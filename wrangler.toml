@@ -1,0 +1,64 @@
+# ============================================================
+# Fredy — Cloudflare Worker configuration
+# Phase: Scaffold (Prompt 2)
+# ============================================================
+
+name = "fredy"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ============================================================
+# KV Bindings
+# ============================================================
+# Single namespace for all Fredy data, namespaced by key prefix.
+# See ARCHITECTURE_RULES.md §7.1 for the full key map.
+[[kv_namespaces]]
+binding = "SETTINGS"
+id = "REPLACE_WITH_REAL_KV_ID"
+
+# ============================================================
+# D1 Binding (optional — analytics only)
+# ============================================================
+# Uncomment when D1 is introduced in a later phase.
+# [[d1_databases]]
+# binding = "FREDY_DB"
+# database_name = "fredy-analytics"
+# database_id = "REPLACE_WITH_REAL_D1_ID"
+
+# ============================================================
+# Cron Triggers
+# ============================================================
+# Two cron triggers:
+#   1. Every minute — checks for due scheduling slots and the silent
+#      scheduling fallback queue (inherited from AI Admin).
+#   2. Every 15 minutes — refreshes content source caches so a slot
+#      never fires on a stale fetch.
+[triggers]
+crons = ["* * * * *", "*/15 * * * *"]
+
+# ============================================================
+# Environment Variables (non-secret)
+# ============================================================
+[vars]
+ADMIN_ID = "REPLACE_WITH_TELEGRAM_USER_ID"
+TARGET_CHANNEL = "@ILIVIR3"
+FOOTER_TEXT = "🌀 @ILIVIR3"
+DEBUG_MODE = "false"
+DEFAULT_AI_PROVIDER = "openrouter"
+DEFAULT_LANGUAGE = "auto"
+SCHEDULER_TIMEZONE = "Asia/Tehran"
+SCHEDULE_SLOTS = "09:00,13:00,18:00,22:00"
+SCHEDULE_JITTER_MINUTES = "30"
+
+# ============================================================
+# Secrets (DO NOT put real values here — set via dashboard):
+#   wrangler secret put BOT_TOKEN
+#   wrangler secret put GEMINI_API_KEY
+#   wrangler secret put OPENROUTER_API_KEY
+#   wrangler secret put GITHUB_TOKEN       (optional, for higher rate limit)
+#   wrangler secret put NEWSAPI_KEY
+#   wrangler secret put NASA_API_KEY
+#   wrangler secret put WEBHOOK_SECRET     (optional, webhook verification)
+#   wrangler secret put DEBUG_TOKEN        (optional, /debug protection)
+# ============================================================
