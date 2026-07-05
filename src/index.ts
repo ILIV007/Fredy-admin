@@ -18,6 +18,7 @@ import { webhookHandler } from "./entry/webhook";
 import { cronHandler } from "./entry/cron";
 import { debugHandler } from "./entry/debug";
 import { tickHandler } from "./entry/tick";
+import { managerHandler } from "./entry/manager";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -42,6 +43,12 @@ export default {
     if (request.method === "GET" && url.pathname === "/tick") {
       const container = buildContainer(env);
       return tickHandler(request, url, { env, container });
+    }
+
+    // /Manager or /manager — full debug dashboard.
+    if (url.pathname === "/Manager" || url.pathname === "/manager" || url.pathname.startsWith("/Manager/") || url.pathname.startsWith("/manager/")) {
+      const container = buildContainer(env);
+      return managerHandler(request, url, { env, container });
     }
 
     // /debug/* — debug dashboard (requires DEBUG_TOKEN).

@@ -122,9 +122,9 @@ export const manualScreen: Screen = {
         return { alert: `❌ No content available from "${pluginId}"` };
       }
 
-      // Process through content pipeline
+      // Process through content pipeline — skip dedup for manual posts
       const settings = await container.config.getSettings(adminId);
-      const result = await container.content.process(item, settings.language.default);
+      const result = await container.content.process(item, settings.language.default, true);
       
       if (!result.ok || !result.content) {
         return { alert: `❌ Pipeline failed: ${result.error ?? "unknown"}` };

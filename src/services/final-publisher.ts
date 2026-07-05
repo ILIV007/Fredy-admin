@@ -169,44 +169,48 @@ export class FinalPublisher {
     const settings = await this.deps.settings();
     const channel = settings.telegram.targetChannel;
     const parseMode = settings.telegram.parseMode;
-    const disablePreview = settings.telegram.disableWebPagePreview;
+
+    // Sanitize HTML to prevent 400 errors.
+    const safeFullText = this.sanitizeHtml(post.fullText);
+    const safeCaption = this.sanitizeHtml(post.caption);
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
       const result = await this.deps.tg.sendPhoto(
-        channel,
-        post.media.url,
-        post.caption,
-        {
-          parse_mode: parseMode,
-          disable_web_page_preview: disablePreview,
-        },
+        channel, post.media.url, safeCaption,
+        { parse_mode: parseMode, disable_web_page_preview: true },
       );
-
       if (!result.ok || !result.result) {
         throw new Error(`Telegram sendPhoto failed: ${result.description ?? "unknown"}`);
       }
-
-      return {
-        messageId: result.result.message_id,
-        chatId: String(result.result.chat?.id ?? channel),
-      };
+      return { messageId: result.result.message_id, chatId: String(result.result.chat?.id ?? channel) };
     }
 
     // Text-only post.
-    const result = await this.deps.tg.sendMessage(channel, post.fullText, {
-      parse_mode: parseMode,
-      disable_web_page_preview: disablePreview,
+    const result = await this.deps.tg.sendMessage(channel, safeFullText, {
+      parse_mode: parseMode, disable_web_page_preview: true,
     });
-
     if (!result.ok || !result.result) {
       throw new Error(`Telegram sendMessage failed: ${result.description ?? "unknown"}`);
     }
+    return { messageId: result.result.message_id, chatId: String(result.result.chat?.id ?? channel) };
+  }
 
-    return {
-      messageId: result.result.message_id,
-      chatId: String(result.result.chat?.id ?? channel),
-    };
+  /** Sanitize HTML: remove unbalanced/empty tags, fix nested blockquotes. */
+  private sanitizeHtml(html: string): string {
+    let r = html;
+    r = r.replace(/<(b|i|u|s|code|pre|blockquote)>\s*<\/\1>/gi, "");
+    r = r.replace(/<blockquote>([^<]*?)<blockquote>/g, "$1");
+    r = r.replace(/<\/blockquote>([^<]*?)<\/blockquote>/g, "$1</blockquote>");
+    const tags = ["b", "i", "u", "s", "code", "pre", "blockquote", "a"];
+    for (const tag of tags) {
+      const openRegex = tag === "a" ? /<a\s/g : new RegExp(`<${tag}(?:\\s[^>]*)?>`, "g");
+      const open = (r.match(openRegex) || []).length;
+      const close = (r.match(new RegExp(`</${tag}>`, "g")) || []).length;
+      if (open > close) r += `</${tag}>`.repeat(open - close);
+    }
+    if (r.length > 4096) r = r.slice(0, 4090) + "…";
+    return r;
   }
 
   /** Simulate publishing (for debug/testing — no Telegram call). */

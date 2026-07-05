@@ -60,6 +60,7 @@ export class ContentManager {
   async process(
     sourceItem: SourceItem,
     language?: string,
+    skipDedup = false,
   ): Promise<PipelineResult> {
     const settings = await this.deps.settings();
     const lang = language ?? settings.language.default;
@@ -110,11 +111,13 @@ export class ContentManager {
       return this.reject("validate", reason, validation.errors.join("; "), item);
     }
 
-    // ── Stage 5: Duplicate Check ───────────────────────────
-    const dupCheck = await this.deps.duplicateDetector.check(item);
-    if (dupCheck.isDuplicate) {
-      const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
-      return this.reject("duplicate_check", reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, item);
+    // ── Stage 5: Duplicate Check (skip for manual) ────────
+    if (!skipDedup) {
+      const dupCheck = await this.deps.duplicateDetector.check(item);
+      if (dupCheck.isDuplicate) {
+        const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
+        return this.reject("duplicate_check", reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, item);
+      }
     }
 
     // ── Stage 6: Category Resolve ──────────────────────────
@@ -197,7 +200,7 @@ export class ContentManager {
     if (!item) {
       return this.reject("normalize", "empty_content", `Plugin "${pluginId}" returned no items`, null);
     }
-    return this.process(item, language);
+    return this.process(item, language, true);
   }
 
   /**
