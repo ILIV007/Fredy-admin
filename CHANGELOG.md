@@ -2,6 +2,103 @@
 
 All notable changes to Fredy are documented here. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [1.5.0] — 2026-07-05 — HTML Formatter Port (from AI Admin v0.6.9)
+
+### Implemented
+
+- **Full HTML Formatter Engine** — ported from AI Admin v0.6.9 `src/formatter.js`:
+  - **Phase 1: PROTECT** — extract code blocks (```...```), inline code (`...`), markdown links [text](url), existing HTML tags
+  - **Phase 2: STRIP + ESCAPE** — strip decorative emojis (preserve functional ones), escape HTML, convert plain URLs to `<a href>` with shortened labels
+  - **Phase 3: MARKDOWN TRANSFORMS** — `**bold**` → `<b>`, `*italic*` → `<i>`, `~~strike~~` → `<s>`, `# heading` → `<b>heading</b>`, `- item` → `• item`
+  - **Phase 4: NUMBERED STEPS** — group numbered lists (1. 2. 3.) into `<blockquote>` with number emojis (1️⃣ 2️⃣ 3️⃣)
+  - **Phase 5: QUOTE LIST ITEMS** — heading ending with `:` + following description → `<blockquote>` (heading stays outside)
+  - **Phase 6: QUOTE LONG PARAGRAPHS** — paragraphs >120 chars with 2+ sentence endings → `<blockquote>` (skip first eligible to avoid quoting the intro)
+  - **Phase 7: RESTORE** — restore code blocks as `<pre><code>`, inline code as `<code>`, markdown links as `<a href>`
+  - **Phase 8: POLISH** — collapse extra newlines, append source URL in blockquote, append source footer, validate and fix HTML
+
+- **HTML Utilities** — ported from AI Admin v0.6.9 `src/html-utils.js`:
+  - `closeOpenTags(html)` — stack-based tag closing after truncation (handles nested tags, void tags, attribute tags)
+  - `truncateHtml(html, maxLen, suffix)` — smart truncation at paragraph/sentence/newline boundaries, avoids cutting inside HTML tags, closes all open tags
+  - `validateAndFixHtml(html)` — close unclosed tags, remove nested blockquotes, remove empty tags
+  - `shortenUrl(url, maxLen)` — hostname + pathname, truncated with `…`
+  - `trimUrlPunctuation(url)` — remove trailing `.,);:!?}]`
+  - `stripHtml(input)` — remove all HTML tags
+  - `escapeHtml(input)` — escape `&`, `<`, `>`
+
+- **UX Layer updated** — now passes body through HtmlFormatter for proper:
+  - Code blocks (`<pre><code>`)
+  - Inline code (`<code>`)
+  - Bold/italic/strikethrough
+  - Headings
+  - Bullet lists
+  - Numbered steps with emojis
+  - Long paragraphs in blockquotes
+  - URLs as `<a href>` links
+  - HTML validation and tag fixing
+
+- **Container wiring** — UXLayer now receives `FormatterService` dependency
+
+### Formatting Examples
+
+**Input (AI-generated):**
+```
+This is a **great tool** for developers.
+
+1. Install it with `npm install tool`
+2. Configure the `config.json` file
+3. Run `tool start`
+
+Features:
+- Fast build times
+- Hot reload support
+- TypeScript native
+
+This paragraph is long enough to be wrapped in a blockquote because it contains multiple sentences and exceeds the minimum length threshold for automatic quoting by the formatter engine.
+```
+
+**Output (Telegram HTML):**
+```html
+This is a <b>great tool</b> for developers.
+
+<blockquote>1️⃣ Install it with <code>npm install tool</code>
+2️⃣ Configure the <code>config.json</code> file
+3️⃣ Run <code>tool start</code></blockquote>
+
+Features:
+• Fast build times
+• Hot reload support
+• TypeScript native
+
+<blockquote>This paragraph is long enough to be wrapped in a blockquote because it contains multiple sentences and exceeds the minimum length threshold for automatic quoting by the formatter engine.</blockquote>
+
+<blockquote>https://github.com/owner/repo</blockquote>
+
+🌌Source
+```
+
+### Files changed
+- **Rewritten:** `src/primitives/html.ts` — full implementation (closeOpenTags, truncateHtml, validateAndFixHtml, shortenUrl, trimUrlPunctuation, escapeHtml, stripHtml)
+- **Rewritten:** `src/plugins/formatters/html-formatter.ts` — full 8-phase HTML formatting engine
+- **Updated:** `src/services/ux-layer.ts` — now uses FormatterService for body formatting
+- **Updated:** `src/container.ts` — UXLayer receives formatter dependency
+
+### Compliance
+- ✅ Code blocks → `<pre><code>` 
+- ✅ Inline code → `<code>`
+- ✅ Bold → `<b>`
+- ✅ Italic → `<i>`
+- ✅ Strikethrough → `<s>`
+- ✅ Headings → `<b>`
+- ✅ Bullet lists → `•`
+- ✅ Numbered steps → `<blockquote>` with number emojis
+- ✅ Long paragraphs → `<blockquote>`
+- ✅ URLs → `<a href>` with shortened labels
+- ✅ HTML validation (close unclosed tags, remove empty tags, fix nested blockquotes)
+- ✅ Source URL in `<blockquote>`
+- ✅ Source footer `[emoji]Source`
+
+---
+
 ## [1.4.0] — 2026-07-05 — Deployment & Setup Guide
 
 ### Implemented

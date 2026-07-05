@@ -19,13 +19,16 @@
 import type { ReadyContent, FinalPost, ContentMedia } from "../types/content";
 import type { HookEngine } from "./hook-engine";
 import type { SourceFormatter } from "./source-formatter";
+import type { FormatterService } from "./formatter";
 import type { Logger } from "./logger";
 import { TELEGRAM_TEXT_LIMIT, TELEGRAM_CAPTION_LIMIT } from "../core/constants";
+import { truncateHtml } from "../primitives/html";
 
 export interface UXLayerDeps {
   readonly logger: Logger;
   readonly hookEngine: HookEngine;
   readonly sourceFormatter: SourceFormatter;
+  readonly formatter: FormatterService;
 }
 
 /** Maximum body lines. */
@@ -43,18 +46,29 @@ export class UXLayer {
     const hook = this.deps.hookEngine.generate(content);
 
     // 2. Humanize the body (strip metadata, shorten, restructure).
-    const body = this.humanizeBody(content.text);
+    const rawBody = this.humanizeBody(content.text);
 
-    // 3. Extract a key takeaway.
+    // 3. Format the body through the HTML formatter (blockquote, code, monospace, etc.)
+    const formatted = this.deps.formatter.format({
+      text: rawBody,
+      category: content.category,
+      sourceUrl: content.sourceUrl,
+      sourceEmoji: "", // We'll add the source line separately in the UX layer
+      footer: "",
+      language: content.language,
+    });
+    const body = formatted.text;
+
+    // 4. Extract a key takeaway.
     const takeaway = this.extractTakeaway(content.text, content.category);
 
-    // 4. Build the source line.
+    // 5. Build the source line.
     const { emoji, footer } = await this.deps.sourceFormatter.buildFooter();
 
-    // 5. Assemble the full text.
+    // 6. Assemble the full text.
     const fullText = this.assembleFullText(hook, body, takeaway, footer, content.sourceUrl);
 
-    // 6. Build a shorter caption for image posts.
+    // 7. Build a shorter caption for image posts.
     const caption = this.assembleCaption(hook, body, takeaway, footer);
 
     return {

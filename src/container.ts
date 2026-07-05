@@ -272,6 +272,7 @@ export function buildContainer(env: Env): Container {
     logger,
     hookEngine,
     sourceFormatter,
+    formatter,
   });
   const finalPublisher = new FinalPublisher({
     tg,
