@@ -1,9 +1,9 @@
 /**
  * src/admin/screens/stats.ts
- * Stats screen — global and per-admin statistics.
+ * Stats screen — global + today statistics.
  */
 
-import type { Screen } from "../registry";
+import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
 import { buildKeyboardWithBack, labelButton } from "../keyboards";
@@ -47,7 +47,6 @@ export const statsScreen: Screen = {
     return buildKeyboardWithBack([
       [labelButton("─── Actions ───")],
       [{ text: "🔄 Refresh", callback_data: "ignore" }],
-      [{ text: "🗑️ Reset Stats", callback_data: "action:stats:reset" }],
     ]);
   },
 };

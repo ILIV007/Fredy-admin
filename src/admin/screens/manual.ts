@@ -1,8 +1,7 @@
 /**
  * src/admin/screens/manual.ts
- * Manual Actions screen — send category A/B/C, send NASA, send specific plugin.
- *
- * Triggers immediate pipeline runs without waiting for the scheduler.
+ * Manual Post screen — select category → select API → send post.
+ * Posts are sent to BOTH the user's private chat AND the channel.
  */
 
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
@@ -10,66 +9,135 @@ import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
 import { buildKeyboardWithBack, labelButton, navButton } from "../keyboards";
 import { header, divider, kv } from "../helpers/formatting";
+import type { Category } from "../../types/category";
 
 export const manualScreen: Screen = {
   id: "manual",
 
   async text(ctx) {
-    const sources = ctx.container.sources.list();
-    return [
-      header("Manual Actions", "✍️"),
+    const data = ctx.query.data ?? "";
+    
+    // If showing APIs for a category
+    if (data.startsWith("manual:cat:")) {
+      const cat = data.split(":")[2] as Category;
+      return this.showApisText(ctx, cat);
+    }
+    
+    // Default: show categories
+    const sources = ctx.container.plugins.list();
+    const cats: Category[] = ["A", "B", "C"];
+    
+    const lines = [
+      header("Manual Post", "✍️"),
       "",
-      "Trigger an immediate post. The pipeline runs once and publishes to the channel.",
+      "Select a category to see available APIs:",
       "",
-      header("By Category", "📚"),
-      kv("A", "Dev content (programming, AI, GitHub, tools)"),
-      kv("B", "Tech news"),
-      kv("C", "NASA / joke / quote / fact"),
-      "",
-      header("By Source", "🔌"),
-      ...sources.map((s) => kv(s.name, `${s.label} (${s.category})`)),
-      "",
-      divider(),
-      "<i>Tap an action to run it now.</i>",
-    ].join("\n");
+    ];
+    
+    for (const cat of cats) {
+      const catSources = sources.filter((s) => s.getCategory() === cat);
+      const enabled = catSources.filter((s) => ctx.container.plugins.isEnabled(s.metadata.id));
+      lines.push(`<b>Category ${cat}</b> — ${enabled.length} APIs available`);
+      for (const s of enabled) {
+        lines.push(`  • ${s.metadata.name} (${s.metadata.id})`);
+      }
+      lines.push("");
+    }
+    
+    lines.push(divider(), "<i>Posts are sent to both your chat and the channel.</i>");
+    return lines.join("\n");
   },
 
-  keyboard(s: FredySettings): InlineKeyboard {
-    void s;
+  keyboard(settings: FredySettings): InlineKeyboard {
+    void settings;
     return buildKeyboardWithBack([
-      [labelButton("─── By Category ───")],
-      [navButton("🟢 Send Category A", "action:manual:category:A")],
-      [navButton("🟡 Send Category B", "action:manual:category:B")],
-      [navButton("🟣 Send Category C", "action:manual:category:C")],
-      [labelButton("─── By Source ───")],
-      [navButton("📦 Send GitHub", "action:manual:source:github")],
-      [navButton("📰 Send News", "action:manual:source:news")],
-      [navButton("🪐 Send NASA", "action:manual:source:nasa")],
-      [navButton("😄 Send Joke", "action:manual:source:joke")],
-      [labelButton("─── Special ───")],
-      [navButton("🧪 Simulate (no publish)", "action:manual:simulate")],
+      [labelButton("─── Select Category ───")],
+      [
+        navButton("🟢 Category A", "manual:cat:A"),
+        navButton("🟡 Category B", "manual:cat:B"),
+      ],
+      [
+        navButton("🟣 Category C", "manual:cat:C"),
+      ],
     ]);
   },
 
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
-    const parts = data.split(":");
-    // Format: action:manual:<type>:<arg>
-    if (parts.length < 4 || parts[1] !== "manual") return;
-    const [, , type, arg] = parts;
-
-    if (type === "simulate") {
-      return { toast: "🧪 Simulation not implemented (Phase 6)" };
+    // Handle category selection → show APIs
+    if (data.startsWith("manual:cat:")) {
+      const cat = data.split(":")[2] as Category;
+      const sources = ctx.container.plugins.list()
+        .filter((s) => s.getCategory() === cat)
+        .filter((s) => ctx.container.plugins.isEnabled(s.metadata.id));
+      
+      const rows: InlineKeyboard["inline_keyboard"] = sources.map((s) => [
+        { text: `📤 ${s.metadata.name}`, callback_data: `manual:send:${s.metadata.id}` },
+      ]);
+      rows.push([{ text: "← Back to categories", callback_data: "menu:manual" }]);
+      
+      return {
+        newText: `${header("Category " + cat + " APIs", "📡")}\n\nSelect an API to send a post:\n\n${sources.map((s) => `  • ${s.metadata.name}`).join("\n")}`,
+        newKeyboard: { inline_keyboard: rows },
+      };
     }
 
-    if (type === "category") {
-      // Trigger pipeline for a specific category.
-      // Real impl: container.pipeline.run({ category: arg, simulate: false })
-      return { toast: `🚀 Sending category ${arg}... (skeleton)` };
+    // Handle API selection → send post
+    if (data.startsWith("manual:send:")) {
+      const pluginId = data.split(":")[2]!;
+      return this.sendPost(ctx, pluginId);
     }
+  },
 
-    if (type === "source") {
-      // Trigger pipeline for a specific source.
-      return { toast: `🚀 Sending from ${arg}... (skeleton)` };
+  async showApisText(ctx: ScreenContext, cat: Category): Promise<string> {
+    const sources = ctx.container.plugins.list()
+      .filter((s) => s.getCategory() === cat)
+      .filter((s) => ctx.container.plugins.isEnabled(s.metadata.id));
+    
+    return [
+      header(`Category ${cat} APIs`, "📡"),
+      "",
+      "Select an API to send a post:",
+      "",
+      ...sources.map((s) => `  • ${s.metadata.name} (${s.metadata.id})`),
+    ].join("\n");
+  },
+
+  async sendPost(ctx: ScreenContext, pluginId: string): Promise<ScreenAction> {
+    const { container, adminId, chatId } = ctx;
+    
+    try {
+      // Fetch one item from the plugin
+      const item = await container.plugins.fetchOne(pluginId);
+      if (!item) {
+        return { alert: `❌ No content available from "${pluginId}"` };
+      }
+
+      // Process through content pipeline
+      const settings = await container.config.getSettings(adminId);
+      const result = await container.content.process(item, settings.language.default);
+      
+      if (!result.ok || !result.content) {
+        return { alert: `❌ Pipeline failed: ${result.error ?? "unknown"}` };
+      }
+
+      // Send to admin's private chat (preview)
+      await container.tg.sendMessage(chatId, 
+        `<b>📝 Post Preview</b>\n\n${result.content.text}\n\n${result.content.sourceFooter}\n\n🌀 @ILIVIR3`,
+        { parse_mode: "HTML", disable_web_page_preview: true }
+      ).catch(() => {});
+
+      // Also send to channel
+      const channel = settings.telegram.targetChannel;
+      const pubResult = await container.finalPublisher.publish(result.content);
+      
+      if (pubResult.ok) {
+        return { toast: `✅ Sent to both chat and ${channel}!` };
+      } else {
+        return { toast: `⚠️ Preview sent, but channel publish failed: ${pubResult.error}` };
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { alert: `❌ Error: ${msg.slice(0, 200)}` };
     }
   },
 };

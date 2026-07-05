@@ -65,6 +65,25 @@ export class AdminOrchestrator {
       return;
     }
 
+    // Special: toggle:approve — flip approve mode.
+    if (data === "toggle:approve") {
+      const currentSettings = await container.config.getSettings(fromId);
+      const newVal = !currentSettings.approveMode;
+      await container.config.updateSettings(fromId, { approveMode: newVal });
+      await tg.answerCallbackQuery(query.id, newVal ? "🔐 Approve ON" : "🔓 Approve OFF").catch(() => {});
+      const updatedSettings = await container.config.getSettings(fromId);
+      const mainScreen = this.screens.get("main");
+      if (mainScreen) {
+        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updatedSettings, query };
+        const newText = await mainScreen.text(sctx);
+        const newKeyboard = mainScreen.keyboard(updatedSettings);
+        await tg.editMessageText(chatId, messageId, newText, {
+          parse_mode: "HTML", reply_markup: newKeyboard, disable_web_page_preview: true,
+        }).catch(() => {});
+      }
+      return;
+    }
+
     // Parse the callback data: "menu:<id>" or "set:<scope>:<value>" or "action:<name>:<args>".
     const screenId = this.resolveScreenId(data);
     const screen = this.screens.get(screenId);
@@ -243,8 +262,11 @@ export class AdminOrchestrator {
     // "action:<name>:..." → name (manual actions)
     if (first === "action") return second || "main";
 
-    // "toggle:<scope>" → scope
-    if (first === "toggle") return second || "main";
+    // "toggle:<scope>" → main (toggles are handled specially above)
+    if (first === "toggle") return "main";
+
+    // "manual:<subaction>:..." → manual screen
+    if (first === "manual") return "manual";
 
     // Otherwise, treat the first part as the screen ID (e.g., "soul:view" → "soul").
     return first || "main";

@@ -18,7 +18,6 @@ export const helpCommand: Command = {
       "  /menu — Open admin dashboard",
       "  /help — This message",
       "  /stats — Show statistics",
-      "  /soul — View soul.md status",
       "",
       "<b>Diagnostics:</b>",
       "  /checkperms — Check bot permissions in channel",

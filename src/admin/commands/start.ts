@@ -6,42 +6,18 @@
  */
 
 import type { Command, CommandContext } from "../registry";
-import { mainScreen } from "../screens/main";
-import type { FredySettings } from "../../types/config";
 
 export const startCommand: Command = {
   name: "/start",
   description: "Show bot introduction and open admin menu",
 
   async handle(ctx: CommandContext): Promise<void> {
-    const { container, adminId, chatId, reply } = ctx;
-
-    // 1. Send the introduction message (visible to everyone).
+    const { container, chatId } = ctx;
+    // Only send the introduction — no menu.
     await container.tg.sendMessage(chatId, buildIntroduction(), {
       parse_mode: "HTML",
       disable_web_page_preview: true,
     }).catch(() => {});
-
-    // 2. Send the admin menu (inline keyboard).
-    const settings = await container.config.getSettings(adminId);
-    const screenCtx = {
-      container,
-      adminId,
-      chatId,
-      messageId: 0,
-      settings,
-      query: {} as never,
-    };
-    const text = await mainScreen.text(screenCtx);
-    const keyboard = mainScreen.keyboard(settings as FredySettings);
-
-    await container.tg.sendMessage(chatId, text, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-      disable_web_page_preview: true,
-    }).catch(() => {});
-
-    void reply;
   },
 };
 
@@ -108,7 +84,7 @@ function buildIntroduction(): string {
     "",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     "",
-    "👇 <b>Tap the buttons below to control Fredy.</b>",
+    "👉 <b>Use /menu to open the admin dashboard.</b>",
     "",
     "<i>Only the admin can use these controls.</i>",
   ].join("\n");
