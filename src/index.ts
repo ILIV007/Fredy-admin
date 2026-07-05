@@ -24,6 +24,8 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // ── Public endpoints ──
+
     // GET / — basic health check.
     if (request.method === "GET" && url.pathname === "/") {
       return healthHandler(env);
@@ -39,11 +41,31 @@ export default {
       return detailedHealthHandler(env);
     }
 
-    // GET /tick?key=<CRON_KEY> — external cron endpoint.
-    if (request.method === "GET" && url.pathname === "/tick") {
+    // ── Internal endpoints (require CRON_KEY or DEBUG_TOKEN) ──
+
+    // POST /internal/tick — external cron endpoint (auth via headers).
+    if (request.method === "POST" && url.pathname === "/internal/tick") {
       const container = buildContainer(env);
-      return tickHandler(request, url, { env, container });
+      return tickHandler(request, { env, container });
     }
+
+    // GET /internal/tick — also allow GET for easy testing (auth via headers).
+    if (request.method === "GET" && url.pathname === "/internal/tick") {
+      const container = buildContainer(env);
+      return tickHandler(request, { env, container });
+    }
+
+    // GET /internal/health — same as /health but under /internal.
+    if (request.method === "GET" && url.pathname === "/internal/health") {
+      return detailedHealthHandler(env);
+    }
+
+    // GET /internal/version — same as /version but under /internal.
+    if (request.method === "GET" && url.pathname === "/internal/version") {
+      return versionHandler();
+    }
+
+    // ── Manager dashboard ──
 
     // /Manager or /manager — full debug dashboard.
     if (url.pathname === "/Manager" || url.pathname === "/manager" || url.pathname.startsWith("/Manager/") || url.pathname.startsWith("/manager/")) {
@@ -51,11 +73,15 @@ export default {
       return managerHandler(request, url, { env, container });
     }
 
-    // /debug/* — debug dashboard (requires DEBUG_TOKEN).
+    // ── Debug dashboard ──
+
+    // /debug/* — legacy debug dashboard (requires DEBUG_TOKEN).
     if (url.pathname === "/debug" || url.pathname.startsWith("/debug/")) {
       const container = buildContainer(env);
       return debugHandler(request, url, { env, container });
     }
+
+    // ── Telegram webhook ──
 
     // GET /webhook/info — bot info.
     if (request.method === "GET" && url.pathname === "/webhook/info") {
@@ -75,8 +101,7 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
-  // Cloudflare Cron Triggers — currently disabled (account limit reached).
-  // Scheduler runs via GET /tick?key=<CRON_KEY> from external cron instead.
+  // Cloudflare Cron Triggers — disabled (using external cron via /internal/tick).
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const container = buildContainer(env);
     await cronHandler(event, { env, container, ctx });

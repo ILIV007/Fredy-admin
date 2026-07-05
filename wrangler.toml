@@ -16,12 +16,14 @@ binding = "Fredy_SETTINGS"
 id = "64f76bc1a74346cc969a007f3a322050"
 
 # ============================================================
-# Cron Triggers — DISABLED (account limit reached)
+# Cron Triggers — DISABLED (using external cron via /internal/tick)
 # ============================================================
-# Using external cron (cron-job.org) via /tick endpoint only.
 # Set up at: https://cron-job.org
-#   URL: https://<your-worker>.workers.dev/tick?key=<CRON_KEY>
+#   URL: https://<your-worker>.workers.dev/internal/tick
+#   Method: POST
+#   Headers: Authorization: Bearer <CRON_KEY>
 #   Schedule: Every 5 minutes
+# Auth: Authorization: Bearer <CRON_KEY> or X-Cron-Key: <CRON_KEY>
 
 # [triggers]
 # crons = ["*/5 * * * *"]
