@@ -30,7 +30,7 @@ export async function cronHandler(
   const { env, container, ctx } = deps;
   console.log(`[cron] tick at ${new Date().toISOString()}`);
 
-  // Single cron trigger (every minute).
+  // Single cron trigger (every 5 minutes).
   // Runs: scheduler tick + source refresh + scheduled queue processing.
   ctx.waitUntil(processScheduledQueue(env, container));
   ctx.waitUntil(

@@ -16,18 +16,15 @@ binding = "Fredy_SETTINGS"
 id = "64f76bc1a74346cc969a007f3a322050"
 
 # ============================================================
-# Cron Triggers — DISABLED
+# Cron Triggers — 1 trigger as fallback
 # ============================================================
-# Your Cloudflare account has reached the 5 cron trigger limit.
-# Instead, use an external cron service (cron-job.org, GitHub Actions,
-# or uptimerobot) to hit the /tick endpoint every minute:
-#
-#   GET https://<your-worker>.workers.dev/tick?key=<CRON_KEY>
-#
-# Set CRON_KEY as a secret: wrangler secret put CRON_KEY
+# External cron (cron-job.org) is the primary scheduler via /tick.
+# This 1 Cloudflare trigger is a fallback — runs every 5 minutes.
+# If your account already has 5 triggers, delete old ones first:
+#   Dashboard > Workers & Pages > [other workers] > Triggers
 
-# [triggers]
-# crons = ["* * * * *"]
+[triggers]
+crons = ["*/5 * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)
