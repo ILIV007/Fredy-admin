@@ -16,15 +16,15 @@ binding = "Fredy_SETTINGS"
 id = "64f76bc1a74346cc969a007f3a322050"
 
 # ============================================================
-# Cron Triggers — 1 trigger as fallback
+# Cron Triggers — DISABLED (account limit reached)
 # ============================================================
-# External cron (cron-job.org) is the primary scheduler via /tick.
-# This 1 Cloudflare trigger is a fallback — runs every 5 minutes.
-# If your account already has 5 triggers, delete old ones first:
-#   Dashboard > Workers & Pages > [other workers] > Triggers
+# Using external cron (cron-job.org) via /tick endpoint only.
+# Set up at: https://cron-job.org
+#   URL: https://<your-worker>.workers.dev/tick?key=<CRON_KEY>
+#   Schedule: Every 5 minutes
 
-[triggers]
-crons = ["*/5 * * * *"]
+# [triggers]
+# crons = ["*/5 * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

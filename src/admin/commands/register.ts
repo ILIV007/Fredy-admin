@@ -6,6 +6,7 @@
 import type { CommandRegistry } from "../registry";
 import {
   startCommand,
+  menuCommand,
   helpCommand,
   statsCommand,
   checkPermsCommand,
@@ -15,6 +16,7 @@ import {
 
 export function registerCommands(registry: CommandRegistry): void {
   registry.register(startCommand);
+  registry.register(menuCommand);
   registry.register(helpCommand);
   registry.register(statsCommand);
   registry.register(checkPermsCommand);
