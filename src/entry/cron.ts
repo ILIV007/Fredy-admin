@@ -28,38 +28,31 @@ export async function cronHandler(
   deps: CronHandlerDeps,
 ): Promise<void> {
   const { env, container, ctx } = deps;
-  console.log(`[cron] tick — cron="${event.cron}" at ${new Date().toISOString()}`);
+  console.log(`[cron] tick at ${new Date().toISOString()}`);
 
-  // Run the silent scheduling fallback queue on every minute tick.
-  if (event.cron === "* * * * *") {
-    ctx.waitUntil(processScheduledQueue(env, container));
-    ctx.waitUntil(
-      (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
-        const result = await scheduler.tick();
-        if (result.fired) {
-          console.log(`[cron] slot fired: index=${result.slot?.index ?? "?"} category=${result.slot?.category ?? "?"}`);
-        } else if (result.skipped) {
-          console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
-        }
-      })(),
-    );
-    return;
-  }
+  // Single cron trigger (every minute).
+  // Runs: scheduler tick + source refresh + scheduled queue processing.
+  ctx.waitUntil(processScheduledQueue(env, container));
+  ctx.waitUntil(
+    (async () => {
+      const scheduler = new SchedulerOrchestrator(container);
 
-  // Refresh source caches every 15 minutes.
-  if (event.cron === "*/15 * * * *") {
-    ctx.waitUntil(
-      (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
+      // 1. Scheduler tick — fire due slots.
+      const result = await scheduler.tick();
+      if (result.fired) {
+        console.log(`[cron] slot fired: index=${result.slot?.index ?? "?"} category=${result.slot?.category ?? "?"}`);
+      } else if (result.skipped) {
+        console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
+      }
+
+      // 2. Source refresh — keep caches warm (every 15th minute).
+      const minute = new Date().getMinutes();
+      if (minute % 15 === 0) {
         await scheduler.refreshSources();
         console.log("[cron] source refresh complete");
-      })(),
-    );
-    return;
-  }
-
-  console.log(`[cron] unknown schedule: ${event.cron}`);
+      }
+    })(),
+  );
 }
 
 /**

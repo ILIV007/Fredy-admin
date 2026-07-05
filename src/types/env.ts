@@ -5,7 +5,7 @@
 
 export interface Env {
   // KV bindings
-  SETTINGS: KVNamespace;
+  Fredy_SETTINGS: KVNamespace;
   // FREDY_DB: D1Database; // uncomment when D1 is introduced
 
   // Non-secret vars
