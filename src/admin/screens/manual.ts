@@ -59,10 +59,20 @@ export const manualScreen: Screen = {
       [
         navButton("🟣 Category C", "manual:cat:C"),
       ],
+      [labelButton("─── Or ───")],
+      [navButton("🎲 Random Post", "manual:random")],
     ]);
   },
 
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
+    // Handle random post
+    if (data === "manual:random") {
+      const sources = ctx.container.plugins.list().filter((s) => ctx.container.plugins.isEnabled(s.metadata.id));
+      if (sources.length === 0) return { alert: "❌ No enabled APIs" };
+      const random = sources[Math.floor(Math.random() * sources.length)]!;
+      return this.sendPost(ctx, random.metadata.id);
+    }
+
     // Handle category selection → show APIs
     if (data.startsWith("manual:cat:")) {
       const cat = data.split(":")[2] as Category;

@@ -48,17 +48,13 @@ export const mainScreen: Screen = {
         { text: "⚙️ Settings", target: "menu:settings" },
         { text: "✍️ Manual Post", target: "menu:manual" },
       ),
-      navRow(
-        { text: toggleApproveLabel(settings.approveMode), target: "toggle:approve" },
-        { text: "📊 Stats", target: "menu:stats" },
-      ),
+      [
+        { text: settings.approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
+        { text: "📊 Stats", callback_data: "menu:stats" },
+      ],
       [
         { text: "🐛 Debug", callback_data: "menu:debug" },
       ],
     ]);
   },
 };
-
-function toggleApproveLabel(on: boolean): string {
-  return on ? "🔐 Approve: ON" : "🔓 Approve: OFF";
-}
