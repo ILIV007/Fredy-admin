@@ -1,6 +1,6 @@
 # ============================================================
 # Fredy — Cloudflare Worker Configuration
-# Version: 1.5.2
+# Version: 1.5.3
 # ============================================================
 
 name = "fredy-admin"
@@ -16,28 +16,18 @@ binding = "Fredy_SETTINGS"
 id = "64f76bc1a74346cc969a007f3a322050"
 
 # ============================================================
-# preview_id = "REPLACE_WITH_PREVIEW_KV_ID"  # for wrangler dev
-
+# Cron Triggers — DISABLED
 # ============================================================
-# D1 Database (Optional — Analytics)
-# ============================================================
-# Uncomment to enable D1 for relational analytics.
-# Free tier: 5GB storage, 5M reads/day.
+# Your Cloudflare account has reached the 5 cron trigger limit.
+# Instead, use an external cron service (cron-job.org, GitHub Actions,
+# or uptimerobot) to hit the /tick endpoint every minute:
 #
-# [[d1_databases]]
-# binding = "FREDY_DB"
-# database_name = "fredy-analytics"
-# database_id = "REPLACE_WITH_D1_DATABASE_ID"
+#   GET https://<your-worker>.workers.dev/tick?key=<CRON_KEY>
+#
+# Set CRON_KEY as a secret: wrangler secret put CRON_KEY
 
-# ============================================================
-# Cron Triggers
-# ============================================================
-# Free tier: max 5 cron triggers per account.
-# Using 1 trigger (every minute) to stay within limits.
-# Source cache refresh happens within the same tick.
-
-[triggers]
-crons = ["* * * * *"]
+# [triggers]
+# crons = ["* * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)
@@ -58,11 +48,9 @@ SCHEDULE_JITTER_MINUTES = "30"
 #   ADMIN_ID               — your Telegram user ID
 #   GEMINI_API_KEY         — from https://aistudio.google.com/apikey
 #   OPENROUTER_API_KEY     — from https://openrouter.ai/keys
-#   NEWSAPI_KEY            — from https://newsapi.org
-#   NASA_API_KEY           — from https://api.nasa.gov
+#   CRON_KEY               — random string for /tick endpoint auth
 #   WEBHOOK_SECRET         — random string for webhook verification
 #   DEBUG_TOKEN            — random string for /debug protection
-#   GITHUB_TOKEN           — optional, for higher rate limit
 # ============================================================
 
 [observability]

@@ -28,6 +28,7 @@ export interface Env {
   NASA_API_KEY?: string;
   WEBHOOK_SECRET?: string;
   DEBUG_TOKEN?: string;
+  CRON_KEY?: string;
 }
 
 /**
