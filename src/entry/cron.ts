@@ -1,8 +1,8 @@
 /**
  * src/entry/cron.ts
  * Cron trigger handler. Two crons fire this (configured in wrangler.toml):
- *   - "* * * * *"     → scheduler tick (check for due slots, send queued messages)
- *   - "*/15 * * * *"  → source refresh (keep content caches warm)
+ *   - Every minute      → scheduler tick (check for due slots, send queued messages)
+ *   - Every 15 minutes  → source refresh (keep content caches warm)
  *
  * The cron handler also runs the silent scheduling fallback queue:
  *   List due messages from KV (fredy:sched:queue:*) and send them via
