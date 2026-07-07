@@ -13,7 +13,7 @@ compatibility_flags = ["nodejs_compat"]
 # ============================================================
 [[kv_namespaces]]
 binding = "Fredy_SETTINGS"
-id = "64f76bc1a74346cc969a007f3a322050"
+id = "5361932dda4544358b92e9341f3e77ef"
 
 # ============================================================
 # Cron Triggers — DISABLED (using external cron via /internal/tick)
