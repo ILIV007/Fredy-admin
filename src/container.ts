@@ -67,6 +67,22 @@ import { FinalPublisher } from "./services/final-publisher";
 // Formatter plugin (not a content source, so not in PluginLoader).
 import { HtmlFormatter } from "./plugins/formatters/html-formatter";
 
+// Bundled default soul (full soul.md will be loaded at build time in a later phase)
+const BUNDLED_SOUL = `
+# Identity
+
+You are Fredy.
+You are the publishing intelligence behind ILIVIR3.
+Your purpose is to deliver useful knowledge.
+
+# Personality
+
+Curious. Calm. Technical. Developer-first.
+Professional without sounding corporate.
+
+(Full soul loaded from docs/soul.md — this is a fallback.)
+`.trim();
+
 /**
  * Build the DI container. Called once per Worker isolate.
  * Order matters — services that depend on others must be constructed after
@@ -74,9 +90,9 @@ import { HtmlFormatter } from "./plugins/formatters/html-formatter";
  */
 export function buildContainer(env: Env): Container {
   // Layer 0: KV + Logger (no deps)
-  const kv = new KVStore({ kv: env.Fredy_SETTINGS });
+  const kv = new KVStore({ kv: env.SETTINGS });
   const logger = new Logger({
-    kv: env.Fredy_SETTINGS,
+    kv: env.SETTINGS,
     isDebugMode: () => env.DEBUG_MODE === "true",
   });
 
@@ -99,7 +115,7 @@ export function buildContainer(env: Env): Container {
   });
 
   // Layer 3: Soul + Language + Emoji (depend on kv + config)
-  const soul = new SoulLoader();
+  const soul = new SoulLoader({ kv, defaultSoul: BUNDLED_SOUL });
   const lang = new LanguageManager({
     defaultLanguage: env.DEFAULT_LANGUAGE === "fa" ? "fa" : "en",
   });
@@ -164,6 +180,10 @@ export function buildContainer(env: Env): Container {
   const quality = new QualityFilter({
     kv,
     checks: [],
+    settings: () => config.getSettings(Number(env.ADMIN_ID)),
+  });
+  const scheduler = new SchedulerService({
+    kv,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
 
@@ -252,7 +272,6 @@ export function buildContainer(env: Env): Container {
     logger,
     hookEngine,
     sourceFormatter,
-    formatter,
   });
   const finalPublisher = new FinalPublisher({
     tg,

@@ -112,7 +112,7 @@ export class DebugService {
       // Booleans for quick health check
       has_bot_token: isTruthy(env.BOT_TOKEN),
       has_admin_id: isTruthy(env.ADMIN_ID),
-      has_kv: !!env.Fredy_SETTINGS,
+      has_kv: !!env.SETTINGS,
       has_gemini: isTruthy(env.GEMINI_API_KEY),
       has_openrouter: isTruthy(env.OPENROUTER_API_KEY),
       has_github: isTruthy(env.GITHUB_TOKEN),
@@ -157,7 +157,7 @@ export class DebugService {
       ok: true,
       time: new Date().toISOString(),
       has_bot_token: !!this.deps.env.BOT_TOKEN,
-      has_kv: !!this.deps.env.Fredy_SETTINGS,
+      has_kv: !!this.deps.env.SETTINGS,
     };
   }
 

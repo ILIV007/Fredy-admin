@@ -5,7 +5,7 @@
 
 export interface Env {
   // KV bindings
-  Fredy_SETTINGS: KVNamespace;
+  SETTINGS: KVNamespace;
   // FREDY_DB: D1Database; // uncomment when D1 is introduced
 
   // Non-secret vars
@@ -28,7 +28,6 @@ export interface Env {
   NASA_API_KEY?: string;
   WEBHOOK_SECRET?: string;
   DEBUG_TOKEN?: string;
-  CRON_KEY?: string;
 }
 
 /**

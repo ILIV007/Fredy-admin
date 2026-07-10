@@ -32,19 +32,21 @@ const REFRESH_KEY = "fredy:tick:lastRefresh";
 
 export async function tickHandler(
   request: Request,
+  url: URL,
   deps: TickHandlerDeps,
 ): Promise<Response> {
   const { env, container } = deps;
   const startTime = Date.now();
   const log: string[] = [];
 
-  // ── 1. Authentication (header-based) ─────────────────────
+  // ── 1. Authentication (header-based + query fallback) ───
   if (!env.CRON_KEY) {
     return json({ ok: false, error: "CRON_KEY not set" }, 500);
   }
   const authHeader = request.headers.get("Authorization") ?? "";
   const xCronKey = request.headers.get("X-Cron-Key") ?? "";
-  const providedKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : xCronKey;
+  const queryKey = url.searchParams.get("key") ?? "";
+  const providedKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : (xCronKey || queryKey);
   if (providedKey !== env.CRON_KEY) {
     return json({ ok: false, error: "Unauthorized" }, 403);
   }

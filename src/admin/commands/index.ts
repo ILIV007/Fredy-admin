@@ -4,8 +4,8 @@
  */
 
 export { startCommand } from "./start";
-export { menuCommand } from "./menu";
 export { helpCommand } from "./help";
 export { statsCommand } from "./stats";
 export { checkPermsCommand } from "./checkperms";
+export { soulCommand } from "./soul";
 export { healthCommand } from "./health";

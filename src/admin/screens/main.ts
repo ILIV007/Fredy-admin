@@ -1,6 +1,7 @@
 /**
  * src/admin/screens/main.ts
  * Dashboard screen — bot status at a glance.
+ * Bot ON/OFF toggle is the first button, alone in its row.
  */
 
 import type { Screen } from "../registry";
@@ -21,7 +22,7 @@ export const mainScreen: Screen = {
       "",
       kv("Bot", settings.general.botEnabled ? "🟢 Active" : "🔴 Disabled"),
       kv("Maintenance", settings.general.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "1.6.0"),
+      kv("Version", "2.2.0"),
       kv("Channel", settings.telegram.targetChannel),
       kv("Language", settings.language.default),
       kv("AI Provider", settings.ai.primaryProvider),
@@ -36,6 +37,10 @@ export const mainScreen: Screen = {
 
   keyboard(settings: FredySettings): InlineKeyboard {
     return buildKeyboard([
+      // Bot ON/OFF — first row, ALONE
+      [
+        { text: settings.general.botEnabled ? "🟢 Bot: ON" : "🔴 Bot: OFF", callback_data: "toggle:botEnabled" },
+      ],
       navRow(
         { text: "📅 Scheduler", target: "menu:schedule" },
         { text: "📚 Categories", target: "menu:categories" },

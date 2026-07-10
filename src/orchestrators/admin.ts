@@ -67,19 +67,34 @@ export class AdminOrchestrator {
 
     // Special: toggle:approve — flip approve mode.
     if (data === "toggle:approve") {
-      const currentSettings = await container.config.getSettings(fromId);
-      const newVal = !currentSettings.approveMode;
+      const cur = await container.config.getSettings(fromId);
+      const newVal = !cur.approveMode;
       await container.config.updateSettings(fromId, { approveMode: newVal });
       await tg.answerCallbackQuery(query.id, newVal ? "🔐 Approve ON" : "🔓 Approve OFF").catch(() => {});
-      const updatedSettings = await container.config.getSettings(fromId);
-      const mainScreen = this.screens.get("main");
-      if (mainScreen) {
-        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updatedSettings, query };
-        const newText = await mainScreen.text(sctx);
-        const newKeyboard = mainScreen.keyboard(updatedSettings);
-        await tg.editMessageText(chatId, messageId, newText, {
-          parse_mode: "HTML", reply_markup: newKeyboard, disable_web_page_preview: true,
-        }).catch(() => {});
+      const updated = await container.config.getSettings(fromId);
+      const ms = this.screens.get("main");
+      if (ms) {
+        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+        const newText = await ms.text(sctx);
+        const newKb = ms.keyboard(updated);
+        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
+      }
+      return;
+    }
+
+    // Special: toggle:botEnabled — flip bot enabled.
+    if (data === "toggle:botEnabled") {
+      const cur = await container.config.getSettings(fromId);
+      const newVal = !cur.general.botEnabled;
+      await container.config.updateSettings(fromId, { general: { ...cur.general, botEnabled: newVal } });
+      await tg.answerCallbackQuery(query.id, newVal ? "🟢 Bot ON" : "🔴 Bot OFF").catch(() => {});
+      const updated = await container.config.getSettings(fromId);
+      const ms = this.screens.get("main");
+      if (ms) {
+        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+        const newText = await ms.text(sctx);
+        const newKb = ms.keyboard(updated);
+        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
       }
       return;
     }
@@ -148,25 +163,8 @@ export class AdminOrchestrator {
           }).catch(() => {});
         });
       } else {
-        // No action returned — this is a NAVIGATION click (e.g., "menu:schedule").
-        // Re-render the target screen with its text and keyboard.
+        // No action returned — just close the callback query.
         await tg.answerCallbackQuery(query.id).catch(() => {});
-
-        const newText = await screen.text(ctx);
-        const newKeyboard = screen.keyboard(settings);
-
-        await tg.editMessageText(chatId, messageId, newText, {
-          parse_mode: "HTML",
-          reply_markup: newKeyboard,
-          disable_web_page_preview: true,
-        }).catch(async (error: unknown) => {
-          console.warn("[admin] editMessageText failed (nav), sending new message:", error);
-          await tg.sendMessage(chatId, newText, {
-            parse_mode: "HTML",
-            reply_markup: newKeyboard,
-            disable_web_page_preview: true,
-          }).catch(() => {});
-        });
       }
     } catch (error) {
       console.error("[admin] callback handler error:", error);
@@ -262,11 +260,8 @@ export class AdminOrchestrator {
     // "action:<name>:..." → name (manual actions)
     if (first === "action") return second || "main";
 
-    // "toggle:<scope>" → main (toggles are handled specially above)
-    if (first === "toggle") return "main";
-
-    // "manual:<subaction>:..." → manual screen
-    if (first === "manual") return "manual";
+    // "toggle:<scope>" → scope
+    if (first === "toggle") return second || "main";
 
     // Otherwise, treat the first part as the screen ID (e.g., "soul:view" → "soul").
     return first || "main";
