@@ -31,14 +31,9 @@ compatibility_flags = ["nodejs_compat"]
 #   fredy:global:*     — global stats
 
 [[kv_namespaces]]
-<<<<<<< HEAD
 binding = "SETTINGS"
 id = "5361932dda4544358b92e9341f3e77ef"
 # preview_id = "REPLACE_WITH_PREVIEW_KV_ID"  # for wrangler dev
-=======
-binding = "Fredy_SETTINGS"
-id = "5361932dda4544358b92e9341f3e77ef"
->>>>>>> dd98f979988f84f6fc231520605c10ab3ed59757
 
 # ============================================================
 # D1 Database (Optional — Analytics)
