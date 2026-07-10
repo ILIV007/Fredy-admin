@@ -85,6 +85,3 @@ export class RetryManager {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
-
-/** Re-export for testing. */
-export { DEFAULT_RETRY_OPTIONS };

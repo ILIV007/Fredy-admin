@@ -182,10 +182,6 @@ export function buildContainer(env: Env): Container {
     checks: [],
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
-  const scheduler = new SchedulerService({
-    kv,
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
 
   // Layer 7: Formatter (plugins)
   const htmlFormatter = new HtmlFormatter();
