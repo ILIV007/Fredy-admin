@@ -11,7 +11,7 @@ Fredy is a production-ready, serverless Content Operating System that automatica
 
 ---
 
-## ✨ Features
+## ✨ Features 
 
 - **Plugin-based architecture** — 12 content source providers (GitHub, NewsAPI, NASA, JokeAPI, Hacker News, Dev.to, StackExchange, Reddit, XKCD, GitHub Releases, GitHub Trending, Wikimedia)
 - **AI-powered content generation** — Google Gemini (primary) + OpenRouter (fallback) with multi-model race and automatic provider switching
