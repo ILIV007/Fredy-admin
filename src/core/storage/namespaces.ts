@@ -6,15 +6,15 @@
 import type { Env } from "../../types/env";
 
 /**
- * The single KV namespace Fredy uses. Bound in wrangler.toml as "SETTINGS".
- * The name "SETTINGS" is kept for AI Admin compatibility; Fredy namespaces by key prefix.
+ * The single KV namespace Fredy uses. Bound in wrangler.toml as "Fredy_SETTINGS".
+ * Fredy namespaces by key prefix (fredy:*) within this single namespace.
  */
-export const KV_BINDING_NAME = "SETTINGS" as const;
+export const KV_BINDING_NAME = "Fredy_SETTINGS" as const;
 
 /** Get the KV namespace from env. Throws if missing. */
 export function getKV(env: Env): KVNamespace {
-  if (!env.SETTINGS) {
+  if (!env.Fredy_SETTINGS) {
     throw new Error(`KV namespace "${KV_BINDING_NAME}" is not bound`);
   }
-  return env.SETTINGS;
+  return env.Fredy_SETTINGS;
 }

@@ -21,22 +21,22 @@ import type { Env } from "../types/env";
 import { PluginLogger } from "./plugin-logger";
 
 // Source plugins — Category A (Developer Content)
-import { createGitHubPlugin } from "../plugins/sources/github";
-import { createDevToPlugin } from "../plugins/sources/devto";
-import { createStackExchangePlugin } from "../plugins/sources/stackexchange";
-import { createRedditPlugin } from "../plugins/sources/reddit";
-import { createGitHubReleasesPlugin } from "../plugins/sources/github-releases";
+import { createGitHubPlugin } from "../plugins/sources/github/index";
+import { createDevToPlugin } from "../plugins/sources/devto/index";
+import { createStackExchangePlugin } from "../plugins/sources/stackexchange/index";
+import { createRedditPlugin } from "../plugins/sources/reddit/index";
+import { createGitHubReleasesPlugin } from "../plugins/sources/github-releases/index";
 
 // Source plugins — Category B (Tech News)
-import { createNewsPlugin } from "../plugins/sources/news";
-import { createHackerNewsPlugin } from "../plugins/sources/hackernews";
+import { createNewsPlugin } from "../plugins/sources/news/index";
+import { createHackerNewsPlugin } from "../plugins/sources/hackernews/index";
 
 // Source plugins — Category C (Support Content)
-import { createNasaPlugin } from "../plugins/sources/nasa";
-import { createJokePlugin } from "../plugins/sources/joke";
-import { createXkcdPlugin } from "../plugins/sources/xkcd";
-import { createGitHubTrendingPlugin } from "../plugins/sources/github-trending";
-import { createWikimediaPlugin } from "../plugins/sources/wikimedia";
+import { createNasaPlugin } from "../plugins/sources/nasa/index";
+import { createJokePlugin } from "../plugins/sources/joke/index";
+import { createXkcdPlugin } from "../plugins/sources/xkcd/index";
+import { createGitHubTrendingPlugin } from "../plugins/sources/github-trending/index";
+import { createWikimediaPlugin } from "../plugins/sources/wikimedia/index";
 
 // AI providers
 import { GeminiProvider } from "../plugins/ai/gemini";

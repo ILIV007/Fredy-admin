@@ -23,6 +23,14 @@ export const contentSchema = z.object({
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ]),
   emojiHistorySize: z.number().int().min(5).max(50).default(10),
+  // Queue minimum and target depths per category.
+  // When depth < min, the tick endpoint generates content until depth >= target.
+  queueMinA: z.number().int().min(0).max(20).default(2),
+  queueMinB: z.number().int().min(0).max(20).default(1),
+  queueMinC: z.number().int().min(0).max(20).default(1),
+  queueTargetA: z.number().int().min(0).max(20).default(4),
+  queueTargetB: z.number().int().min(0).max(20).default(2),
+  queueTargetC: z.number().int().min(0).max(20).default(2),
 });
 
 export type ContentConfig = z.infer<typeof contentSchema>;
@@ -41,6 +49,12 @@ export const contentDefaults: ContentConfig = {
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ],
   emojiHistorySize: 10,
+  queueMinA: 2,
+  queueMinB: 1,
+  queueMinC: 1,
+  queueTargetA: 4,
+  queueTargetB: 2,
+  queueTargetC: 2,
 };
 
 export const contentSection = {

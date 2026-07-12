@@ -90,9 +90,9 @@ Professional without sounding corporate.
  */
 export function buildContainer(env: Env): Container {
   // Layer 0: KV + Logger (no deps)
-  const kv = new KVStore({ kv: env.SETTINGS });
+  const kv = new KVStore({ kv: env.Fredy_SETTINGS });
   const logger = new Logger({
-    kv: env.SETTINGS,
+    kv: env.Fredy_SETTINGS,
     isDebugMode: () => env.DEBUG_MODE === "true",
   });
 
@@ -150,7 +150,7 @@ export function buildContainer(env: Env): Container {
   const qualityEngine = new QualityEngine({ logger });
 
   const ai = new AIService({
-    providers: providers.list(),
+    providers: providers.list().filter((p) => p.isConfigured(env)),
     preferred: env.DEFAULT_AI_PROVIDER as "gemini" | "openrouter" | "auto",
     soul,
     promptBuilder,
@@ -180,10 +180,6 @@ export function buildContainer(env: Env): Container {
   const quality = new QualityFilter({
     kv,
     checks: [],
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
-  const scheduler = new SchedulerService({
-    kv,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
 

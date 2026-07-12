@@ -1,8 +1,31 @@
 # Fredy — Changelog
 
-All notable changes to Fredy are documented here. Versions follow the Prompt roadmap (each Prompt = minor version bump).
+All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
-## [1.4.0] — 2026-07-05 — Deployment & Setup Guide
+## [3.3.0] — 2026-07-12 — Production Fixes & Real Plugin Implementations
+
+### Critical Fixes
+- **Build errors fixed** — all 4 Cloudflare build failures resolved:
+  - Removed duplicate `const scheduler` declaration in `container.ts`
+  - Fixed `*/15` JSDoc comment bug in `cron.ts`
+  - Fixed `await` inside non-async arrow function in `daily-planner.ts`
+  - Removed duplicate `DEFAULT_RETRY_OPTIONS` export in `retry-manager.ts`
+  - Fixed `**/*.test.ts` JSDoc comment bug in `test-units.ts`
+
+- **All 12 plugins now have real API implementations** (previously stubs returning `[]`):
+  - GitHub, GitHub Releases, GitHub Trending, Dev.to, Stack Exchange, Reddit
+  - NewsAPI, Hacker News, NASA APOD, JokeAPI, XKCD, Wikimedia
+
+- **Tick endpoint non-blocking** — `/internal/tick` returns 200 OK immediately and runs heavy work in `ctx.waitUntil()`. Fixes 30-second cron-job.org timeout.
+
+- **All plugins now have KV caching** — 30min to 6hr depending on data freshness.
+
+### Manager Dashboard
+- **NEW: Test Everything button** — runs all 9 system checks + 12 plugin tests + AI test in ONE click with copyable JSON report.
+- Version bumped from 2.2.0 to 3.3.0 in all 5 places.
+- Last Tick timestamp now shown on dashboard.
+
+## [1.4.0]## [1.4.0] — 2026-07-05 — Deployment & Setup Guide
 
 ### Implemented
 
