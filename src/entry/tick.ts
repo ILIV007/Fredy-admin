@@ -47,8 +47,7 @@ export async function tickHandler(
         log.push("config error: " + errMsg(e));
       }
       if (!settings) {
-        // Try with adminId=0 as fallback, or just return — don't crash.
-        return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log: ["config not available — set ADMIN_ID secret"] });
+        return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log });
       }
       log.push("config loaded");
 
