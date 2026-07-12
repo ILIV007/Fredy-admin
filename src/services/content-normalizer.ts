@@ -85,9 +85,8 @@ export class ContentNormalizer {
     if (!item.title || item.title.trim().length === 0) {
       throw new Error("SourceItem missing required field: title");
     }
-    if (!item.body || item.body.trim().length === 0) {
-      throw new Error("SourceItem missing required field: body");
-    }
+    // Body is optional — some sources (HackerNews, XKCD) only have title.
+    // The AI will generate the body from the title + URL.
     if (!item.source || item.source.trim().length === 0) {
       throw new Error("SourceItem missing required field: source");
     }
@@ -138,8 +137,9 @@ export class ContentNormalizer {
     return collapseWhitespace(title).slice(0, 500);
   }
 
-  /** Normalize body: trim, collapse whitespace, limit length. */
-  private normalizeBody(body: string): string {
+  /** Normalize body: trim, collapse whitespace, limit length. Falls back to title. */
+  private normalizeBody(body: string | null | undefined): string {
+    if (!body || body.trim().length === 0) return "";
     return collapseWhitespace(body).slice(0, 4096);
   }
 

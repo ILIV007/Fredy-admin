@@ -73,7 +73,7 @@ FOOTER_TEXT = "🌀 @ILIVIR3"
 
 # --- Debug ---
 DEBUG_MODE = "false"
-DEFAULT_AI_PROVIDER = "openrouter"
+DEFAULT_AI_PROVIDER = "gemini"
 
 # --- Language ---
 DEFAULT_LANGUAGE = "auto"

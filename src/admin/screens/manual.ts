@@ -99,8 +99,8 @@ export const manualScreen: Screen = {
         if (items.length === 0) {
           return { alert: `❌ No items from ${arg}` };
         }
-        // Process the first item through the pipeline.
-        const result = await ctx.container.content.process(items[0]!, "en");
+        // Process the first item through the pipeline — skip dedup for manual posts.
+        const result = await ctx.container.content.process(items[0]!, "en", { skipDedup: true });
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {

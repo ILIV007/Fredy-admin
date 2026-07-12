@@ -21,10 +21,10 @@ export type AIConfig = z.infer<typeof aiSchema>;
 
 export const aiDefaults: AIConfig = {
   _version: 1,
-  primaryProvider: "openrouter",
-  fallbackProvider: "gemini",
+  primaryProvider: "gemini",
+  fallbackProvider: "openrouter",
   temperature: 0.7,
-  maxTokens: 3096,
+  maxTokens: 2500,
   retryCount: 2,
   promptProfile: "default",
   qualityThreshold: 60,

@@ -51,11 +51,9 @@ export class ContentValidator {
       errors.push(`Title too long (${item.title.length} chars, max ${MAX_TITLE_LENGTH})`);
     }
 
-    if (!item.body || item.body.trim().length === 0) {
-      errors.push("Body is empty");
-    } else if (item.body.trim().length < MIN_BODY_LENGTH) {
-      errors.push(`Body too short (${item.body.trim().length} chars, min ${MIN_BODY_LENGTH})`);
-    } else if (item.body.length > MAX_BODY_LENGTH) {
+    // Body is optional — some sources (HackerNews, XKCD) only have title.
+    // The AI will generate the body from the title + URL.
+    if (item.body && item.body.length > MAX_BODY_LENGTH) {
       errors.push(`Body too long (${item.body.length} chars, max ${MAX_BODY_LENGTH})`);
     }
 

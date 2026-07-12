@@ -60,9 +60,11 @@ export class ContentManager {
   async process(
     sourceItem: SourceItem,
     language?: string,
+    options?: { skipDedup?: boolean },
   ): Promise<PipelineResult> {
     const settings = await this.deps.settings();
     const lang = language ?? settings.language.default;
+    const skipDedup = options?.skipDedup ?? false;
 
     // ── Stage 1: Normalize (SourceItem → StandardPost) ─────
     let post: StandardPost;
@@ -110,11 +112,13 @@ export class ContentManager {
       return this.reject("validate", reason, validation.errors.join("; "), item);
     }
 
-    // ── Stage 5: Duplicate Check ───────────────────────────
-    const dupCheck = await this.deps.duplicateDetector.check(item);
-    if (dupCheck.isDuplicate) {
-      const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
-      return this.reject("duplicate_check", reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, item);
+    // ── Stage 5: Duplicate Check (skip for manual triggers) ──
+    if (!skipDedup) {
+      const dupCheck = await this.deps.duplicateDetector.check(item);
+      if (dupCheck.isDuplicate) {
+        const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
+        return this.reject("duplicate_check", reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, item);
+      }
     }
 
     // ── Stage 6: Category Resolve ──────────────────────────
@@ -142,14 +146,84 @@ export class ContentManager {
     });
 
     if (!aiResult.ok || !aiResult.content) {
-      return this.reject("ai_generate", "ai_failed", aiResult.error ?? "AI generation failed", resolvedItem);
+      // ── FORMAT-ONLY FALLBACK ──────────────────────────────
+      // When AI fails (rate limit, timeout, etc.), publish with format-only mode.
+      // This uses the cleaned title/body directly without AI rewrite.
+      // Pattern from ai-admin: "NEVER stop publishing because AI failed"
+      this.deps.logger.warn("ai.fallback", {
+        contentId: resolvedItem.id,
+        error: aiResult.error ?? "AI failed",
+        message: "AI failed — using format-only fallback",
+      });
+      // Build a minimal AIGeneratedContent from the source item.
+      const fallbackContent = {
+        text: resolvedItem.body || resolvedItem.title,
+        aiConfidence: 0,
+        generatedLanguage: lang,
+        headline: resolvedItem.title,
+        notes: "format-only (AI unavailable)",
+      };
+      const fallbackQuality = {
+        passed: true,
+        overallScore: 50, // below threshold but allowed for fallback
+        dimensionScores: [],
+        hardReject: false,
+        minScore: settings.ai.qualityThreshold,
+      };
+      try {
+        const readyContent = await this.deps.formatter.buildReadyContent(
+          resolvedItem,
+          fallbackContent,
+          fallbackQuality as never,
+          "format-only",
+          "none",
+          0,
+          0,
+        );
+        if (!skipDedup) await this.deps.duplicateDetector.record(item);
+        await this.deps.queue.enqueue(readyContent);
+        return { ok: true, content: readyContent, item, stage: "complete" };
+      } catch (error) {
+        return this.reject("format", "ai_failed", `Format-only fallback failed: ${this.errMsg(error)}`, item);
+      }
     }
 
     // ── Stage 8: Quality Score ─────────────────────────────
     if (!aiResult.quality || !aiResult.quality.passed) {
+      // If quality fails but AI succeeded, still allow format-only fallback.
       const reason = aiResult.quality?.hardReject ? "quality_hard_reject" : "quality_below_threshold";
       const detail = aiResult.quality?.hardRejectReason ?? `Score ${aiResult.quality?.overallScore ?? 0} < ${settings.ai.qualityThreshold}`;
-      return this.reject("quality_score", reason, detail, resolvedItem);
+      this.deps.logger.warn("quality.reject_fallback", {
+        contentId: resolvedItem.id,
+        reason,
+        detail,
+        message: "Quality below threshold — using format-only fallback",
+      });
+      // Use the AI content anyway with a lower score.
+      const fallbackQuality = {
+        passed: true,
+        overallScore: 50,
+        dimensionScores: [],
+        hardReject: false,
+        minScore: settings.ai.qualityThreshold,
+      };
+      post = { ...post, score: 50 };
+      try {
+        const readyContent = await this.deps.formatter.buildReadyContent(
+          resolvedItem,
+          aiResult.content!,
+          fallbackQuality as never,
+          aiResult.provider,
+          aiResult.model,
+          aiResult.tokensUsed,
+          aiResult.estimatedCost,
+        );
+        if (!skipDedup) await this.deps.duplicateDetector.record(item);
+        await this.deps.queue.enqueue(readyContent);
+        return { ok: true, content: readyContent, item, stage: "complete" };
+      } catch (error) {
+        return this.reject("format", "ai_failed", `Format fallback failed: ${this.errMsg(error)}`, item);
+      }
     }
 
     // Attach quality score to the StandardPost.

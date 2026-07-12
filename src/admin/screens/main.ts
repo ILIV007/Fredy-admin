@@ -22,7 +22,7 @@ export const mainScreen: Screen = {
       "",
       kv("Bot", settings.general.botEnabled ? "🟢 Active" : "🔴 Disabled"),
       kv("Maintenance", settings.general.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "3.6.0"),
+      kv("Version", "3.7.0"),
       kv("Channel", settings.telegram.targetChannel),
       kv("Language", settings.language.default),
       kv("AI Provider", settings.ai.primaryProvider),
@@ -52,6 +52,10 @@ export const mainScreen: Screen = {
       navRow(
         { text: "⚙️ Settings", target: "menu:settings" },
         { text: "✍️ Manual Post", target: "menu:manual" },
+      ),
+      navRow(
+        { text: "📝 Edit Config", target: "menu:config" },
+        { text: "🔄 Refresh", target: "action:main:refresh" },
       ),
       [
         { text: settings.approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
