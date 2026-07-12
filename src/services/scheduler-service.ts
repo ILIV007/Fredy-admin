@@ -95,6 +95,19 @@ export class SchedulerService {
       };
     }
 
+    // 1d. Check approve mode — when ON, scheduler does NOT auto-publish.
+    // Posts are queued but wait for manual approval via the admin panel.
+    if (settings.approveMode) {
+      return {
+        fired: false,
+        slot: null,
+        job: null,
+        published: null,
+        skipped: true,
+        skipReason: "Approve mode is ON (waiting for manual approval)",
+      };
+    }
+
     // 2. Get or generate today's plan.
     let plan: DailyPlan;
     try {

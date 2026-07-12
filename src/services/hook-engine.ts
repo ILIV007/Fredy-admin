@@ -207,8 +207,10 @@ export class HookEngine {
   }
 
   /** Clean a hook: trim, remove trailing punctuation, limit length. */
-  private cleanHook(hook: string): string {
+  private cleanHook(hook: string | null | undefined): string {
+    if (!hook) return "";
     let cleaned = hook.trim();
+    if (!cleaned) return "";
     // Remove trailing period (hooks shouldn't end with .).
     cleaned = cleaned.replace(/[.]+$/, "");
     // Limit length.

@@ -60,15 +60,17 @@ export function kv(key: string, value: string | number | boolean | null | undefi
 }
 
 /** Escape HTML special characters in a string. */
-export function escapeHtml(input: string): string {
-  return input
+export function escapeHtml(input: string | null | undefined): string {
+  if (input === null || input === undefined) return "";
+  return String(input)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
 
 /** Truncate a string for display. */
-export function truncate(input: string, maxLen: number, suffix = "…"): string {
+export function truncate(input: string | null | undefined, maxLen: number, suffix = "…"): string {
+  if (input === null || input === undefined) return "";
   if (input.length <= maxLen) return input;
   return input.slice(0, maxLen - suffix.length) + suffix;
 }

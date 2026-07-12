@@ -8,6 +8,7 @@
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
+import type { Category } from "../../types/category";
 import { buildKeyboardWithBack, labelButton, navButton } from "../keyboards";
 import { header, divider, kv } from "../helpers/formatting";
 
@@ -15,7 +16,7 @@ export const manualScreen: Screen = {
   id: "manual",
 
   async text(ctx) {
-    const sources = ctx.container.sources.list();
+    const plugins = ctx.container.plugins.list();
     return [
       header("Manual Actions", "✍️"),
       "",
@@ -27,7 +28,7 @@ export const manualScreen: Screen = {
       kv("C", "NASA / joke / quote / fact"),
       "",
       header("By Source", "🔌"),
-      ...sources.map((s) => kv(s.name, `${s.label} (${s.category})`)),
+      ...plugins.map((p) => kv(p.metadata.name, `${p.metadata.id} (${p.metadata.category})`)),
       "",
       divider(),
       "<i>Tap an action to run it now.</i>",
@@ -46,6 +47,8 @@ export const manualScreen: Screen = {
       [navButton("📰 Send News", "action:manual:source:news")],
       [navButton("🪐 Send NASA", "action:manual:source:nasa")],
       [navButton("😄 Send Joke", "action:manual:source:joke")],
+      [navButton("🚀 Send HackerNews", "action:manual:source:hackernews")],
+      [navButton("🛠️ Send Dev.to", "action:manual:source:devto")],
       [labelButton("─── Special ───")],
       [navButton("🧪 Simulate (no publish)", "action:manual:simulate")],
     ]);
@@ -54,22 +57,61 @@ export const manualScreen: Screen = {
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
     const parts = data.split(":");
     // Format: action:manual:<type>:<arg>
-    if (parts.length < 4 || parts[1] !== "manual") return;
-    const [, , type, arg] = parts;
+    if (parts.length < 3 || parts[0] !== "action" || parts[1] !== "manual") return;
+    const type = parts[2] ?? "";
+    const arg = parts[3] ?? "";
 
     if (type === "simulate") {
-      return { toast: "🧪 Simulation not implemented (Phase 6)" };
+      return { toast: "🧪 Simulation not implemented yet" };
     }
 
     if (type === "category") {
-      // Trigger pipeline for a specific category.
-      // Real impl: container.pipeline.run({ category: arg, simulate: false })
-      return { toast: `🚀 Sending category ${arg}... (skeleton)` };
+      if (!["A", "B", "C"].includes(arg)) {
+        return { alert: "❌ Invalid category" };
+      }
+      try {
+        const result = await ctx.container.content.processForCategory(
+          arg as Category,
+          null,
+          "en",
+        );
+        if (result.ok && result.content) {
+          // Publish immediately.
+          const pubResult = await ctx.container.finalPublisher.publish(result.content);
+          if (pubResult.ok) {
+            return { toast: `✅ Published from category ${arg}!` };
+          }
+          return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
+        }
+        return { alert: `❌ No content available for category ${arg}: ${result.error ?? "all rejected"}` };
+      } catch (error) {
+        return { alert: `❌ Error: ${error instanceof Error ? error.message : String(error)}` };
+      }
     }
 
     if (type === "source") {
-      // Trigger pipeline for a specific source.
-      return { toast: `🚀 Sending from ${arg}... (skeleton)` };
+      if (!arg) {
+        return { alert: "❌ Missing source ID" };
+      }
+      try {
+        // Fetch one item from the specific plugin.
+        const items = await ctx.container.plugins.fetchFrom(arg);
+        if (items.length === 0) {
+          return { alert: `❌ No items from ${arg}` };
+        }
+        // Process the first item through the pipeline.
+        const result = await ctx.container.content.process(items[0]!, "en");
+        if (result.ok && result.content) {
+          const pubResult = await ctx.container.finalPublisher.publish(result.content);
+          if (pubResult.ok) {
+            return { toast: `✅ Published from ${arg}!` };
+          }
+          return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
+        }
+        return { alert: `❌ Processing failed: ${result.error ?? "rejected"}` };
+      } catch (error) {
+        return { alert: `❌ Error: ${error instanceof Error ? error.message : String(error)}` };
+      }
     }
   },
 };
