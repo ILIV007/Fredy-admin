@@ -62,23 +62,31 @@ export const debugScreen: Screen = {
 
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
     const parts = data.split(":");
-    if (parts.length < 4) return;
-    const [, scope, field, action] = parts;
+    // Format: "set:debug:<field>:<action>" or "set:debug:<field>:<action>:<extra>"
+    //      or "action:debug:<op>" or "action:debug:logs:<which>"
+    if (parts.length < 3) return;
+    const first = parts[0] ?? "";
+    const second = parts[1] ?? "";
+    const third = parts[2] ?? "";
+    const fourth = parts[3] ?? "";
+    const fifth = parts[4] ?? "";
 
-    if (scope === "set" && field === "debug") {
+    // Handle "set:debug:<field>:<action>"
+    if (first === "set" && second === "debug") {
       const d = ctx.settings.debug;
       let patch: Partial<FredySettings> = {};
-      if (action === "toggle") patch = { debug: { ...d, enabled: !d.enabled } };
-      else if (action === "simulation" && parts[4] === "toggle") patch = { debug: { ...d, simulationMode: !d.simulationMode } };
-      else if (action === "verbose" && parts[4] === "toggle") patch = { debug: { ...d, verboseOutput: !d.verboseOutput } };
+      if (third === "enabled" && fourth === "toggle") patch = { debug: { ...d, enabled: !d.enabled } };
+      else if (third === "simulation" && fourth === "toggle") patch = { debug: { ...d, simulationMode: !d.simulationMode } };
+      else if (third === "verbose" && fourth === "toggle") patch = { debug: { ...d, verboseOutput: !d.verboseOutput } };
       if (Object.keys(patch).length === 0) return;
       const result = await ctx.container.config.updateSettings(ctx.adminId, patch);
       if (!result.ok) return { alert: `❌ ${result.error}` };
       return { toast: "✅ Updated" };
     }
 
-    if (scope === "action" && field === "debug") {
-      const op = action;
+    // Handle "action:debug:<op>" or "action:debug:logs:<which>"
+    if (first === "action" && second === "debug") {
+      const op = third;
 
       if (op === "testKv") {
         const result = await ctx.container.debug.testKv();
@@ -107,7 +115,7 @@ export const debugScreen: Screen = {
       }
 
       if (op === "logs") {
-        const which = parts[4];
+        const which = fourth;
         let events: readonly { readonly time: number; readonly event: string; readonly level: string }[];
         if (which === "updates") events = await ctx.container.debug.getRecentUpdates();
         else if (which === "errors") events = await ctx.container.debug.getRecentErrors();

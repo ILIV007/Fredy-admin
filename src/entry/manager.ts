@@ -41,7 +41,7 @@ export async function managerHandler(
     const queueDepths = await container.queue.depth().catch(() => []);
     const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: "3.5.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: "3.5.1", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -156,7 +156,58 @@ export async function managerHandler(
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     const providers = container.providers.listWithStatus();
     const tokenStats = container.ai.getTokenStats();
-    return json({ ok: true, settings: settings?.ai, providers, tokenStats });
+    // Build models list with usage priority (from settings.providers config).
+    const providerConfig = settings?.providers;
+    const modelsByProvider: Record<string, Array<{ model: string; priority: number; enabled: boolean }>> = {};
+    for (const p of providers) {
+      const cfg = providerConfig?.[p.id as "gemini" | "openrouter"];
+      modelsByProvider[p.id] = (cfg?.models ?? []).map((model: string, idx: number) => ({
+        model,
+        priority: idx + 1, // 1 = first tried, 2 = second, etc.
+        enabled: p.enabled && p.configured,
+      }));
+    }
+    return json({ ok: true, settings: settings?.ai, providers, modelsByProvider, tokenStats });
+  }
+
+  // ── Test specific AI model ──
+  const aiModelMatch = apiPath.match(/^test\/ai\/([\w-]+)\/(.+)$/);
+  if (aiModelMatch && request.method === "POST") {
+    const providerId = aiModelMatch[1]!;
+    const model = aiModelMatch[2]!;
+    try {
+      const providers = container.providers.list().filter((p) => p.id === providerId && p.isConfigured(env));
+      if (providers.length === 0) {
+        return json({ ok: false, error: `Provider ${providerId} not configured` }, 400);
+      }
+      const provider = providers[0]!;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await provider.complete({
+          system: "You are a helpful assistant. Reply in English.",
+          user: "Say hello in one sentence.",
+          model,
+          jsonMode: false,
+          maxTokens: 100,
+          temperature: 0.7,
+        }, controller.signal);
+        clearTimeout(timeout);
+        return json({
+          ok: true,
+          provider: providerId,
+          model,
+          text: response.text?.slice(0, 300),
+          tokensUsed: response.tokensUsed,
+          latencyMs: response.latencyMs,
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        throw err;
+      }
+    } catch (error) {
+      return json({ ok: false, provider: providerId, model, error: errMsg(error) }, 500);
+    }
   }
 
   // ── Scheduler ──
@@ -188,7 +239,7 @@ export async function managerHandler(
 
   // ── System ──
   if (apiPath === "system" && request.method === "GET") {
-    return json({ ok: true, version: "3.5.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
+    return json({ ok: true, version: "3.5.1", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
   }
 
   // ── Test single plugin ──
@@ -214,7 +265,7 @@ export async function managerHandler(
   if (apiPath === "test/everything" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "3.5.0",
+      version: "3.5.1",
       sections: {} as Record<string, unknown>,
     };
     const sections = report["sections"] as Record<string, unknown>;
@@ -226,7 +277,7 @@ export async function managerHandler(
         ok: true,
         durationMs: Date.now() - t0,
         detail: {
-          version: "3.5.0",
+          version: "3.5.1",
           buildDate: "2026-07-12",
           kv: !!env.Fredy_SETTINGS,
           pluginCount: container.plugins.list().length,
@@ -478,10 +529,30 @@ async function loadQueue(){
 async function loadAI(){
   const d=await api("ai");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  // Build models table with priority and test buttons.
+  let modelsHtml='';
+  if(d.modelsByProvider){
+    for(const[pid,models]of Object.entries(d.modelsByProvider)){
+      const provInfo=(d.providers||[]).find(p=>p.id===pid)||{};
+      modelsHtml+='<div style="margin-bottom:12px"><h4 style="margin-bottom:6px">'+(provInfo.name||pid)+' '+(provInfo.configured?'✅':'❌')+' '+(provInfo.enabled?'🟢':'🔴')+'</h4><table style="font-size:12px"><thead><tr><th>#</th><th>Model</th><th>Status</th><th>Test</th></tr></thead><tbody>'+
+      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/'/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
+      '</tbody></table></div>';
+    }
+  }
   c.innerHTML='<div class="card-grid">'+card("Provider",d.settings?.primaryProvider??"—")+card("Fallback",d.settings?.fallbackProvider??"—")+card("Temperature",d.settings?.temperature??"—")+card("Max Tokens",d.settings?.maxTokens??"—")+card("Quality",d.settings?.qualityThreshold??"—")+card("Retries",d.settings?.retryCount??"—")+'</div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Providers</h3><table><thead><tr><th>Provider</th><th>Enabled</th><th>Configured</th><th>Models</th></tr></thead><tbody>'+d.providers.map(p=>'<tr><td>'+p.name+'</td><td>'+badge(p.enabled)+'</td><td>'+(p.configured?"✓":"✗")+'</td><td>'+p.modelCount+'</td></tr>').join("")+'</tbody></table></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">🤖 AI Models (by usage priority)</h3><p style="color:var(--text2);font-size:12px;margin-bottom:8px">Priority 1 = tried first, 2 = fallback, etc. Click 🧪 to test each model individually.</p>'+modelsHtml+'</div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Token Usage</h3><div class="card-grid">'+card("Calls",d.tokenStats?.totalCalls??0)+card("Success",d.tokenStats?.successfulCalls??0)+card("Failed",d.tokenStats?.failedCalls??0)+card("Tokens",d.tokenStats?.totalTokens??0)+card("Cost","$"+(d.tokenStats?.totalCost??0).toFixed(4))+'</div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Test AI</h3><div style="display:flex;gap:8px;margin-bottom:8px"><input type="text" id="ai-test" placeholder="Test text..." style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px"><button class="btn" onclick="testAI()">Test</button></div><div id="ai-result-wrap"></div></div>';
+  '<div class="card"><h3 style="margin-bottom:8px">Test AI (full pipeline)</h3><div style="display:flex;gap:8px;margin-bottom:8px"><input type="text" id="ai-test" placeholder="Test text..." style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px"><button class="btn" onclick="testAI()">Test</button></div><div id="ai-result-wrap"></div></div>';
+}
+
+async function testAIModel(pid,model){
+  toast("🧪 Testing "+pid+"/"+model+"...");
+  const w=document.getElementById("ai-result-wrap");
+  if(w)w.innerHTML='<div class="card">Testing '+pid+'/'+model+'...</div>';
+  const d=await api("test/ai/"+pid+"/"+model,"POST");
+  const jsonStr=JSON.stringify(d,null,2);
+  if(w)w.innerHTML='<h4 style="margin:8px 0">Result: '+pid+'/'+model+'</h4><pre id="ai-model-pre">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'ai-model-pre\\')">📋 Copy</button>';
+  toast(d.ok?"✅ "+model+" OK":"❌ "+model+" failed");
 }
 
 async function testAI(){
@@ -534,7 +605,7 @@ async function loadStats(){
 }
 
 function loadAbout(){
-  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","3.5.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
+  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","3.5.1")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
 }
 
 async function clearLogs(){const d=await api("clear/logs","POST");toast(d.ok?"✅ Logs cleared":"❌ Failed");}

@@ -71,27 +71,33 @@ export const categoriesScreen: Screen = {
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
     const parts = data.split(":");
     // Format: set:categories:<cat>:<field>[:action]
+    //      or: set:categories:sameTwice:toggle
     if (parts.length < 4) return;
-    const [, , cat, field, action] = parts;
-    if (!["A", "B", "C"].includes(cat)) return;
-    const category = cat as Category;
+    const cat = parts[2] ?? "";
+    const field = parts[3] ?? "";
+    const action = parts[4] ?? "";
 
     const c = ctx.settings.categories;
     let patch: Partial<FredySettings> = {};
 
-    if (field === "toggle") {
-      const item = c[category];
-      patch = { categories: { ...c, [category]: { ...item, enabled: !item.enabled } } };
-    } else if (field === "limit") {
-      const item = c[category];
-      const next = action === "inc" ? Math.min(50, item.dailyLimit + 1) : Math.max(0, item.dailyLimit - 1);
-      patch = { categories: { ...c, [category]: { ...item, dailyLimit: next } } };
-    } else if (field === "weight") {
-      const item = c[category];
-      const next = action === "inc" ? Math.min(100, item.weight + 5) : Math.max(0, item.weight - 5);
-      patch = { categories: { ...c, [category]: { ...item, weight: next } } };
-    } else if (field === "sameTwice" && action === "toggle") {
+    // Handle "sameTwice" toggle (special — not a category).
+    if (cat === "sameTwice" && field === "toggle") {
       patch = { categories: { ...c, allowSameCategoryTwice: !c.allowSameCategoryTwice } };
+    } else if (["A", "B", "C"].includes(cat)) {
+      const category = cat as Category;
+
+      if (field === "toggle") {
+        const item = c[category];
+        patch = { categories: { ...c, [category]: { ...item, enabled: !item.enabled } } };
+      } else if (field === "limit") {
+        const item = c[category];
+        const next = action === "inc" ? Math.min(50, item.dailyLimit + 1) : Math.max(0, item.dailyLimit - 1);
+        patch = { categories: { ...c, [category]: { ...item, dailyLimit: next } } };
+      } else if (field === "weight") {
+        const item = c[category];
+        const next = action === "inc" ? Math.min(100, item.weight + 5) : Math.max(0, item.weight - 5);
+        patch = { categories: { ...c, [category]: { ...item, weight: next } } };
+      }
     }
 
     if (Object.keys(patch).length === 0) return;

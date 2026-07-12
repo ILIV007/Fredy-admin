@@ -84,7 +84,8 @@ export class UXLayer {
   }
 
   /** Humanize the body: strip metadata, shorten, clean up. */
-  private humanizeBody(text: string): string {
+  private humanizeBody(text: string | null | undefined): string {
+    if (!text) return "";
     let body = text;
 
     // Remove any visible metadata patterns.
@@ -112,7 +113,8 @@ export class UXLayer {
   }
 
   /** Strip visible metadata (scores, API names, system traces). */
-  private stripMetadata(text: string): string {
+  private stripMetadata(text: string | null | undefined): string {
+    if (!text) return "";
     let cleaned = text;
 
     // Remove patterns like "Score: 85", "Quality: 90/100".
@@ -138,7 +140,8 @@ export class UXLayer {
   }
 
   /** Remove AI cliché phrases. */
-  private stripCliches(text: string): string {
+  private stripCliches(text: string | null | undefined): string {
+    if (!text) return "";
     const cliches = [
       /in today's world,?/gi,
       /it is worth noting that?/gi,
@@ -161,7 +164,8 @@ export class UXLayer {
   }
 
   /** Extract a key takeaway line from the body. */
-  private extractTakeaway(text: string, category: string): string {
+  private extractTakeaway(text: string | null | undefined, category: string): string {
+    if (!text) return "";
     const sentences = text
       .split(/[.!?]\s/)
       .map((s) => s.trim())
@@ -195,8 +199,10 @@ export class UXLayer {
   }
 
   /** Clean a takeaway sentence. */
-  private cleanTakeaway(sentence: string): string {
+  private cleanTakeaway(sentence: string | null | undefined): string {
+    if (!sentence) return "";
     let cleaned = sentence.trim();
+    if (!cleaned) return "";
     // Ensure it ends with a period.
     if (!/[.!?]$/.test(cleaned)) cleaned += ".";
     // Limit length.
@@ -276,8 +282,9 @@ export class UXLayer {
   }
 
   /** Escape HTML special characters. */
-  private escapeHtml(input: string): string {
-    return input
+  private escapeHtml(input: string | null | undefined): string {
+    if (input === null || input === undefined) return "";
+    return String(input)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");

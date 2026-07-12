@@ -1,8 +1,6 @@
 /**
  * src/admin/screens/providers.ts
  * Providers screen — list all plugins, enable/disable, priority, manual test.
- *
- * Now uses PluginManager (content sources) and ProviderRegistry (AI providers).
  */
 
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
@@ -74,61 +72,112 @@ export const providersScreen: Screen = {
       [toggleButton("OpenRouter", true, "set:providers:openrouter:toggle")],
       [labelButton("─── Source Plugins ───")],
       [toggleButton("GitHub", true, "set:plugins:github:toggle")],
+      [toggleButton("Dev.to", true, "set:plugins:devto:toggle")],
       [toggleButton("News", true, "set:plugins:news:toggle")],
       [toggleButton("NASA", true, "set:plugins:nasa:toggle")],
       [toggleButton("Joke", true, "set:plugins:joke:toggle")],
+      [toggleButton("XKCD", true, "set:plugins:xkcd:toggle")],
+      [toggleButton("HackerNews", true, "set:plugins:hackernews:toggle")],
+      [toggleButton("Wikimedia", true, "set:plugins:wikimedia:toggle")],
       [labelButton("─── Manual Tests ───")],
-      [navButton("🧪 Test Gemini", "action:test:gemini")],
-      [navButton("🧪 Test OpenRouter", "action:test:openrouter")],
-      [navButton("🧪 Test All Sources", "action:test:all-sources")],
-      [navButton("🩺 Health Check All", "action:plugins:healthCheckAll")],
+      [navButton("🧪 Test Gemini", "action:providers:test:gemini")],
+      [navButton("🧪 Test OpenRouter", "action:providers:test:openrouter")],
+      [navButton("🧪 Test All Sources", "action:providers:test:all-sources")],
+      [navButton("🩺 Health Check All", "action:providers:healthCheckAll")],
     ]);
   },
 
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
     const parts = data.split(":");
-    if (parts.length < 4) return;
-    const [, scope, id, action] = parts;
+    // Accept both 3-part and 4-part callbacks.
+    // Format: "set:<scope>:<id>:<action>"  (4 parts)
+    //      or "action:providers:<action>"  (3 parts)
+    //      or "action:providers:<action>:<arg>"  (4 parts)
+    if (parts.length < 3) return;
 
-    // Toggle AI providers.
-    if (scope === "providers" && action === "toggle") {
-      if (id === "gemini" || id === "openrouter") {
-        const isEnabled = ctx.container.providers.isEnabled(id);
+    const first = parts[0] ?? "";
+    const second = parts[1] ?? "";
+    const third = parts[2] ?? "";
+    const fourth = parts[3] ?? "";
+
+    // Handle "set:providers:<id>:toggle" and "set:plugins:<id>:toggle"
+    if (first === "set") {
+      const scope = second;
+      const id = third;
+      const action = fourth;
+
+      // Toggle AI providers.
+      if (scope === "providers" && action === "toggle") {
+        if (id === "gemini" || id === "openrouter") {
+          const isEnabled = ctx.container.providers.isEnabled(id);
+          if (isEnabled) {
+            ctx.container.providers.disable(id);
+          } else {
+            ctx.container.providers.enable(id);
+          }
+          return { toast: `✅ ${id} ${isEnabled ? "disabled" : "enabled"}` };
+        }
+      }
+
+      // Toggle content source plugins.
+      if (scope === "plugins" && action === "toggle") {
+        if (!id) return { alert: "❌ Missing plugin ID" };
+        const isEnabled = ctx.container.plugins.isEnabled(id);
         if (isEnabled) {
-          ctx.container.providers.disable(id);
+          ctx.container.plugins.disable(id);
         } else {
-          ctx.container.providers.enable(id);
+          ctx.container.plugins.enable(id);
         }
         return { toast: `✅ ${id} ${isEnabled ? "disabled" : "enabled"}` };
       }
     }
 
-    // Toggle content source plugins.
-    if (scope === "plugins" && action === "toggle") {
-      const isEnabled = ctx.container.plugins.isEnabled(id);
-      if (isEnabled) {
-        ctx.container.plugins.disable(id);
-      } else {
-        ctx.container.plugins.enable(id);
-      }
-      return { toast: `✅ ${id} ${isEnabled ? "disabled" : "enabled"}` };
-    }
+    // Handle "action:providers:<action>" or "action:providers:<action>:<arg>"
+    if (first === "action" && second === "providers") {
+      const action = third;
 
-    // Health check all.
-    if (scope === "plugins" && id === "healthCheckAll") {
-      const statuses = await ctx.container.plugins.healthCheckAll();
-      const healthy = statuses.filter((s) => s.healthy).length;
-      return { toast: `🩺 ${healthy}/${statuses.length} plugins healthy` };
-    }
-
-    // Manual tests.
-    if (scope === "test") {
-      if (id === "gemini" || id === "openrouter") {
-        return { toast: `🧪 Testing ${id}... (skeleton)` };
-      }
-      if (id === "all-sources") {
+      // Health check all.
+      if (action === "healthCheckAll") {
         const statuses = await ctx.container.plugins.healthCheckAll();
-        return { toast: `🧪 Health check: ${statuses.filter((s) => s.healthy).length}/${statuses.length} ok` };
+        const healthy = statuses.filter((s) => s.healthy).length;
+        return { toast: `🩺 ${healthy}/${statuses.length} plugins healthy` };
+      }
+
+      // Test AI providers.
+      if (action === "test") {
+        const providerId = fourth;
+        if (providerId === "gemini" || providerId === "openrouter") {
+          // Run a quick AI test.
+          try {
+            const soul = await ctx.container.soul.load();
+            const result = await ctx.container.ai.generate({
+              category: "A",
+              source: "test",
+              raw: {
+                id: "test",
+                source: "test",
+                category: "A" as const,
+                title: "Test",
+                body: "Hello world",
+                url: "https://example.com",
+                fetchedAt: Date.now(),
+              },
+              language: "en",
+              soul,
+            });
+            if (result.ok) {
+              return { toast: `✅ ${result.provider}/${result.model} (${result.tokensUsed} tokens)` };
+            }
+            return { alert: `❌ ${providerId}: ${result.error ?? "failed"}` };
+          } catch (error) {
+            return { alert: `❌ ${providerId}: ${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+        if (providerId === "all-sources") {
+          const statuses = await ctx.container.plugins.healthCheckAll();
+          const healthy = statuses.filter((s) => s.healthy).length;
+          return { toast: `🧪 Health check: ${healthy}/${statuses.length} ok` };
+        }
       }
     }
   },

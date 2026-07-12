@@ -73,7 +73,8 @@ export const settingsScreen: Screen = {
       }
     } else if (scope === "language") {
       if (field === "default") {
-        patch = { language: { ...ctx.settings.language, default: value as "auto" | "en" | "fa" } };
+        // action is the language value ("auto", "en", "fa")
+        patch = { language: { ...ctx.settings.language, default: action as "auto" | "en" | "fa" } };
       }
     } else if (scope === "content") {
       if (field === "postsPerDay") {
