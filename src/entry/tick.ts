@@ -41,8 +41,15 @@ export async function tickHandler(
     try {
       const adminId = env.ADMIN_ID || "0";
       let settings: FredySettings | null = null;
-      try { settings = await container.config.getSettings(Number(adminId)); } catch { log.push("config load failed"); }
-      if (!settings) return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log: ["config not available"] });
+      try {
+        settings = await container.config.getSettings(Number(adminId));
+      } catch (e) {
+        log.push("config error: " + errMsg(e));
+      }
+      if (!settings) {
+        // Try with adminId=0 as fallback, or just return — don't crash.
+        return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log: ["config not available — set ADMIN_ID secret"] });
+      }
       log.push("config loaded");
 
       try {
