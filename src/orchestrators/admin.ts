@@ -373,8 +373,9 @@ export class AdminOrchestrator {
 }
 
 /** Escape HTML special characters. */
-function escapeHtml(input: string): string {
-  return input
+function escapeHtml(input: string | null | undefined): string {
+  if (input === null || input === undefined) return "";
+  return String(input)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");

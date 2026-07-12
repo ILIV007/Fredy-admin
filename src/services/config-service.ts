@@ -290,7 +290,15 @@ export class ConfigService {
   /** Merge a partial blob with defaults for any missing/invalid sections. */
   private mergeWithDefaults(partial: Record<string, unknown>): FredySettings {
     const defaults = this.buildDefaults();
-    return { ...defaults, ...partial } as FredySettings;
+    // Only merge keys that are defined and not null — avoids overwriting
+    // valid defaults with undefined/null values from failed validation.
+    const result: Record<string, unknown> = { ...defaults };
+    for (const [key, value] of Object.entries(partial)) {
+      if (value !== undefined && value !== null) {
+        result[key] = value;
+      }
+    }
+    return result as FredySettings;
   }
 
   /** Deep-merge a patch into a target. Arrays are replaced, not concatenated. */
