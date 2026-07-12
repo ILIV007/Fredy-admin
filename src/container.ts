@@ -155,7 +155,6 @@ export function buildContainer(env: Env): Container {
     soul,
     promptBuilder,
     responseParser,
-    // retryHandler removed
     fallbackHandler,
     tokenTracker,
     qualityEngine,

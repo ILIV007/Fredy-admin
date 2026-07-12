@@ -21,20 +21,20 @@ export const contentSchema = z.object({
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ]),
   emojiHistorySize: z.number().int().min(5).max(50).default(10),
-  queueMinA: z.number().int().min(0).max(50).default(8),
-  queueTargetA: z.number().int().min(0).max(50).default(15),
-  queueMinB: z.number().int().min(0).max(50).default(4),
-  queueTargetB: z.number().int().min(0).max(50).default(8),
-  queueMinC: z.number().int().min(0).max(50).default(8),
-  queueTargetC: z.number().int().min(0).max(50).default(15),
+  queueMinA: z.number().int().min(0).max(50).default(2),
+  queueTargetA: z.number().int().min(0).max(50).default(4),
+  queueMinB: z.number().int().min(0).max(50).default(1),
+  queueTargetB: z.number().int().min(0).max(50).default(2),
+  queueMinC: z.number().int().min(0).max(50).default(2),
+  queueTargetC: z.number().int().min(0).max(50).default(4),
 });
 
 export type ContentConfig = z.infer<typeof contentSchema>;
 
 export const contentDefaults: ContentConfig = {
   _version: 1,
-  postsPerDay: 9,
-  categoryDistribution: { A: 45, B: 25, C: 30 },
+  postsPerDay: 4,
+  categoryDistribution: { A: 50, B: 25, C: 25 },
   randomOffsetMinutes: 25,
   burstPosting: false,
   duplicatePrevention: true,
@@ -45,9 +45,9 @@ export const contentDefaults: ContentConfig = {
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ],
   emojiHistorySize: 10,
-  queueMinA: 8, queueTargetA: 15,
-  queueMinB: 4, queueTargetB: 8,
-  queueMinC: 8, queueTargetC: 15,
+  queueMinA: 2, queueTargetA: 4,
+  queueMinB: 1, queueTargetB: 2,
+  queueMinC: 2, queueTargetC: 4,
 };
 
 export const contentSection = {
@@ -55,5 +55,5 @@ export const contentSection = {
   version: 1,
   schema: contentSchema,
   defaults: contentDefaults,
-  description: "Posts per day, category distribution, queue sizes, dedup, emoji pool.",
+  description: "Posts per day, queue sizes, dedup, emoji pool.",
 };

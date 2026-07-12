@@ -18,7 +18,7 @@ export const schedulerSchema = z.object({
   burstPosting: z.boolean().default(false),
   skipIfLowQuality: z.boolean().default(true),
   tickLockTimeout: z.number().int().min(30).max(300).default(90),
-  refreshIntervalMinutes: z.number().int().min(5).max(120).default(15),
+  refreshIntervalMinutes: z.number().int().min(5).max(120).default(60),
   minGapMinutes: z.number().int().min(5).max(120).default(30),
 });
 
@@ -27,14 +27,14 @@ export type SchedulerConfig = z.infer<typeof schedulerSchema>;
 export const schedulerDefaults: SchedulerConfig = {
   _version: 1,
   enabled: false,
-  slots: ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "23:00"],
+  slots: ["09:00", "13:00", "18:00", "22:00"],
   jitterMinutes: 25,
   timezone: "Asia/Tehran",
   postingWindows: [{ start: "08:00", end: "23:59" }],
   burstPosting: false,
   skipIfLowQuality: true,
   tickLockTimeout: 90,
-  refreshIntervalMinutes: 15,
+  refreshIntervalMinutes: 60,
   minGapMinutes: 30,
 };
 
@@ -43,5 +43,5 @@ export const schedulerSection = {
   version: 1,
   schema: schedulerSchema,
   defaults: schedulerDefaults,
-  description: "Daily posting slots, jitter, timezone, windows, tick lock, refresh interval.",
+  description: "Posting slots, jitter, timezone, tick lock, refresh interval.",
 };
