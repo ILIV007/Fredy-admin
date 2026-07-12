@@ -18,7 +18,7 @@ import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { redditManifest } from "./manifest";
 
-const REDDIT_BASE = "https://www.reddit.com";
+const REDDIT_BASE = "https://old.reddit.com";
 const CACHE_KEY = "fredy:source:reddit:top";
 const CACHE_TTL_SECONDS = 60 * 60; // 1 hour
 
@@ -92,8 +92,10 @@ export class RedditPlugin implements Plugin {
 
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers) ContentBot",
-        "Accept": "application/json",
+        // Reddit blocks generic bot UAs with 403. Use a realistic browser UA.
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
       },
     });
 

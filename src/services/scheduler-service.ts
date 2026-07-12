@@ -71,6 +71,30 @@ export class SchedulerService {
       };
     }
 
+    // 1b. Check if bot is enabled (master kill switch).
+    if (!settings.general.botEnabled) {
+      return {
+        fired: false,
+        slot: null,
+        job: null,
+        published: null,
+        skipped: true,
+        skipReason: "Bot is disabled (botEnabled=false)",
+      };
+    }
+
+    // 1c. Check maintenance mode (skip publishing, but still allow queue maintenance).
+    if (settings.general.maintenanceMode) {
+      return {
+        fired: false,
+        slot: null,
+        job: null,
+        published: null,
+        skipped: true,
+        skipReason: "Maintenance mode is ON",
+      };
+    }
+
     // 2. Get or generate today's plan.
     let plan: DailyPlan;
     try {

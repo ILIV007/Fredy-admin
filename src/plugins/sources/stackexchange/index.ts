@@ -77,16 +77,15 @@ export class StackExchangePlugin implements Plugin {
     const tags = TAG_SETS[Math.floor(Math.random() * TAG_SETS.length)]!;
     const tagged = tags.join(";");
 
-    // Build URL with filter to get question body
-    // filter=withbody returns the question body as HTML
+    // Build URL — use default filter (no custom filter to avoid 400 errors)
+    // The default filter returns: title, link, score, tags, is_answered, creation_date
+    // We don't get the body, but that's OK — the AI generates the body.
     const params = new URLSearchParams({
       order: "desc",
       sort: "votes",
       tagged,
       site: "stackoverflow",
       pagesize: "20",
-      filter: "!nNPvSNdWme",
-      key: "fredy)1Lx0pGRM5DO4nH5TQ((",
     });
 
     const url = `${SO_API}/questions?${params.toString()}`;
@@ -131,12 +130,16 @@ export class StackExchangePlugin implements Plugin {
 
   normalize(raw: unknown): SourceItem {
     const q = raw as SOQuestion;
+    // When no body is returned (default filter), build a fallback body from tags.
+    const body = q.body ?? q.excerpt ?? (q.tags && q.tags.length > 0
+      ? `Tags: ${q.tags.join(", ")}`
+      : "");
     return {
       id: String(q.question_id ?? ""),
       source: this.metadata.id,
       category: this.metadata.category,
       title: String(q.title ?? ""),
-      body: String(q.body ?? q.excerpt ?? ""),
+      body: String(body),
       url: String(q.link ?? ""),
       language: "en",
       publishedAt: q.creation_date ? q.creation_date * 1000 : undefined,

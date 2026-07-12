@@ -65,8 +65,7 @@ crons = ["* * * * *", "*/15 * * * *"]
 # Secrets are set via `wrangler secret put` or Cloudflare dashboard.
 
 [vars]
-# --- Telegram ---
-ADMIN_ID = "REPLACE_WITH_YOUR_TELEGRAM_USER_ID"
+# --- Telegram (non-secret) ---
 TARGET_CHANNEL = "@ILIVIR3"
 FOOTER_TEXT = "🌀 @ILIVIR3"
 
@@ -88,16 +87,21 @@ SCHEDULE_JITTER_MINUTES = "30"
 # Set via: wrangler secret put <NAME>
 # Or via Cloudflare dashboard: Workers > fredy > Settings > Variables
 #
-# REQUIRED:
-#   BOT_TOKEN              — from @BotFather
-#   GEMINI_API_KEY         — from https://aistudio.google.com/apikey
-#   OPENROUTER_API_KEY     — from https://openrouter.ai/keys
-#   NEWSAPI_KEY            — from https://newsapi.org
-#   NASA_API_KEY           — from https://api.nasa.gov
+# REQUIRED (secrets):
+#   ADMIN_ID              — your Telegram numeric user ID (secret!)
+#   BOT_TOKEN             — from @BotFather
+#   GEMINI_API_KEY        — from https://aistudio.google.com/apikey
+#   OPENROUTER_API_KEY    — from https://openrouter.ai/keys
+#   CRON_KEY              — random string for /internal/tick auth
 #
-# RECOMMENDED:
-#   WEBHOOK_SECRET         — random string for webhook verification
-#   DEBUG_TOKEN            — random string for /debug protection
+# RECOMMENDED (secrets):
+#   WEBHOOK_SECRET        — random string for webhook verification
+#   DEBUG_TOKEN           — random string for /Manager protection
+#
+# OPTIONAL (secrets for content sources):
+#   NEWSAPI_KEY           — from https://newsapi.org
+#   NASA_API_KEY          — from https://api.nasa.gov
+#   GITHUB_TOKEN          — from https://github.com/settings/tokens
 #
 # OPTIONAL (enhancement):
 #   GITHUB_TOKEN           — from https://github.com/settings/tokens (higher rate limit)
