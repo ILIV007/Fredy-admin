@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /**
  * src/plugins/sources/github-releases/index.ts
  * GitHub Releases content source plugin.
@@ -8,6 +9,8 @@
  * Polls releases from a curated list of popular repos.
  */
 
+=======
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
@@ -15,6 +18,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { githubReleasesManifest } from "./manifest";
+<<<<<<< HEAD
 
 const GH_API = "https://api.github.com";
 const CACHE_KEY = "fredy:source:github-releases:latest";
@@ -58,17 +62,19 @@ interface GHRelease {
   repo?: string;
 }
 
+=======
+const REPOS = ["microsoft/vscode", "facebook/react", "vercel/next.js", "rust-lang/rust", "golang/go", "nodejs/node", "denoland/deno", "oven-sh/bun"];
+export interface GitHubReleasesPluginDeps { readonly env: Env; readonly kv: KVStore; readonly logger: PluginLogger; }
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 export class GitHubReleasesPlugin implements Plugin {
   readonly metadata = githubReleasesManifest;
-
   constructor(private readonly deps: GitHubReleasesPluginDeps) {}
-
   getSource(): string { return this.metadata.id; }
   getCategory(): Category { return this.metadata.category; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
-
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "github-releases" });
+<<<<<<< HEAD
 
     // Check cache first
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
@@ -134,9 +140,18 @@ export class GitHubReleasesPlugin implements Plugin {
     });
 
     return items;
+=======
+    const h: Record<string,string> = { "Accept": "application/vnd.github.v3+json", "User-Agent": "Fredy-Bot" };
+    if (this.deps.env.GITHUB_TOKEN) h["Authorization"] = `token ${this.deps.env.GITHUB_TOKEN}`;
+    const repo = REPOS[Math.floor(Math.random()*REPOS.length)]!;
+    const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: h });
+    if (!r.ok) throw new Error(`GH Releases ${r.status}`);
+    const data = await r.json() as Record<string, unknown>;
+    return [this.normalize(data)];
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
-
   normalize(raw: unknown): SourceItem {
+<<<<<<< HEAD
     const release = raw as GHRelease;
     return {
       id: `rel-${release.repo ?? "unknown"}-${release.tag_name ?? ""}`,
@@ -170,9 +185,13 @@ export class GitHubReleasesPlugin implements Plugin {
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,
     };
+=======
+    const r = raw as Record<string, unknown>;
+    const repo = (String(r["html_url"] ?? "").match(/github\.com\/([^/]+\/[^/]+)\//) ?? [])[1] ?? "";
+    return { id: String(r["id"] ?? ""), source: this.metadata.id, category: this.metadata.category, title: `${repo} ${r["tag_name"] ?? ""}`, body: String(r["body"] ?? r["name"] ?? ""), url: String(r["html_url"] ?? ""), language: "en", publishedAt: r["published_at"] ? Date.parse(String(r["published_at"])) : undefined, metadata: { tagName: r["tag_name"], repo }, fetchedAt: Date.now() };
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
+  validate(item: SourceItem): boolean { return !!item.title && !!item.url; }
+  async health(): Promise<PluginStatus> { return { pluginId: this.metadata.id, healthy: true, enabled: this.metadata.enabled, lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null, consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0, rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null }; }
 }
-
-export function createGitHubReleasesPlugin(deps: GitHubReleasesPluginDeps): GitHubReleasesPlugin {
-  return new GitHubReleasesPlugin(deps);
-}
+export function createGitHubReleasesPlugin(deps: GitHubReleasesPluginDeps): GitHubReleasesPlugin { return new GitHubReleasesPlugin(deps); }

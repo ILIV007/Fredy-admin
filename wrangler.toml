@@ -4,7 +4,7 @@
 # Phase: Production Deployment
 # ============================================================
 
-name = "fredy-admin"
+name = "fredy"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -31,7 +31,7 @@ compatibility_flags = ["nodejs_compat"]
 #   fredy:global:*     — global stats
 
 [[kv_namespaces]]
-binding = "Fredy_SETTINGS"
+binding = "SETTINGS"
 id = "5361932dda4544358b92e9341f3e77ef"
 # preview_id = "REPLACE_WITH_PREVIEW_KV_ID"  # for wrangler dev
 
