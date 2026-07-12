@@ -94,7 +94,6 @@ export class StackExchangePlugin implements Plugin {
       headers: {
         "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)",
         "Accept": "application/json",
-        "Accept-Encoding": "gzip",
       },
     });
 

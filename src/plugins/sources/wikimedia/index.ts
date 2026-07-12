@@ -80,7 +80,6 @@ export class WikimediaPlugin implements Plugin {
       headers: {
         "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; contact@ilivir3.example) Cloudflare-Workers",
         "Accept": "application/json",
-        "Accept-Encoding": "gzip",
       },
     });
 

@@ -1,10 +1,16 @@
 /**
  * src/orchestrators/admin.ts
  * Admin panel orchestrator. Routes Telegram updates to the screen/command
- * registries. Replaces AI Admin's handleUpdate + handleCallbackQuery +
- * handlePrivateMessage (3 functions, ~500 lines) with a thin dispatcher.
+ * registries.
  *
- * See ARCHITECTURE_RULES.md §12.
+ * Callback routing:
+ *   "menu:<id>"       → navigate to screen <id>, render it
+ *   "back"            → navigate to main screen
+ *   "toggle:approve"  → flip approve mode (special)
+ *   "toggle:botEnabled" → flip bot enabled (special)
+ *   "set:<scope>:..." → delegate to current screen's onCallback
+ *   "action:<name>:..." → delegate to current screen's onCallback
+ *   "<screenId>:<action>" → delegate to screen <screenId>'s onCallback
  */
 
 import type { Container } from "../types/env";
@@ -35,10 +41,9 @@ export class AdminOrchestrator {
       await this.handleMessage(update.message);
       return;
     }
-    // Channel posts and edits are not handled by the admin panel.
   }
 
-  /** Handle a callback query — look up screen, call onCallback, render result. */
+  /** Handle a callback query — route to navigation or screen handler. */
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
     const { container } = this;
     const tg = container.tg;
@@ -59,56 +64,42 @@ export class AdminOrchestrator {
       return;
     }
 
-    // Special: ignore no-op buttons.
+    // No-op button.
     if (data === "ignore") {
       await tg.answerCallbackQuery(query.id).catch(() => {});
       return;
     }
 
-    // Special: toggle:approve — flip approve mode.
+    // ── Special toggles (handled inline) ──────────────────────
     if (data === "toggle:approve") {
-      const cur = await container.config.getSettings(fromId);
-      const newVal = !cur.approveMode;
-      await container.config.updateSettings(fromId, { approveMode: newVal });
-      await tg.answerCallbackQuery(query.id, newVal ? "🔐 Approve ON" : "🔓 Approve OFF").catch(() => {});
-      const updated = await container.config.getSettings(fromId);
-      const ms = this.screens.get("main");
-      if (ms) {
-        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
-        const newText = await ms.text(sctx);
-        const newKb = ms.keyboard(updated);
-        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
-      }
+      await this.handleToggleApprove(query, fromId, chatId, messageId);
       return;
     }
-
-    // Special: toggle:botEnabled — flip bot enabled.
     if (data === "toggle:botEnabled") {
-      const cur = await container.config.getSettings(fromId);
-      const newVal = !cur.general.botEnabled;
-      await container.config.updateSettings(fromId, { general: { ...cur.general, botEnabled: newVal } });
-      await tg.answerCallbackQuery(query.id, newVal ? "🟢 Bot ON" : "🔴 Bot OFF").catch(() => {});
-      const updated = await container.config.getSettings(fromId);
-      const ms = this.screens.get("main");
-      if (ms) {
-        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
-        const newText = await ms.text(sctx);
-        const newKb = ms.keyboard(updated);
-        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
-      }
+      await this.handleToggleBot(query, fromId, chatId, messageId);
       return;
     }
 
-    // Parse the callback data: "menu:<id>" or "set:<scope>:<value>" or "action:<name>:<args>".
+    // ── Navigation: "menu:<id>" or "back" ────────────────────
+    if (data === "back" || data === "menu:main" || data === "menu:back") {
+      await this.navigate(query, "main", fromId, chatId, messageId);
+      return;
+    }
+    if (data.startsWith("menu:")) {
+      const targetId = data.slice(5);
+      await this.navigate(query, targetId || "main", fromId, chatId, messageId);
+      return;
+    }
+
+    // ── Delegate to screen: "set:", "action:", "<screenId>:..." ─
+    const settings = await container.config.getSettings(fromId);
     const screenId = this.resolveScreenId(data);
     const screen = this.screens.get(screenId);
     if (!screen) {
-      await tg.answerCallbackQuery(query.id, `❌ Unknown screen: ${screenId}`).catch(() => {});
+      await tg.answerCallbackQuery(query.id, `❌ Unknown: ${screenId}`).catch(() => {});
       return;
     }
 
-    // Load settings.
-    const settings = await container.config.getSettings(fromId);
     const ctx: ScreenContext = {
       container,
       adminId: fromId,
@@ -122,13 +113,10 @@ export class AdminOrchestrator {
       let action: ScreenAction | void;
       if (screen.onCallback) {
         action = await screen.onCallback(data, ctx);
-      } else {
-        action = undefined;
       }
 
-      // If the screen returned an action, apply it.
       if (action && typeof action === "object") {
-        // Toast / alert first (closes the loading spinner).
+        // Toast / alert.
         if (action.alert) {
           await tg.answerCallbackQuery(query.id, action.alert, true).catch(() => {});
         } else if (action.toast) {
@@ -137,39 +125,140 @@ export class AdminOrchestrator {
           await tg.answerCallbackQuery(query.id).catch(() => {});
         }
 
-        // Redirect to another screen?
-        const targetScreenId = action.redirectTo
-          ? this.resolveScreenId(action.redirectTo)
-          : screen.id;
-        const targetScreen = this.screens.get(targetScreenId) ?? screen;
+        // Redirect?
+        if (action.redirectTo) {
+          const targetId = this.resolveScreenId(action.redirectTo);
+          const targetScreen = this.screens.get(targetId);
+          if (targetScreen) {
+            const newText = action.newText ?? await targetScreen.text(ctx);
+            const newKeyboard = action.newKeyboard ?? targetScreen.keyboard(settings);
+            await this.render(chatId, messageId, newText, newKeyboard);
+          }
+          return;
+        }
 
-        // Compute the new text and keyboard.
-        // If the action provided explicit text/keyboard, use those.
-        // Otherwise, re-render the target screen.
-        const newText = action.newText ?? await targetScreen.text(ctx);
-        const newKeyboard = action.newKeyboard ?? targetScreen.keyboard(settings);
-
-        await tg.editMessageText(chatId, messageId, newText, {
-          parse_mode: "HTML",
-          reply_markup: newKeyboard,
-          disable_web_page_preview: true,
-        }).catch(async (error: unknown) => {
-          // If editing fails (e.g., message too old), send a new message.
-          console.warn("[admin] editMessageText failed, sending new message:", error);
-          await tg.sendMessage(chatId, newText, {
-            parse_mode: "HTML",
-            reply_markup: newKeyboard,
-            disable_web_page_preview: true,
-          }).catch(() => {});
-        });
+        // Stay on same screen — render with new text/keyboard if provided,
+        // otherwise re-render the current screen (to reflect any setting changes).
+        const updatedSettings = await container.config.getSettings(fromId);
+        const newText = action.newText ?? await screen.text({ ...ctx, settings: updatedSettings });
+        const newKeyboard = action.newKeyboard ?? screen.keyboard(updatedSettings);
+        await this.render(chatId, messageId, newText, newKeyboard);
       } else {
-        // No action returned — just close the callback query.
-        await tg.answerCallbackQuery(query.id).catch(() => {});
+        // No action returned — re-render the screen to reflect current state.
+        const updatedSettings = await container.config.getSettings(fromId);
+        const newText = await screen.text({ ...ctx, settings: updatedSettings });
+        const newKeyboard = screen.keyboard(updatedSettings);
+        await this.render(chatId, messageId, newText, newKeyboard);
       }
     } catch (error) {
       console.error("[admin] callback handler error:", error);
       const message = error instanceof Error ? error.message : String(error);
       await tg.answerCallbackQuery(query.id, `❌ Error: ${message.slice(0, 200)}`, true).catch(() => {});
+    }
+  }
+
+  /** Navigate to a screen — render it fresh. */
+  private async navigate(
+    query: TelegramCallbackQuery,
+    screenId: string,
+    fromId: number,
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    const { container } = this;
+    const screen = this.screens.get(screenId);
+    if (!screen) {
+      await container.tg.answerCallbackQuery(query.id, `❌ Screen not found: ${screenId}`).catch(() => {});
+      return;
+    }
+
+    const settings = await container.config.getSettings(fromId);
+    const ctx: ScreenContext = {
+      container,
+      adminId: fromId,
+      chatId,
+      messageId,
+      settings,
+      query,
+    };
+
+    try {
+      const text = await screen.text(ctx);
+      const keyboard = screen.keyboard(settings);
+      await container.tg.answerCallbackQuery(query.id).catch(() => {});
+      await this.render(chatId, messageId, text, keyboard);
+    } catch (error) {
+      console.error("[admin] navigate error:", error);
+      const message = error instanceof Error ? error.message : String(error);
+      await container.tg.answerCallbackQuery(query.id, `❌ ${message.slice(0, 200)}`, true).catch(() => {});
+    }
+  }
+
+  /** Render text + keyboard — edit message, or send new if edit fails. */
+  private async render(
+    chatId: number,
+    messageId: number,
+    text: string,
+    keyboard: import("../types/telegram").InlineKeyboard,
+  ): Promise<void> {
+    const tg = this.container.tg;
+    await tg.editMessageText(chatId, messageId, text, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+      disable_web_page_preview: true,
+    }).catch(async (error: unknown) => {
+      console.warn("[admin] editMessageText failed, sending new message:", error);
+      await tg.sendMessage(chatId, text, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+        disable_web_page_preview: true,
+      }).catch(() => {});
+    });
+  }
+
+  /** Handle toggle:approve inline. */
+  private async handleToggleApprove(
+    query: TelegramCallbackQuery,
+    fromId: number,
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    const { container } = this;
+    const tg = container.tg;
+    const cur = await container.config.getSettings(fromId);
+    const newVal = !cur.approveMode;
+    await container.config.updateSettings(fromId, { approveMode: newVal });
+    await tg.answerCallbackQuery(query.id, newVal ? "🔐 Approve ON" : "🔓 Approve OFF").catch(() => {});
+    const updated = await container.config.getSettings(fromId);
+    const ms = this.screens.get("main");
+    if (ms) {
+      const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+      const newText = await ms.text(sctx);
+      const newKb = ms.keyboard(updated);
+      await this.render(chatId, messageId, newText, newKb);
+    }
+  }
+
+  /** Handle toggle:botEnabled inline. */
+  private async handleToggleBot(
+    query: TelegramCallbackQuery,
+    fromId: number,
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    const { container } = this;
+    const tg = container.tg;
+    const cur = await container.config.getSettings(fromId);
+    const newVal = !cur.general.botEnabled;
+    await container.config.updateSettings(fromId, { general: { ...cur.general, botEnabled: newVal } });
+    await tg.answerCallbackQuery(query.id, newVal ? "🟢 Bot ON" : "🔴 Bot OFF").catch(() => {});
+    const updated = await container.config.getSettings(fromId);
+    const ms = this.screens.get("main");
+    if (ms) {
+      const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+      const newText = await ms.text(sctx);
+      const newKb = ms.keyboard(updated);
+      await this.render(chatId, messageId, newText, newKb);
     }
   }
 
@@ -239,31 +328,25 @@ export class AdminOrchestrator {
 
   /**
    * Resolve a callback data string to a screen ID.
-   * Examples:
-   *   "menu:main"       → "main"
-   *   "menu:schedule"   → "schedule"
-   *   "set:ai:temp:0.5" → "ai"  (settings handled by the screen itself)
+   *   "set:ai:temp:0.5" → "ai"
    *   "action:manual:A" → "manual"
    *   "soul:view"       → "soul"
+   *   "scheduler:refresh" → "schedule"
    */
   private resolveScreenId(data: string): string {
     const parts = data.split(":");
     const first = parts[0] ?? "";
     const second = parts[1] ?? "";
 
-    // "menu:<id>" → id
-    if (first === "menu") return second || "main";
-
-    // "set:<scope>:..." → scope (the screen that owns the setting)
     if (first === "set") return second || "main";
-
-    // "action:<name>:..." → name (manual actions)
     if (first === "action") return second || "main";
-
-    // "toggle:<scope>" → scope
     if (first === "toggle") return second || "main";
 
-    // Otherwise, treat the first part as the screen ID (e.g., "soul:view" → "soul").
+    // Map special action scopes to screen IDs.
+    if (first === "scheduler") return "schedule";
+    if (first === "soul") return "soul";
+    if (first === "manual") return "manual";
+
     return first || "main";
   }
 }
