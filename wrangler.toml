@@ -1,7 +1,6 @@
 # ============================================================
 # Fredy — Cloudflare Worker Configuration
-# Version: 1.4.0
-# Phase: Production Deployment
+# Version: 2.3.0
 # ============================================================
 
 name = "fredy-admin"
@@ -12,117 +11,48 @@ compatibility_flags = ["nodejs_compat"]
 # ============================================================
 # KV Namespaces
 # ============================================================
-# Fredy uses a single KV namespace with key prefixes (fredy:*)
-# for efficient free-tier usage. All data is namespaced by prefix:
-#   fredy:settings:*   — runtime config
-#   fredy:state:*      — runtime state
-#   fredy:queue:*      — content queue
-#   fredy:dlq:*        — dead-letter queue
-#   fredy:sched:*      — scheduler data
-#   fredy:dedup:*      — duplicate detection
-#   fredy:history:*    — publish history
-#   fredy:source:*     — source caches
-#   fredy:plugin:*     — plugin status
-#   fredy:debug:*      — debug logs
-#   fredy:convo:*      — admin conversations
-#   fredy:approve:*    — approve-mode posts
-#   fredy:mg:*         — media group buffering
-#   fredy:soul         — soul.md override
-#   fredy:global:*     — global stats
-
 [[kv_namespaces]]
 binding = "Fredy_SETTINGS"
 id = "5361932dda4544358b92e9341f3e77ef"
-# preview_id = "REPLACE_WITH_PREVIEW_KV_ID"  # for wrangler dev
 
 # ============================================================
-# D1 Database (Optional — Analytics)
+# Cron Triggers — DISABLED
 # ============================================================
-# Uncomment to enable D1 for relational analytics.
-# Free tier: 5GB storage, 5M reads/day.
-#
-# [[d1_databases]]
-# binding = "FREDY_DB"
-# database_name = "fredy-analytics"
-# database_id = "REPLACE_WITH_D1_DATABASE_ID"
-
-# ============================================================
-# Cron Triggers
-# ============================================================
-# Two cron triggers:
-#   1. Every minute — scheduler tick (check for due slots, publish)
-#   2. Every 15 minutes — source cache refresh (keep content fresh)
-#
-# Cloudflare free tier: up to 5 cron triggers per Worker.
-
-[triggers]
-crons = ["* * * * *", "*/15 * * * *"]
+# Using external cron (cron-job.org) at 5-minute intervals via /internal/tick.
+# Cloudflare cron triggers are disabled to avoid the 5-trigger account limit.
+# If you want to re-enable, delete old triggers from other workers first:
+#   Dashboard > Workers & Pages > [other workers] > Triggers > Delete
+# Then uncomment:
+# [triggers]
+# crons = ["*/15 * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)
 # ============================================================
-# These are set in wrangler.toml and are NOT secret.
-# Secrets are set via `wrangler secret put` or Cloudflare dashboard.
-
+# ADMIN_ID is set as a SECRET, not here.
 [vars]
-# --- Telegram ---
-ADMIN_ID = "REPLACE_WITH_YOUR_TELEGRAM_USER_ID"
 TARGET_CHANNEL = "@ILIVIR3"
 FOOTER_TEXT = "🌀 @ILIVIR3"
-
-# --- Debug ---
 DEBUG_MODE = "false"
-DEFAULT_AI_PROVIDER = "openrouter"
-
-# --- Language ---
+DEFAULT_AI_PROVIDER = "gemini"
 DEFAULT_LANGUAGE = "auto"
-
-# --- Scheduler ---
 SCHEDULER_TIMEZONE = "Asia/Tehran"
-SCHEDULE_SLOTS = "09:00,13:00,18:00,22:00"
-SCHEDULE_JITTER_MINUTES = "30"
+SCHEDULE_SLOTS = "08:00,10:00,12:00,14:00,16:00,18:00,20:00,22:00,23:00"
+SCHEDULE_JITTER_MINUTES = "25"
 
 # ============================================================
-# Secrets (DO NOT put values here!)
+# Secrets (set via: wrangler secret put <NAME>)
+#   BOT_TOKEN          — from @BotFather
+#   ADMIN_ID           — your Telegram user ID
+#   GEMINI_API_KEY     — from aistudio.google.com
+#   OPENROUTER_API_KEY — from openrouter.ai
+#   CRON_KEY           — random string for /internal/tick auth
+#   WEBHOOK_SECRET     — random string for webhook verification
+#   DEBUG_TOKEN        — random string for /Manager auth
+#   NEWSAPI_KEY        — optional
+#   NASA_API_KEY       — optional
+#   GITHUB_TOKEN       — optional
 # ============================================================
-# Set via: wrangler secret put <NAME>
-# Or via Cloudflare dashboard: Workers > fredy > Settings > Variables
-#
-# REQUIRED:
-#   BOT_TOKEN              — from @BotFather
-#   GEMINI_API_KEY         — from https://aistudio.google.com/apikey
-#   OPENROUTER_API_KEY     — from https://openrouter.ai/keys
-#   NEWSAPI_KEY            — from https://newsapi.org
-#   NASA_API_KEY           — from https://api.nasa.gov
-#
-# RECOMMENDED:
-#   WEBHOOK_SECRET         — random string for webhook verification
-#   DEBUG_TOKEN            — random string for /debug protection
-#
-# OPTIONAL (enhancement):
-#   GITHUB_TOKEN           — from https://github.com/settings/tokens (higher rate limit)
-# ============================================================
-
-# ============================================================
-# Observability
-# ============================================================
-# Enable Cloudflare Workers Logs for debugging.
-# View with: wrangler tail
 
 [observability]
 enabled = true
-
-# ============================================================
-# Limits (Cloudflare Free Tier)
-# ============================================================
-# - 100,000 requests/day
-# - 10ms CPU time per request (can be extended)
-# - 1,000 KV writes/day, 100,000 KV reads/day
-# - 5 cron triggers per Worker
-# - 1 MB Worker size limit
-#
-# Fredy is designed to work within these limits:
-# - Batched stats (reduces KV writes)
-# - In-memory config cache (reduces KV reads)
-# - Efficient cron (1-minute tick is sufficient)
-# ============================================================
