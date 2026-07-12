@@ -1,6 +1,8 @@
 /**
  * src/core/config/sections/categories.ts
+ * Per-category configuration. See FREDY_GUIDELINES.md §1.
  */
+
 import { z } from "zod";
 
 export const categoryItemSchema = z.object({
@@ -37,5 +39,6 @@ export const categoriesSection = {
   version: 1,
   schema: categoriesSchema,
   defaults: categoriesDefaults,
-  description: "Per-category enable, daily limit, priority, weight.",
+  description:
+    "Per-category enable, daily limit, priority, weight, fallback behavior, and rotation order.",
 };

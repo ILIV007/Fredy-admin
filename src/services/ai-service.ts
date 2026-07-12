@@ -24,6 +24,7 @@ import type { FredySettings } from "../types/config";
 import type { SoulLoader } from "./soul-loader";
 import type { PromptBuilder } from "./prompt-builder";
 import type { ResponseParser } from "./response-parser";
+import type { RetryHandler } from "./retry-handler";
 import type { FallbackHandler } from "./fallback-handler";
 import type { TokenTracker } from "./token-tracker";
 import type { QualityEngine } from "./quality-engine";
@@ -35,6 +36,7 @@ export interface AIServiceDeps {
   readonly soul: SoulLoader;
   readonly promptBuilder: PromptBuilder;
   readonly responseParser: ResponseParser;
+  readonly retryHandler: RetryHandler;
   readonly fallbackHandler: FallbackHandler;
   readonly tokenTracker: TokenTracker;
   readonly qualityEngine: QualityEngine;

@@ -14,8 +14,8 @@ export class XkcdPlugin implements Plugin {
   supportsMedia(): boolean { return this.metadata.supportsImages; }
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "xkcd" });
-    const r = await fetch("https://xkcd.com/info.json");
-    if (!r.ok) throw new Error(`XKCD API ${r.status}`);
+    const r = await fetch("https://xkcd.com/info.json", { headers: { "User-Agent": "Fredy-Bot/1.0" } });
+    if (!r.ok) throw new Error(`XKCD ${r.status}`);
     const data = await r.json() as Record<string, unknown>;
     return [this.normalize(data)];
   }

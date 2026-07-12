@@ -507,7 +507,7 @@ async function loadSystem(){
     '<button class="btn btn-danger" onclick="clearDedup()">Clear Dedup</button>'+
     '<button class="btn btn-danger" onclick="clearQueue()">Clear Queue</button>'+
     '<button class="btn btn-ghost" onclick="clearLogs()">Clear Logs</button>'+
-    '</div><pre id="action-result" style="margin-top:12px"></pre></div>';
+    "</div><pre id="action-result" style="margin-top:12px"></pre></div>";
 }
 
 async function loadStats(){

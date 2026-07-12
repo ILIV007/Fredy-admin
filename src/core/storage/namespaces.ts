@@ -13,8 +13,8 @@ export const KV_BINDING_NAME = "SETTINGS" as const;
 
 /** Get the KV namespace from env. Throws if missing. */
 export function getKV(env: Env): KVNamespace {
-  if (!env.Fredy_SETTINGS) {
+  if (!env.SETTINGS) {
     throw new Error(`KV namespace "${KV_BINDING_NAME}" is not bound`);
   }
-  return env.Fredy_SETTINGS;
+  return env.SETTINGS;
 }

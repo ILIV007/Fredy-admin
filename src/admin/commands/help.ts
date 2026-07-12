@@ -1,6 +1,8 @@
 /**
  * src/admin/commands/help.ts
+ * /help command — lists all available commands.
  */
+
 import type { Command, CommandContext } from "../registry";
 
 export const helpCommand: Command = {
@@ -12,10 +14,10 @@ export const helpCommand: Command = {
       "<b>🤖 Fredy — Commands</b>",
       "",
       "<b>Admin Panel:</b>",
-      "  /start — Show bot introduction",
-      "  /menu — Open admin dashboard",
+      "  /start — Open dashboard",
       "  /help — This message",
       "  /stats — Show statistics",
+      "  /soul — View soul.md status",
       "",
       "<b>Diagnostics:</b>",
       "  /checkperms — Check bot permissions in channel",
