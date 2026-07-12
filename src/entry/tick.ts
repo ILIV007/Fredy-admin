@@ -1,6 +1,7 @@
 /**
  * src/entry/tick.ts
  * Internal tick endpoint — POST/GET /internal/tick
+<<<<<<< HEAD
  *
  * Auth: Authorization: Bearer <CRON_KEY> or X-Cron-Key: <CRON_KEY> or ?key=<CRON_KEY>
  *
@@ -15,6 +16,8 @@
  *   5. [background] Maintain queue (refill if below minimum)
  *   6. [background] Refresh sources (if interval elapsed)
  *   7. [background] Cleanup + release lock
+=======
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
  */
 
 import type { Env, Container } from "../types/env";
@@ -43,6 +46,7 @@ export async function tickHandler(
   const { env, container, ctx } = deps;
   const startTime = Date.now();
 
+<<<<<<< HEAD
   // ── 1. Authentication (header-based + query fallback) ───
   if (!env.CRON_KEY) {
     return json({ ok: false, error: "CRON_KEY not set" }, 500);
@@ -102,25 +106,33 @@ async function runTickWork(container: Container, env: Env): Promise<string[]> {
     log.push("config loaded");
 
     // ── Publish due posts (from queue only) ────────────
+=======
+  try {
+    if (!env.CRON_KEY) return json({ ok: false, error: "CRON_KEY not set" }, 500);
+    const authHeader = request.headers.get("Authorization") ?? "";
+    const xCronKey = request.headers.get("X-Cron-Key") ?? "";
+    const queryKey = url.searchParams.get("key") ?? "";
+    const providedKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : (xCronKey || queryKey);
+    if (providedKey !== env.CRON_KEY) return json({ ok: false, error: "Unauthorized" }, 403);
+
+    const lockAcquired = await acquireLock(container);
+    if (!lockAcquired) return json({ ok: true, skipped: true, reason: "lock_held", time: new Date().toISOString(), durationMs: Date.now() - startTime, log: ["skipped: lock held"] });
+
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
     try {
-      // Process silent scheduling queue.
-      await processScheduledQueue(env, container);
-      log.push("scheduled queue processed");
-
-      // Scheduler tick — fires due slots from queue.
-      const scheduler = new SchedulerOrchestrator(container);
-      const tickResult = await scheduler.tick();
-      if (tickResult.fired) {
-        log.push(`slot fired: category=${tickResult.slot?.category ?? "?"}`);
-      } else if (tickResult.skipped) {
-        log.push(`slot skipped: ${tickResult.skipReason ?? "unknown"}`);
-      } else {
-        log.push("no due slots");
+      const adminId = env.ADMIN_ID || "0";
+      let settings: FredySettings | null = null;
+      try {
+        settings = await container.config.getSettings(Number(adminId));
+      } catch (e) {
+        log.push("config error: " + errMsg(e));
       }
-    } catch (error) {
-      log.push(`publish error: ${errMsg(error)}`);
-    }
+      if (!settings) {
+        return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log });
+      }
+      log.push("config loaded");
 
+<<<<<<< HEAD
     // ── Maintain queue (refill if below minimum) ──────
     try {
       await maintainQueue(container, settings, log);
@@ -161,116 +173,81 @@ async function acquireLock(container: Container): Promise<boolean> {
     return true;
   } catch {
     return true; // On KV error, allow execution.
+=======
+      try {
+        await processScheduledQueue(env, container);
+        log.push("queue processed");
+        const scheduler = new SchedulerOrchestrator(container);
+        const tickResult = await scheduler.tick();
+        if (tickResult.fired) log.push("slot fired: " + (tickResult.slot?.category ?? "?"));
+        else if (tickResult.skipped) log.push("slot skipped: " + (tickResult.skipReason ?? "?"));
+        else log.push("no due slots");
+      } catch (e) { log.push("publish error: " + errMsg(e)); }
+
+      try { await maintainQueue(container, settings, log); } catch (e) { log.push("queue error: " + errMsg(e)); }
+      try { await refreshSourcesIfNeeded(container, settings, log); } catch (e) { log.push("refresh error: " + errMsg(e)); }
+      await container.kv.flushAllStats().catch(() => {});
+      log.push("done");
+    } finally { await releaseLock(container); }
+
+    return json({ ok: true, time: new Date().toISOString(), durationMs: Date.now() - startTime, log });
+  } catch (e) {
+    return json({ ok: false, error: errMsg(e), time: new Date().toISOString(), durationMs: Date.now() - startTime, log }, 500);
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
 }
 
-async function releaseLock(container: Container): Promise<void> {
-  try {
-    await container.kv.delete(LOCK_KEY);
-  } catch {
-    // ignore
-  }
+async function acquireLock(c: Container): Promise<boolean> {
+  try { if (await c.kv.get(LOCK_KEY)) return false; await c.kv.set(LOCK_KEY, String(Date.now()), LOCK_TIMEOUT_SECONDS); return true; } catch { return true; }
 }
+async function releaseLock(c: Container): Promise<void> { try { await c.kv.delete(LOCK_KEY); } catch {} }
 
-// ────────────────────────────────────────────────────────────
-// Queue Maintenance (smart refill)
-// ────────────────────────────────────────────────────────────
-
-async function maintainQueue(
-  container: Container,
-  settings: FredySettings,
-  log: string[],
-): Promise<void> {
-  const categories: Category[] = ["A", "B", "C"];
-  const minMap: Record<Category, number> = {
-    A: settings.content.queueMinA,
-    B: settings.content.queueMinB,
-    C: settings.content.queueMinC,
-  };
-  const targetMap: Record<Category, number> = {
-    A: settings.content.queueTargetA,
-    B: settings.content.queueTargetB,
-    C: settings.content.queueTargetC,
-  };
-
-  for (const cat of categories) {
-    if (!settings.categories[cat].enabled) continue;
-
-    const depth = await container.queue.depthFor(cat);
-    const min = minMap[cat];
-    const target = targetMap[cat];
-
-    if (depth < min) {
-      const needed = target - depth;
-      log.push(`queue ${cat}: ${depth}/${min} — generating ${needed} items`);
-
-      // Generate content to fill the queue.
+async function maintainQueue(c: Container, s: FredySettings, log: string[]): Promise<void> {
+  const cats: Category[] = ["A", "B", "C"];
+  const minMap = { A: s.content.queueMinA, B: s.content.queueMinB, C: s.content.queueMinC };
+  const tgtMap = { A: s.content.queueTargetA, B: s.content.queueTargetB, C: s.content.queueTargetC };
+  for (const cat of cats) {
+    if (!s.categories[cat]?.enabled) continue;
+    let depth = 0;
+    try { depth = await c.queue.depthFor(cat); } catch { continue; }
+    if (depth < minMap[cat]) {
+      const needed = tgtMap[cat] - depth;
+      log.push("queue " + cat + ": " + depth + "/" + minMap[cat] + " gen " + needed);
       for (let i = 0; i < needed; i++) {
         try {
-          const result = await container.content.processForCategory(cat, null, settings.language.default);
-          if (result.ok) {
-            log.push(`  ${cat}: generated ${result.content?.id ?? "?"}`);
-          } else {
-            log.push(`  ${cat}: generation failed — ${result.error ?? result.rejectedReason ?? "unknown"}`);
-            break; // Stop if generation fails (likely no more content).
-          }
-        } catch (error) {
-          log.push(`  ${cat}: generation error — ${errMsg(error)}`);
-          break;
-        }
+          const r = await c.content.processForCategory(cat, null, s.language.default);
+          if (!r.ok) { log.push("  " + cat + " gen failed: " + (r.error || r.rejectedReason)); break; }
+        } catch (e) { log.push("  " + cat + " gen error: " + errMsg(e)); break; }
       }
+<<<<<<< HEAD
     } else {
       log.push(`queue ${cat}: ${depth}/${min} OK`);
     }
+=======
+    } else { log.push("queue " + cat + ": " + depth + "/" + minMap[cat] + " OK"); }
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
 }
 
-// ────────────────────────────────────────────────────────────
-// Source Refresh (interval-based)
-// ────────────────────────────────────────────────────────────
-
-async function refreshSourcesIfNeeded(
-  container: Container,
-  settings: FredySettings,
-  log: string[],
-): Promise<void> {
-  const intervalMs = settings.scheduler.refreshIntervalMinutes * 60 * 1000;
-  const lastRefreshStr = await container.kv.get(REFRESH_KEY);
-  const lastRefresh = lastRefreshStr ? Number(lastRefreshStr) : 0;
+async function refreshSourcesIfNeeded(c: Container, s: FredySettings, log: string[]): Promise<void> {
+  const intervalMs = (s.scheduler.refreshIntervalMinutes || 15) * 60 * 1000;
+  let lastRefresh = 0;
+  try { const v = await c.kv.get(REFRESH_KEY); lastRefresh = v ? Number(v) : 0; } catch {}
   const now = Date.now();
-
-  if (now - lastRefresh < intervalMs) {
-    const remaining = Math.ceil((intervalMs - (now - lastRefresh)) / 60000);
-    log.push(`source refresh: skipped (${remaining}min until next)`);
-    return;
-  }
-
-  // Check if refresh is actually needed (queue already full = skip).
-  const depths = await container.queue.depth();
-  const totalDepth = depths.reduce((sum, d) => sum + d.depth, 0);
-  if (totalDepth > 20) {
-    log.push(`source refresh: skipped (queue full: ${totalDepth})`);
-    return;
-  }
-
-  // Refresh.
-  const scheduler = new SchedulerOrchestrator(container);
+  if (now - lastRefresh < intervalMs) { log.push("refresh: skipped"); return; }
+  let totalDepth = 0;
+  try { const d = await c.queue.depth(); totalDepth = d.reduce((sum, x) => sum + x.depth, 0); } catch {}
+  if (totalDepth > 20) { log.push("refresh: skipped (queue full)"); return; }
+  const scheduler = new SchedulerOrchestrator(c);
   await scheduler.refreshSources();
+<<<<<<< HEAD
   await container.kv.set(REFRESH_KEY, String(now));
   log.push(`refresh: done`);
+=======
+  await c.kv.set(REFRESH_KEY, String(now));
+  log.push("refresh: done");
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 }
 
-// ────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────
-
-function errMsg(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function json(obj: unknown, status = 200): Response {
-  return new Response(JSON.stringify(obj, null, 2), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+function errMsg(e: unknown): string { return e instanceof Error ? e.message : String(e); }
+function json(obj: unknown, status = 200): Response { return new Response(JSON.stringify(obj, null, 2), { status, headers: { "Content-Type": "application/json" } }); }

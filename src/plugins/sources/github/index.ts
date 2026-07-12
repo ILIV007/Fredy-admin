@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /**
  * src/plugins/sources/github/index.ts
  * GitHub content source plugin.
@@ -11,6 +12,8 @@
  * Requires GITHUB_TOKEN for higher rate limit (60/hr unauth, 5000/hr authed).
  */
 
+=======
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
@@ -18,6 +21,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { githubManifest } from "./manifest";
+<<<<<<< HEAD
 
 const GH_API = "https://api.github.com";
 const CACHE_KEY = "fredy:source:github:trending";
@@ -49,10 +53,13 @@ interface GHRepo {
   owner?: { login?: string; avatar_url?: string };
 }
 
+=======
+export interface GitHubPluginDeps { readonly env: Env; readonly kv: KVStore; readonly logger: PluginLogger; }
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 export class GitHubPlugin implements Plugin {
   readonly metadata = githubManifest;
-
   constructor(private readonly deps: GitHubPluginDeps) {}
+<<<<<<< HEAD
 
   getSource(): string { return this.metadata.id; }
   getCategory(): Category { return this.metadata.category; }
@@ -121,9 +128,23 @@ export class GitHubPlugin implements Plugin {
     });
 
     return items;
+=======
+  getSource(): string { return this.metadata.id; }
+  getCategory(): Category { return this.metadata.category; }
+  supportsMedia(): boolean { return this.metadata.supportsImages; }
+  async fetch(): Promise<readonly SourceItem[]> {
+    this.deps.logger.info("source.fetch_start", { plugin: "github" });
+    const d = new Date(Date.now() - 7*86400000).toISOString().slice(0,10);
+    const h: Record<string,string> = { "Accept": "application/vnd.github.v3+json", "User-Agent": "Fredy-Bot" };
+    if (this.deps.env.GITHUB_TOKEN) h["Authorization"] = `token ${this.deps.env.GITHUB_TOKEN}`;
+    const r = await fetch(`https://api.github.com/search/repositories?q=created:>${d}+stars:>50&sort=stars&order=desc&per_page=10`, { headers: h });
+    if (!r.ok) throw new Error(`GitHub ${r.status}`);
+    const data = await r.json() as { items?: Array<Record<string, unknown>> };
+    return (data.items ?? []).map(repo => this.normalize(repo));
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
-
   normalize(raw: unknown): SourceItem {
+<<<<<<< HEAD
     const repo = raw as GHRepo;
     const ownerLogin = repo.owner?.login ?? "";
     const ownerAvatar = repo.owner?.avatar_url ?? undefined;
@@ -160,9 +181,20 @@ export class GitHubPlugin implements Plugin {
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,
     };
+=======
+    const r = raw as Record<string, unknown>;
+    const fn = String(r["full_name"] ?? "");
+    return { id: fn, source: this.metadata.id, category: this.metadata.category, title: fn, body: String(r["description"] ?? ""), url: String(r["html_url"] ?? `https://github.com/${fn}`), language: "en", publishedAt: r["created_at"] ? Date.parse(String(r["created_at"])) : undefined, metadata: { stars: r["stargazers_count"], forks: r["forks_count"], language: r["language"] }, fetchedAt: Date.now() };
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
+  validate(item: SourceItem): boolean { return !!item.id && !!item.title && !!item.url; }
+  async health(): Promise<PluginStatus> { return { pluginId: this.metadata.id, healthy: true, enabled: this.metadata.enabled, lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null, consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0, rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null }; }
 }
+<<<<<<< HEAD
 
 export function createGitHubPlugin(deps: GitHubPluginDeps): GitHubPlugin {
   return new GitHubPlugin(deps);
 }
+=======
+export function createGitHubPlugin(deps: GitHubPluginDeps): GitHubPlugin { return new GitHubPlugin(deps); }
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2

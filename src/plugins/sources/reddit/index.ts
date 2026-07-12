@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /**
  * src/plugins/sources/reddit/index.ts
  * Reddit content source plugin.
@@ -10,6 +11,8 @@
  * NOTE: Reddit requires a descriptive User-Agent or returns 429.
  */
 
+=======
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
@@ -17,6 +20,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { redditManifest } from "./manifest";
+<<<<<<< HEAD
 
 const REDDIT_BASE = "https://www.reddit.com";
 const CACHE_KEY = "fredy:source:reddit:top";
@@ -67,17 +71,19 @@ interface RedditResponse {
   };
 }
 
+=======
+const SUBS = ["programming", "javascript", "python", "rust", "golang", "typescript", "webdev", "MachineLearning"];
+export interface RedditPluginDeps { readonly env: Env; readonly kv: KVStore; readonly logger: PluginLogger; }
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
 export class RedditPlugin implements Plugin {
   readonly metadata = redditManifest;
-
   constructor(private readonly deps: RedditPluginDeps) {}
-
   getSource(): string { return this.metadata.id; }
   getCategory(): Category { return this.metadata.category; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
-
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "reddit" });
+<<<<<<< HEAD
 
     // Check cache first
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
@@ -126,9 +132,17 @@ export class RedditPlugin implements Plugin {
     });
 
     return items;
+=======
+    const sub = SUBS[Math.floor(Math.random()*SUBS.length)]!;
+    const r = await fetch(`https://www.reddit.com/r/${sub}/top.json?t=day&limit=10`, { headers: { "User-Agent": "Fredy-Bot/1.0", "Accept": "application/json" } });
+    if (!r.ok) throw new Error(`Reddit ${r.status}`);
+    const data = await r.json() as { data?: { children?: Array<Record<string, unknown>> } };
+    const posts = data.data?.children ?? [];
+    return posts.map(p => this.normalize((p["data"] ?? p) as Record<string, unknown>));
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
-
   normalize(raw: unknown): SourceItem {
+<<<<<<< HEAD
     const post = raw as RedditPost;
     const postUrl = post.url && !post.url.startsWith(REDDIT_BASE)
       ? post.url  // External link
@@ -172,9 +186,12 @@ export class RedditPlugin implements Plugin {
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,
     };
+=======
+    const p = raw as Record<string, unknown>;
+    return { id: String(p["id"] ?? ""), source: this.metadata.id, category: this.metadata.category, title: String(p["title"] ?? ""), body: String(p["selftext"] ?? p["url"] ?? ""), url: String(p["url"] ?? `https://www.reddit.com${p["permalink"] ?? ""}`), language: "en", publishedAt: p["created_utc"] ? Number(p["created_utc"])*1000 : undefined, metadata: { score: p["score"], subreddit: p["subreddit"] }, fetchedAt: Date.now() };
+>>>>>>> 338f91d7e1c1bb2b5861cfa5e9e862ca21001df2
   }
+  validate(item: SourceItem): boolean { return !!item.title && !!item.url && item.url.startsWith("http"); }
+  async health(): Promise<PluginStatus> { return { pluginId: this.metadata.id, healthy: true, enabled: this.metadata.enabled, lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null, consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0, rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null }; }
 }
-
-export function createRedditPlugin(deps: RedditPluginDeps): RedditPlugin {
-  return new RedditPlugin(deps);
-}
+export function createRedditPlugin(deps: RedditPluginDeps): RedditPlugin { return new RedditPlugin(deps); }
