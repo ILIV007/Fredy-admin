@@ -13,7 +13,6 @@ import {
   aiScreen,
   manualScreen,
   scheduleScreen,
-  soulScreen,
   debugScreen,
   statsScreen,
 } from "./index";
@@ -26,7 +25,6 @@ export function registerScreens(registry: ScreenRegistry): void {
   registry.register(aiScreen);
   registry.register(manualScreen);
   registry.register(scheduleScreen);
-  registry.register(soulScreen);
   registry.register(debugScreen);
   registry.register(statsScreen);
 }

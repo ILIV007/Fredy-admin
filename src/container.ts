@@ -20,7 +20,7 @@ import { AIService } from "./services/ai-service";
 import { PromptBuilder } from "./services/prompt-builder";
 import { LanguageInjector } from "./services/language-injector";
 import { ResponseParser } from "./services/response-parser";
-import { RetryHandler } from "./services/retry-handler";
+// RetryHandler removed — use RetryManager
 import { FallbackHandler } from "./services/fallback-handler";
 import { TokenTracker } from "./services/token-tracker";
 import { QualityEngine } from "./services/quality-engine";
@@ -30,7 +30,7 @@ import { ProviderRegistry } from "./services/provider-registry";
 import { PluginLoader } from "./services/plugin-loader";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
-import { QualityFilter } from "./services/quality-filter";
+// QualityFilter removed — use QualityEngine
 import { FormatterService } from "./services/formatter";
 import { LanguageManager } from "./services/language-manager";
 import { ContentQueue } from "./services/content-queue";
@@ -54,7 +54,7 @@ import { DailyPlanner } from "./services/daily-planner";
 import { JobQueue } from "./services/job-queue";
 import { PublishValidator } from "./services/publish-validator";
 import { RetryManager } from "./services/retry-manager";
-import { PublishingService } from "./services/publishing-service";
+// PublishingService removed — use FinalPublisher
 import { HistoryService } from "./services/history-service";
 // Final publishing engine (Prompt 13)
 import { HookEngine } from "./services/hook-engine";
@@ -144,7 +144,7 @@ export function buildContainer(env: Env): Container {
   });
   const promptBuilder = new PromptBuilder({ languageInjector });
   const responseParser = new ResponseParser({});
-  const retryHandler = new RetryHandler({ logger });
+  // RetryHandler removed — AIService uses FallbackHandler directly
   const fallbackHandler = new FallbackHandler({ logger });
   const tokenTracker = new TokenTracker({ logger });
   const qualityEngine = new QualityEngine({ logger });
@@ -155,7 +155,7 @@ export function buildContainer(env: Env): Container {
     soul,
     promptBuilder,
     responseParser,
-    retryHandler,
+    // retryHandler removed
     fallbackHandler,
     tokenTracker,
     qualityEngine,
@@ -177,11 +177,7 @@ export function buildContainer(env: Env): Container {
     config: async () => (await config.getSettings(Number(env.ADMIN_ID))).categories,
     state: () => config.getState(Number(env.ADMIN_ID)),
   });
-  const quality = new QualityFilter({
-    kv,
-    checks: [],
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
+  // QualityFilter + old SchedulerService removed
 
   // Layer 7: Formatter (plugins)
   const htmlFormatter = new HtmlFormatter();
@@ -254,20 +250,14 @@ export function buildContainer(env: Env): Container {
     logger,
     timezone: async () => (await config.getSettings(Number(env.ADMIN_ID))).scheduler.timezone,
   });
-  const publishingService = new PublishingService({
-    tg,
-    validator: publishValidator,
-    retryManager,
-    history,
-    logger,
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
+  // PublishingService removed — use FinalPublisher
   // Final publishing engine (Prompt 13)
   const hookEngine = new HookEngine({ logger });
   const uxLayer = new UXLayer({
     logger,
     hookEngine,
     sourceFormatter,
+    formatter,
   });
   const finalPublisher = new FinalPublisher({
     tg,
@@ -300,7 +290,7 @@ export function buildContainer(env: Env): Container {
     providers,
     categories,
     scheduler,
-    quality,
+    qualityEngine,
     formatter,
     lang,
     queue,
@@ -326,7 +316,6 @@ export function buildContainer(env: Env): Container {
     jobQueue,
     publishValidator,
     retryManager,
-    publishingService,
     history,
     // Final publishing engine (Prompt 13)
     hookEngine,

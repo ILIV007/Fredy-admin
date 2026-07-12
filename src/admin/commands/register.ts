@@ -9,7 +9,6 @@ import {
   helpCommand,
   statsCommand,
   checkPermsCommand,
-  soulCommand,
   healthCommand,
 } from "./index";
 
@@ -18,6 +17,5 @@ export function registerCommands(registry: CommandRegistry): void {
   registry.register(helpCommand);
   registry.register(statsCommand);
   registry.register(checkPermsCommand);
-  registry.register(soulCommand);
   registry.register(healthCommand);
 }

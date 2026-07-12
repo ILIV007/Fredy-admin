@@ -1,35 +1,18 @@
-# ============================================================
-# Fredy — Cloudflare Worker Configuration
-# Version: 2.3.0
-# ============================================================
+# Fredy — Cloudflare Worker Configuration v2.4.0
 
 name = "fredy-admin"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ============================================================
-# KV Namespaces
-# ============================================================
 [[kv_namespaces]]
 binding = "Fredy_SETTINGS"
 id = "5361932dda4544358b92e9341f3e77ef"
 
-# ============================================================
-# Cron Triggers — DISABLED
-# ============================================================
-# Using external cron (cron-job.org) at 5-minute intervals via /internal/tick.
-# Cloudflare cron triggers are disabled to avoid the 5-trigger account limit.
-# If you want to re-enable, delete old triggers from other workers first:
-#   Dashboard > Workers & Pages > [other workers] > Triggers > Delete
-# Then uncomment:
+# Cron triggers DISABLED — using external cron via /internal/tick
 # [triggers]
 # crons = ["*/15 * * * *"]
 
-# ============================================================
-# Environment Variables (Non-Secret)
-# ============================================================
-# ADMIN_ID is set as a SECRET, not here.
 [vars]
 TARGET_CHANNEL = "@ILIVIR3"
 FOOTER_TEXT = "🌀 @ILIVIR3"
@@ -40,19 +23,7 @@ SCHEDULER_TIMEZONE = "Asia/Tehran"
 SCHEDULE_SLOTS = "08:00,10:00,12:00,14:00,16:00,18:00,20:00,22:00,23:00"
 SCHEDULE_JITTER_MINUTES = "25"
 
-# ============================================================
-# Secrets (set via: wrangler secret put <NAME>)
-#   BOT_TOKEN          — from @BotFather
-#   ADMIN_ID           — your Telegram user ID
-#   GEMINI_API_KEY     — from aistudio.google.com
-#   OPENROUTER_API_KEY — from openrouter.ai
-#   CRON_KEY           — random string for /internal/tick auth
-#   WEBHOOK_SECRET     — random string for webhook verification
-#   DEBUG_TOKEN        — random string for /Manager auth
-#   NEWSAPI_KEY        — optional
-#   NASA_API_KEY       — optional
-#   GITHUB_TOKEN       — optional
-# ============================================================
+# Secrets: BOT_TOKEN, ADMIN_ID, GEMINI_API_KEY, OPENROUTER_API_KEY, CRON_KEY, DEBUG_TOKEN
 
 [observability]
 enabled = true

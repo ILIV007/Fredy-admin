@@ -45,7 +45,8 @@ export interface Container {
   readonly providers: import("../services/provider-registry").ProviderRegistry;
   readonly categories: import("../services/category-manager").CategoryManager;
   readonly scheduler: import("../services/scheduler-service").SchedulerService;
-  readonly quality: import("../services/quality-filter").QualityFilter;
+  // quality-filter removed — use qualityEngine
+  readonly qualityEngine: import("../services/quality-engine").QualityEngine;
   readonly formatter: import("../services/formatter").FormatterService;
   readonly lang: import("../services/language-manager").LanguageManager;
   readonly queue: import("../services/content-queue").ContentQueue;
@@ -71,7 +72,7 @@ export interface Container {
   readonly jobQueue: import("../services/job-queue").JobQueue;
   readonly publishValidator: import("../services/publish-validator").PublishValidator;
   readonly retryManager: import("../services/retry-manager").RetryManager;
-  readonly publishingService: import("../services/publishing-service").PublishingService;
+  // publishing-service removed — use finalPublisher
   readonly history: import("../services/history-service").HistoryService;
   // Final publishing engine (Prompt 13)
   readonly hookEngine: import("../services/hook-engine").HookEngine;
