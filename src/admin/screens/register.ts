@@ -1,9 +1,6 @@
 /**
  * src/admin/screens/register.ts
- * Register all screens with a ScreenRegistry instance.
- * Called from container.ts at startup.
  */
-
 import type { ScreenRegistry } from "../registry";
 import {
   mainScreen,

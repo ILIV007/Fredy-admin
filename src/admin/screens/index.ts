@@ -1,8 +1,6 @@
 /**
  * src/admin/screens/index.ts
- * Barrel export of all screens.
  */
-
 export { mainScreen } from "./main";
 export { settingsScreen } from "./settings";
 export { categoriesScreen } from "./categories";

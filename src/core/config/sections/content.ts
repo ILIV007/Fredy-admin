@@ -1,8 +1,6 @@
 /**
  * src/core/config/sections/content.ts
- * Content publishing rules. See FREDY_GUIDELINES.md §2 (length limits) and §9 (dedup).
  */
-
 import { z } from "zod";
 
 export const contentSchema = z.object({
@@ -23,15 +21,21 @@ export const contentSchema = z.object({
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ]),
   emojiHistorySize: z.number().int().min(5).max(50).default(10),
+  queueMinA: z.number().int().min(0).max(50).default(8),
+  queueTargetA: z.number().int().min(0).max(50).default(15),
+  queueMinB: z.number().int().min(0).max(50).default(4),
+  queueTargetB: z.number().int().min(0).max(50).default(8),
+  queueMinC: z.number().int().min(0).max(50).default(8),
+  queueTargetC: z.number().int().min(0).max(50).default(15),
 });
 
 export type ContentConfig = z.infer<typeof contentSchema>;
 
 export const contentDefaults: ContentConfig = {
   _version: 1,
-  postsPerDay: 4,
-  categoryDistribution: { A: 50, B: 25, C: 25 },
-  randomOffsetMinutes: 30,
+  postsPerDay: 9,
+  categoryDistribution: { A: 45, B: 25, C: 30 },
+  randomOffsetMinutes: 25,
   burstPosting: false,
   duplicatePrevention: true,
   duplicateTtlHours: 24 * 7,
@@ -41,6 +45,9 @@ export const contentDefaults: ContentConfig = {
     "🎯", "🧩", "📝", "📊", "🔗", "🔧", "✨", "🐞", "📥", "🪐",
   ],
   emojiHistorySize: 10,
+  queueMinA: 8, queueTargetA: 15,
+  queueMinB: 4, queueTargetB: 8,
+  queueMinC: 8, queueTargetC: 15,
 };
 
 export const contentSection = {
@@ -48,6 +55,5 @@ export const contentSection = {
   version: 1,
   schema: contentSchema,
   defaults: contentDefaults,
-  description:
-    "Posts per day, category distribution, random offset, burst posting, dedup TTL, and source emoji rotation.",
+  description: "Posts per day, category distribution, queue sizes, dedup, emoji pool.",
 };

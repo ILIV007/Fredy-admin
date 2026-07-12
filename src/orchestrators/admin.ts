@@ -65,6 +65,40 @@ export class AdminOrchestrator {
       return;
     }
 
+    // Special: toggle:approve
+    if (data === "toggle:approve") {
+      const cur = await container.config.getSettings(fromId);
+      const newVal = !cur.approveMode;
+      await container.config.updateSettings(fromId, { approveMode: newVal });
+      await tg.answerCallbackQuery(query.id, newVal ? "🔐 Approve ON" : "🔓 Approve OFF").catch(() => {});
+      const updated = await container.config.getSettings(fromId);
+      const ms = this.screens.get("main");
+      if (ms) {
+        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+        const newText = await ms.text(sctx);
+        const newKb = ms.keyboard(updated);
+        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
+      }
+      return;
+    }
+
+    // Special: toggle:botEnabled
+    if (data === "toggle:botEnabled") {
+      const cur = await container.config.getSettings(fromId);
+      const newVal = !cur.general.botEnabled;
+      await container.config.updateSettings(fromId, { general: { ...cur.general, botEnabled: newVal } });
+      await tg.answerCallbackQuery(query.id, newVal ? "🟢 Bot ON" : "🔴 Bot OFF").catch(() => {});
+      const updated = await container.config.getSettings(fromId);
+      const ms = this.screens.get("main");
+      if (ms) {
+        const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
+        const newText = await ms.text(sctx);
+        const newKb = ms.keyboard(updated);
+        await tg.editMessageText(chatId, messageId, newText, { parse_mode: "HTML", reply_markup: newKb, disable_web_page_preview: true }).catch(() => {});
+      }
+      return;
+    }
+
     // Parse the callback data: "menu:<id>" or "set:<scope>:<value>" or "action:<name>:<args>".
     const screenId = this.resolveScreenId(data);
     const screen = this.screens.get(screenId);
@@ -217,19 +251,13 @@ export class AdminOrchestrator {
     const first = parts[0] ?? "";
     const second = parts[1] ?? "";
 
-    // "menu:<id>" → id
     if (first === "menu") return second || "main";
-
-    // "set:<scope>:..." → scope (the screen that owns the setting)
     if (first === "set") return second || "main";
-
-    // "action:<name>:..." → name (manual actions)
     if (first === "action") return second || "main";
-
-    // "toggle:<scope>" → scope
-    if (first === "toggle") return second || "main";
-
-    // Otherwise, treat the first part as the screen ID (e.g., "soul:view" → "soul").
+    // toggle:* is handled above, never reaches here
+    if (first === "toggle") return "main";
+    // manual:* → manual screen
+    if (first === "manual") return "manual";
     return first || "main";
   }
 }
