@@ -141,6 +141,15 @@ export class ConfigSectionRegistry {
       }
     }
 
+    // Preserve top-level non-section fields (like approveMode) that are
+    // not part of any section schema. These are direct boolean/string flags.
+    const sectionKeys = new Set(this.list().map((s) => s.key));
+    for (const [key, value] of Object.entries(input)) {
+      if (!sectionKeys.has(key) && value !== undefined && value !== null) {
+        result[key] = value;
+      }
+    }
+
     if (Object.keys(errors).length > 0) {
       return { ok: false, errors };
     }

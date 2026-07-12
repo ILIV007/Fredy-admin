@@ -144,7 +144,8 @@ export class AdminOrchestrator {
         const newKeyboard = action.newKeyboard ?? screen.keyboard(updatedSettings);
         await this.render(chatId, messageId, newText, newKeyboard);
       } else {
-        // No action returned — re-render the screen to reflect current state.
+        // No action returned — close the callback query and re-render the screen.
+        await tg.answerCallbackQuery(query.id, "🔄 Refreshed").catch(() => {});
         const updatedSettings = await container.config.getSettings(fromId);
         const newText = await screen.text({ ...ctx, settings: updatedSettings });
         const newKeyboard = screen.keyboard(updatedSettings);
