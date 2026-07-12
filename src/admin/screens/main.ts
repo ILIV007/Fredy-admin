@@ -22,7 +22,7 @@ export const mainScreen: Screen = {
       "",
       kv("Bot", settings.general.botEnabled ? "🟢 Active" : "🔴 Disabled"),
       kv("Maintenance", settings.general.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "3.5.1"),
+      kv("Version", "3.5.2"),
       kv("Channel", settings.telegram.targetChannel),
       kv("Language", settings.language.default),
       kv("AI Provider", settings.ai.primaryProvider),

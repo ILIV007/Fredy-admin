@@ -19,7 +19,7 @@ import { stackexchangeManifest } from "./manifest";
 
 const SO_API = "https://api.stackexchange.com/2.3";
 const CACHE_KEY = "fredy:source:stackexchange:top";
-const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours
+const CACHE_TTL_SECONDS = 24 * 3600; // 24 hours (long cache to avoid throttle)
 
 // Programming tags to filter by (rotates for variety)
 const TAG_SETS = [
@@ -98,10 +98,29 @@ export class StackExchangePlugin implements Plugin {
     });
 
     if (!res.ok) {
+      // StackExchange returns 400 on throttle violation (shared Cloudflare IPs).
+      // Return empty array instead of throwing so the pipeline can try other plugins.
+      const body = await res.text().catch(() => "");
+      if (res.status === 400 && body.includes("throttle")) {
+        this.deps.logger.warn("source.throttled", {
+          plugin: "stackexchange",
+          message: "StackExchange API throttled — skipping (will retry from cache next time)",
+        });
+        return [];
+      }
       throw new Error(`SO API ${res.status}: ${res.statusText}`);
     }
 
-    const data = await res.json() as { items?: SOQuestion[] };
+    const data = await res.json() as { items?: SOQuestion[]; error_id?: number; error_message?: string };
+    if (data.error_id) {
+      // Throttle or other API error — return empty gracefully.
+      this.deps.logger.warn("source.api_error", {
+        plugin: "stackexchange",
+        errorId: data.error_id,
+        errorMessage: data.error_message,
+      });
+      return [];
+    }
     const questions = data.items ?? [];
 
     // Filter: score > 5, is_answered

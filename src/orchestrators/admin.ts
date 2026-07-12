@@ -338,11 +338,31 @@ export class AdminOrchestrator {
     const first = parts[0] ?? "";
     const second = parts[1] ?? "";
 
-    if (first === "set") return second || "main";
-    if (first === "action") return second || "main";
-    if (first === "toggle") return second || "main";
+    // "set:<scope>:..." → scope maps to screen ID
+    if (first === "set") {
+      if (second === "scheduler") return "schedule";
+      if (second === "providers") return "providers";
+      if (second === "plugins") return "providers"; // plugin toggles live on providers screen
+      return second || "main";
+    }
 
-    // Map special action scopes to screen IDs.
+    // "action:<scope>:..." → scope maps to screen ID
+    if (first === "action") {
+      if (second === "scheduler") return "schedule";
+      if (second === "manual") return "manual";
+      if (second === "soul") return "soul";
+      if (second === "debug") return "debug";
+      if (second === "test") return "providers"; // test actions live on providers screen
+      if (second === "stats") return "stats";
+      if (second === "plugins") return "providers";
+      if (second === "providers") return "providers";
+      return second || "main";
+    }
+
+    // "toggle:<scope>" → main screen handles toggles inline
+    if (first === "toggle") return "main";
+
+    // Direct screen IDs: "soul:view", "scheduler:refresh", etc.
     if (first === "scheduler") return "schedule";
     if (first === "soul") return "soul";
     if (first === "manual") return "manual";

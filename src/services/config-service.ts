@@ -273,6 +273,11 @@ export class ConfigService {
     return this.deps.cache.stats();
   }
 
+  /** Clear the entire config cache (forces next read to hit KV). */
+  clearCache(): void {
+    this.deps.cache.clear();
+  }
+
   // ────────────────────────────────────────────────────────────
   // Internal helpers
   // ────────────────────────────────────────────────────────────

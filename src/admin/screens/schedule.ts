@@ -58,28 +58,38 @@ export const scheduleScreen: Screen = {
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
     const parts = data.split(":");
     if (parts.length < 3) return;
-    const [, scope, field, action] = parts;
+    const first = parts[0] ?? "";
+    const second = parts[1] ?? "";
+    const third = parts[2] ?? "";
+    const fourth = parts[3] ?? "";
     const sched = ctx.settings.scheduler;
     let patch: Partial<FredySettings> = {};
 
-    if (scope === "scheduler") {
-      if (field === "toggle") {
+    // Handle "set:scheduler:<field>:<action>"
+    if (first === "set" && second === "scheduler") {
+      if (third === "toggle" && fourth === "") {
+        // "set:scheduler:toggle" — 3 parts, fourth is empty
         patch = { scheduler: { ...sched, enabled: !sched.enabled } };
-      } else if (field === "jitter") {
-        const next = action === "inc" ? Math.min(120, sched.jitterMinutes + 5) : Math.max(0, sched.jitterMinutes - 5);
+      } else if (third === "toggle") {
+        // "set:scheduler:toggle:..." — shouldn't happen but handle
+        patch = { scheduler: { ...sched, enabled: !sched.enabled } };
+      } else if (third === "jitter") {
+        const next = fourth === "inc" ? Math.min(120, sched.jitterMinutes + 5) : Math.max(0, sched.jitterMinutes - 5);
         patch = { scheduler: { ...sched, jitterMinutes: next } };
-      } else if (field === "burst" && action === "toggle") {
+      } else if (third === "burst" && fourth === "toggle") {
         patch = { scheduler: { ...sched, burstPosting: !sched.burstPosting } };
-      } else if (field === "skipLowQ" && action === "toggle") {
+      } else if (third === "skipLowQ" && fourth === "toggle") {
         patch = { scheduler: { ...sched, skipIfLowQuality: !sched.skipIfLowQuality } };
       }
     }
 
-    if (scope === "action" && field === "scheduler") {
-      if (action === "refresh") {
+    // Handle "action:scheduler:<op>"
+    if (first === "action" && second === "scheduler") {
+      const op = third;
+      if (op === "refresh") {
         return { toast: "🔄 Status refreshed" };
       }
-      if (action === "forceTick") {
+      if (op === "forceTick") {
         const result = await ctx.container.scheduler.tick();
         return result.fired
           ? { toast: `✅ Slot fired: ${result.slot?.category}` }
