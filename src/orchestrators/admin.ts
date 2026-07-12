@@ -163,8 +163,25 @@ export class AdminOrchestrator {
           }).catch(() => {});
         });
       } else {
-        // No action returned — just close the callback query.
+        // No action returned — this is a NAVIGATION click (e.g., "menu:schedule").
+        // Re-render the target screen with its text and keyboard.
         await tg.answerCallbackQuery(query.id).catch(() => {});
+
+        const newText = await screen.text(ctx);
+        const newKeyboard = screen.keyboard(settings);
+
+        await tg.editMessageText(chatId, messageId, newText, {
+          parse_mode: "HTML",
+          reply_markup: newKeyboard,
+          disable_web_page_preview: true,
+        }).catch(async (error: unknown) => {
+          console.warn("[admin] editMessageText failed (nav), sending new message:", error);
+          await tg.sendMessage(chatId, newText, {
+            parse_mode: "HTML",
+            reply_markup: newKeyboard,
+            disable_web_page_preview: true,
+          }).catch(() => {});
+        });
       }
     } catch (error) {
       console.error("[admin] callback handler error:", error);
