@@ -10,9 +10,9 @@
 
 import type { Env } from "../types/env";
 
-const VERSION = "1.4.0";
+const VERSION = "3.3.0";
 const PHASE = "production";
-const BUILD_DATE = "2026-07-05";
+const BUILD_DATE = "2026-07-12";
 const START_TIME = Date.now();
 
 export interface HealthResponse {

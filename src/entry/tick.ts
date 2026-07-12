@@ -1,18 +1,20 @@
 /**
  * src/entry/tick.ts
- * Internal tick endpoint — POST /internal/tick
+ * Internal tick endpoint — POST/GET /internal/tick
  *
- * Auth: Authorization: Bearer <CRON_KEY> or X-Cron-Key: <CRON_KEY>
+ * Auth: Authorization: Bearer <CRON_KEY> or X-Cron-Key: <CRON_KEY> or ?key=<CRON_KEY>
  *
- * Pipeline:
- *   1. Authenticate (header-based)
+ * DESIGN: Non-blocking. Authenticates → acquires lock → returns 200 immediately.
+ * All actual work runs in ctx.waitUntil() so external cron-job.org never times out.
+ *
+ * Pipeline (runs in background):
+ *   1. Authenticate (synchronous, fast)
  *   2. Acquire KV lock (prevent concurrent execution)
- *   3. Load runtime config
- *   4. Publish due posts (from queue only)
- *   5. Maintain queue (refill if below minimum)
- *   6. Refresh sources (if interval elapsed)
- *   7. Cleanup
- *   8. Release lock
+ *   3. Return 200 OK immediately with "tick started" log
+ *   4. [background] Publish due posts
+ *   5. [background] Maintain queue (refill if below minimum)
+ *   6. [background] Refresh sources (if interval elapsed)
+ *   7. [background] Cleanup + release lock
  */
 
 import type { Env, Container } from "../types/env";
@@ -24,20 +26,22 @@ import type { FredySettings } from "../types/config";
 export interface TickHandlerDeps {
   readonly env: Env;
   readonly container: Container;
+  readonly ctx?: ExecutionContext;
 }
 
 const LOCK_KEY = "fredy:tick:lock";
 const LOCK_TIMEOUT_SECONDS = 90;
 const REFRESH_KEY = "fredy:tick:lastRefresh";
+const LAST_TICK_KEY = "fredy:tick:lastTick";
+const LAST_LOG_KEY = "fredy:tick:lastLog";
 
 export async function tickHandler(
   request: Request,
   url: URL,
   deps: TickHandlerDeps,
 ): Promise<Response> {
-  const { env, container } = deps;
+  const { env, container, ctx } = deps;
   const startTime = Date.now();
-  const log: string[] = [];
 
   // ── 1. Authentication (header-based + query fallback) ───
   if (!env.CRON_KEY) {
@@ -61,13 +65,43 @@ export async function tickHandler(
     });
   }
 
+  // ── 3. Return 200 immediately and run work in background ───
+  const startedAt = new Date().toISOString();
+  await container.kv.set(LAST_TICK_KEY, String(Date.now())).catch(() => {});
+
+  // If ctx is available, run in background. Otherwise run synchronously (legacy mode).
+  if (ctx) {
+    ctx.waitUntil(runTickWork(container, env));
+    return json({
+      ok: true,
+      time: startedAt,
+      durationMs: Date.now() - startTime,
+      log: ["tick started: running in background"],
+    });
+  }
+
+  // Fallback: synchronous execution (older Cloudflare environments without ctx)
+  const log = await runTickWork(container, env);
+  return json({
+    ok: true,
+    time: new Date().toISOString(),
+    durationMs: Date.now() - startTime,
+    log,
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+// Background work
+// ────────────────────────────────────────────────────────────
+
+async function runTickWork(container: Container, env: Env): Promise<string[]> {
+  const log: string[] = [];
+
   try {
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
-
-    // ── 3. Load runtime config ────────────────────────────
     log.push("config loaded");
 
-    // ── 4. Publish due posts (from queue only) ────────────
+    // ── Publish due posts (from queue only) ────────────
     try {
       // Process silent scheduling queue.
       await processScheduledQueue(env, container);
@@ -87,36 +121,32 @@ export async function tickHandler(
       log.push(`publish error: ${errMsg(error)}`);
     }
 
-    // ── 5. Maintain queue (refill if below minimum) ──────
+    // ── Maintain queue (refill if below minimum) ──────
     try {
       await maintainQueue(container, settings, log);
     } catch (error) {
       log.push(`queue maintenance error: ${errMsg(error)}`);
     }
 
-    // ── 6. Refresh sources (if interval elapsed) ─────────
+    // ── Refresh sources (if interval elapsed) ─────────
     try {
       await refreshSourcesIfNeeded(container, settings, log);
     } catch (error) {
       log.push(`refresh error: ${errMsg(error)}`);
     }
 
-    // ── 7. Cleanup ────────────────────────────────────────
-    // Flush batched stats.
+    // ── Cleanup ────────────────────────────────────────
     await container.kv.flushAllStats().catch(() => {});
     log.push("cleanup done");
 
   } finally {
-    // ── 8. Release lock ───────────────────────────────────
+    // ── Release lock ───────────────────────────────────
     await releaseLock(container);
+    // Persist log for debugging
+    await container.kv.setJson(LAST_LOG_KEY, { time: Date.now(), log }, 3600).catch(() => {});
   }
 
-  return json({
-    ok: true,
-    time: new Date().toISOString(),
-    durationMs: Date.now() - startTime,
-    log,
-  });
+  return log;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -190,7 +220,7 @@ async function maintainQueue(
         }
       }
     } else {
-      log.push(`queue ${cat}: ${depth}/${min} — OK`);
+      log.push(`queue ${cat}: ${depth}/${min} OK`);
     }
   }
 }
@@ -227,7 +257,7 @@ async function refreshSourcesIfNeeded(
   const scheduler = new SchedulerOrchestrator(container);
   await scheduler.refreshSources();
   await container.kv.set(REFRESH_KEY, String(now));
-  log.push(`source refresh: complete`);
+  log.push(`refresh: done`);
 }
 
 // ────────────────────────────────────────────────────────────

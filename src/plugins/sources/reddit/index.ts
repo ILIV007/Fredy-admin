@@ -1,9 +1,13 @@
 /**
  * src/plugins/sources/reddit/index.ts
- * Reddit content source plugin (programming-related subreddits).
+ * Reddit content source plugin.
  *
- * Fetches top posts from r/programming, r/learnprogramming, r/javascript, etc.
- * Category A (programming, dev tools, frameworks).
+ * Fetches top posts from programming-related subreddits.
+ * Category A (developer content, discussions).
+ *
+ * GET https://www.reddit.com/r/{subreddit}/top.json?t=day&limit=10
+ *
+ * NOTE: Reddit requires a descriptive User-Agent or returns 429.
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -14,24 +18,53 @@ import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { redditManifest } from "./manifest";
 
-const REDDIT_API = "https://www.reddit.com";
+const REDDIT_BASE = "https://www.reddit.com";
+const CACHE_KEY = "fredy:source:reddit:top";
+const CACHE_TTL_SECONDS = 60 * 60; // 1 hour
 
-/** Subreddits to fetch from. */
+// Programming-related subreddits to rotate through
 const SUBREDDITS = [
   "programming",
-  "learnprogramming",
   "javascript",
   "python",
   "rust",
   "golang",
   "typescript",
   "webdev",
+  "learnprogramming",
+  "coding",
+  "MachineLearning",
 ];
 
 export interface RedditPluginDeps {
   readonly env: Env;
   readonly kv: KVStore;
   readonly logger: PluginLogger;
+}
+
+interface RedditPost {
+  id?: string;
+  title?: string;
+  selftext?: string;
+  url?: string;
+  permalink?: string;
+  score?: number;
+  num_comments?: number;
+  author?: string;
+  created_utc?: number;
+  subreddit?: string;
+  link_flair_text?: string | null;
+  thumbnail?: string;
+  preview?: { images?: Array<{ source?: { url?: string } }> };
+  over_18?: boolean;
+  stickied?: boolean;
+}
+
+interface RedditResponse {
+  kind?: string;
+  data?: {
+    children?: Array<{ kind?: string; data?: RedditPost }>;
+  };
 }
 
 export class RedditPlugin implements Plugin {
@@ -45,40 +78,89 @@ export class RedditPlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "reddit" });
-    // TODO: implement real fetch.
-    // GET /r/<subreddit>/top.json?t=day&limit=10 for each subreddit
-    // Filter: score > 100, not stickied, is_self=false (link posts)
-    void SUBREDDITS;
-    return [];
+
+    // Check cache first
+    const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
+    if (cached && cached.length > 0) {
+      this.deps.logger.info("source.fetch_cache_hit", { plugin: "reddit", count: cached.length });
+      return cached;
+    }
+
+    // Pick a random subreddit for variety
+    const subreddit = SUBREDDITS[Math.floor(Math.random() * SUBREDDITS.length)]!;
+    const url = `${REDDIT_BASE}/r/${subreddit}/top.json?t=day&limit=15`;
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers) ContentBot",
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Reddit API ${res.status}: ${res.statusText}`);
+    }
+
+    const data = await res.json() as RedditResponse;
+    const posts = (data.data?.children ?? [])
+      .map((c) => c.data)
+      .filter((p): p is RedditPost => p !== undefined);
+
+    // Filter: not stickied, not NSFW, score > 10
+    const filtered = posts.filter((p) =>
+      !p.stickied && !p.over_18 && (p.score ?? 0) > 10 && p.title,
+    ).slice(0, 10);
+
+    const items = filtered.map((p) => this.normalize(p));
+
+    // Cache the result
+    if (items.length > 0) {
+      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "reddit",
+      subreddit,
+      totalPosts: posts.length,
+      returned: items.length,
+    });
+
+    return items;
   }
 
   normalize(raw: unknown): SourceItem {
-    const post = (raw as Record<string, unknown>)["data"] as Record<string, unknown> ?? raw as Record<string, unknown>;
+    const post = raw as RedditPost;
+    const postUrl = post.url && !post.url.startsWith(REDDIT_BASE)
+      ? post.url  // External link
+      : `${REDDIT_BASE}${post.permalink ?? ""}`;  // Self post
+    const thumbnail = post.thumbnail && post.thumbnail.startsWith("http")
+      ? post.thumbnail : undefined;
+    const previewImg = post.preview?.images?.[0]?.source?.url;
+    const imageUrl = previewImg ?? thumbnail;
+
     return {
-      id: String(post["id"] ?? ""),
+      id: `reddit-${post.id ?? ""}`,
       source: this.metadata.id,
       category: this.metadata.category,
-      title: String(post["title"] ?? ""),
-      body: String(post["selftext"] ?? post["url"] ?? ""),
-      url: String(post["url"] ?? `https://www.reddit.com${post["permalink"] ?? ""}`),
+      title: String(post.title ?? ""),
+      body: String(post.selftext ?? "").slice(0, 1000),
+      url: postUrl,
+      imageUrl: imageUrl,
       language: "en",
-      publishedAt: post["created_utc"] ? Number(post["created_utc"]) * 1000 : undefined,
-      imageUrl: post["preview"] ? this.extractPreview(post["preview"]) : undefined,
-      metadata: { score: post["score"], subreddit: post["subreddit"], author: post["author"] },
+      publishedAt: post.created_utc ? post.created_utc * 1000 : undefined,
+      metadata: {
+        score: post.score,
+        comments: post.num_comments,
+        author: post.author,
+        subreddit: post.subreddit ?? post.permalink?.split("/")[2],
+        flair: post.link_flair_text,
+      },
       fetchedAt: Date.now(),
     };
   }
 
   validate(item: SourceItem): boolean {
-    return !!item.title && !!item.url && item.url.startsWith("http");
-  }
-
-  private extractPreview(preview: unknown): string | undefined {
-    if (typeof preview !== "object" || preview === null) return undefined;
-    const images = (preview as Record<string, unknown>)["images"] as Array<Record<string, unknown>> | undefined;
-    if (!images || images.length === 0) return undefined;
-    const source = images[0]?.["source"] as Record<string, unknown> | undefined;
-    return source?.["url"] ? String(source["url"]).replace(/&amp;/g, "&") : undefined;
+    return !!item.title && !!item.url && (item.url.includes("reddit.com") || item.url.startsWith("http"));
   }
 
   async health(): Promise<PluginStatus> {

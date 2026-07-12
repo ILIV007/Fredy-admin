@@ -40,7 +40,8 @@ export async function managerHandler(
     const schedStatus = await container.scheduler.status().catch(() => null);
     const queueDepths = await container.queue.depth().catch(() => []);
     const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
-    return json({ ok: true, version: "2.2.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
+    return json({ ok: true, version: "3.3.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -187,7 +188,7 @@ export async function managerHandler(
 
   // ── System ──
   if (apiPath === "system" && request.method === "GET") {
-    return json({ ok: true, version: "2.2.0", buildDate: "2026-07-05", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
+    return json({ ok: true, version: "3.3.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
   }
 
   // ── Test single plugin ──
@@ -207,6 +208,120 @@ export async function managerHandler(
       const result = await container.ai.generate({ category: "A", source: "test", raw: { id: "test", source: "test", category: "A" as const, title: "Test", body: body.text ?? "Test about AI", url: "https://example.com", fetchedAt: Date.now() }, language: "en", soul });
       return json({ ok: result.ok, provider: result.provider, model: result.model, tokens: result.tokensUsed, score: result.quality?.overallScore, text: result.content?.text?.slice(0, 500), error: result.error });
     } catch (error) { return json({ ok: false, error: errMsg(error) }, 500); }
+  }
+
+  // ── Test Everything (comprehensive single-result test) ──
+  if (apiPath === "test/everything" && request.method === "POST") {
+    const report: Record<string, unknown> = {
+      generatedAt: new Date().toISOString(),
+      version: "3.3.0",
+      sections: {} as Record<string, unknown>,
+    };
+    const sections = report["sections"] as Record<string, unknown>;
+
+    // 1. System info
+    try {
+      const t0 = Date.now();
+      sections["system"] = {
+        ok: true,
+        durationMs: Date.now() - t0,
+        detail: {
+          version: "3.3.0",
+          buildDate: "2026-07-12",
+          kv: !!env.Fredy_SETTINGS,
+          pluginCount: container.plugins.list().length,
+          providerCount: container.providers.list().length,
+          secrets: {
+            botToken: !!env.BOT_TOKEN,
+            gemini: !!env.GEMINI_API_KEY,
+            openrouter: !!env.OPENROUTER_API_KEY,
+            newsapi: !!env.NEWSAPI_KEY,
+            nasa: !!env.NASA_API_KEY,
+            github: !!env.GITHUB_TOKEN,
+            cronKey: !!env.CRON_KEY,
+            debugToken: !!env.DEBUG_TOKEN,
+          },
+        },
+      };
+    } catch (e) { sections["system"] = { ok: false, error: errMsg(e) }; }
+
+    // 2. KV test
+    try {
+      const t0 = Date.now();
+      await container.kv.set("fredy:_backtest", "ok", 10);
+      const val = await container.kv.get("fredy:_backtest");
+      await container.kv.delete("fredy:_backtest");
+      sections["kv"] = { ok: val === "ok", durationMs: Date.now() - t0, detail: val === "ok" ? "Read/write OK" : "Value mismatch" };
+    } catch (e) { sections["kv"] = { ok: false, error: errMsg(e) }; }
+
+    // 3. Config test
+    try {
+      const t0 = Date.now();
+      const s = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      sections["config"] = { ok: !!s, durationMs: Date.now() - t0, detail: s ? "Settings loaded" : "No settings" };
+    } catch (e) { sections["config"] = { ok: false, error: errMsg(e) }; }
+
+    // 4. Telegram test
+    try {
+      const t0 = Date.now();
+      const me = await container.tg.getMe();
+      sections["telegram"] = { ok: me.ok, durationMs: Date.now() - t0, detail: me.ok ? `@${me.result?.username}` : "Failed" };
+    } catch (e) { sections["telegram"] = { ok: false, error: errMsg(e) }; }
+
+    // 5. AI test
+    try {
+      const t0 = Date.now();
+      const soul = await container.soul.load();
+      const r = await container.ai.generate({ category: "A", source: "test", raw: { id: "test", source: "test", category: "A" as const, title: "Test", body: "Hello world", url: "https://example.com", fetchedAt: Date.now() }, language: "en", soul });
+      sections["ai"] = { ok: r.ok, durationMs: Date.now() - t0, detail: r.ok ? `${r.provider}/${r.model} (${r.tokensUsed} tokens)` : r.error ?? "Failed" };
+    } catch (e) { sections["ai"] = { ok: false, error: errMsg(e) }; }
+
+    // 6. All plugins test
+    const pluginResults: Array<{ id: string; ok: boolean; itemCount: number; error?: string; durationMs: number }> = [];
+    const plugins = container.plugins.list();
+    for (const p of plugins) {
+      const t0 = Date.now();
+      try {
+        const items = await container.plugins.fetchFrom(p.metadata.id);
+        pluginResults.push({ id: p.metadata.id, ok: true, itemCount: items.length, durationMs: Date.now() - t0 });
+      } catch (error) {
+        pluginResults.push({ id: p.metadata.id, ok: false, itemCount: 0, error: errMsg(error), durationMs: Date.now() - t0 });
+      }
+    }
+    sections["plugins"] = {
+      ok: pluginResults.every((r) => r.ok),
+      detail: `${pluginResults.filter((r) => r.ok).length}/${pluginResults.length} plugins OK`,
+      results: pluginResults,
+    };
+
+    // 7. Queue test
+    try {
+      const t0 = Date.now();
+      const depths = await container.queue.depth();
+      const total = depths.reduce((s, d) => s + d.depth, 0);
+      sections["queue"] = { ok: true, durationMs: Date.now() - t0, detail: `Total: ${total} items`, depths };
+    } catch (e) { sections["queue"] = { ok: false, error: errMsg(e) }; }
+
+    // 8. Scheduler test
+    try {
+      const t0 = Date.now();
+      const status = await container.scheduler.status();
+      sections["scheduler"] = { ok: true, durationMs: Date.now() - t0, detail: `Enabled: ${status.enabled}, Next: ${status.nextSlot?.time ?? "—"}` };
+    } catch (e) { sections["scheduler"] = { ok: false, error: errMsg(e) }; }
+
+    // 9. History test
+    try {
+      const t0 = Date.now();
+      const today = await container.history.getToday();
+      sections["history"] = { ok: true, durationMs: Date.now() - t0, detail: `${today.entries.length} entries today` };
+    } catch (e) { sections["history"] = { ok: false, error: errMsg(e) }; }
+
+    // Compute overall summary
+    const allOk = Object.values(sections).every((s) => (s as { ok?: boolean }).ok === true);
+    report["overallOk"] = allOk;
+    report["summary"] = `${Object.values(sections).filter((s) => (s as { ok?: boolean }).ok === true).length}/${Object.keys(sections).length} sections passed`;
+
+    return json(report);
   }
 
   // ── Clear actions ──
@@ -280,10 +395,46 @@ function loadPage(id){const c=document.getElementById("content");c.innerHTML='<d
 async function loadDashboard(){
   const d=await api("health");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-  c.innerHTML='<div class="card-grid">'+card("Version",d.version)+card("Bot",d.bot?.enabled?badge(1):badge(0))+card("Scheduler",d.scheduler?.enabled?badge(1):badge(0))+card("Approve",d.approveMode?badge(1):badge(0))+card("AI",d.aiProvider??"—")+card("Language",d.language??"—")+card("Plugins",d.plugins?.enabled+"/"+d.plugins?.total)+card("Posts Today",d.scheduler?.postsToday??0)+card("Next Slot",d.scheduler?.nextSlot?.time??"—")+card("Last Refresh",fmtAgo(d.lastRefresh))+card("Last Tick",d.lastTick?fmtAgo(d.lastTick):"—")+'</div>'+
+  c.innerHTML='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">🚀 Quick Test Everything</h3><span class="badge badge-blue">v'+d.version+'</span></div><p style="color:var(--text2);margin-bottom:12px">Runs all 9 system checks + 12 plugin tests + AI test in one click. Full copyable JSON report.</p><div style="display:flex;gap:8px"><button class="btn" onclick="testEverything()">▶️ Test Everything</button><button class="btn btn-ghost" onclick="testAllPlugins()">🔌 Test Plugins Only</button></div><div id="everything-result" style="margin-top:12px"></div></div>'+
+  '<div class="card-grid">'+card("Version",d.version)+card("Bot",d.bot?.enabled?badge(1):badge(0))+card("Scheduler",d.scheduler?.enabled?badge(1):badge(0))+card("Approve",d.approveMode?badge(1):badge(0))+card("AI",d.aiProvider??"—")+card("Language",d.language??"—")+card("Plugins",d.plugins?.enabled+"/"+d.plugins?.total)+card("Posts Today",d.scheduler?.postsToday??0)+card("Next Slot",d.scheduler?.nextSlot?.time??"—")+card("Last Refresh",fmtAgo(d.lastRefresh))+card("Last Tick",d.lastTick?fmtAgo(d.lastTick):"—")+'</div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Global Stats</h3><div class="card-grid">'+card("Processed",d.stats?.processed??0)+card("Published",d.stats?.published??0)+card("Rejected",d.stats?.rejected??0)+card("Failed",d.stats?.failed??0)+'</div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Secrets</h3>'+Object.entries(d.hasSecrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
 }
+
+async function testEverything(){
+  const w=document.getElementById("everything-result");
+  w.innerHTML='<div class="card">⏳ Running comprehensive tests... (this can take 30-60s)</div>';
+  try{
+    const d=await api("test/everything","POST");
+    const jsonStr=JSON.stringify(d,null,2);
+    const summary=d.summary||"unknown";
+    const ok=d.overallOk;
+    // Build section-by-section summary
+    const secRows=Object.entries(d.sections||{}).map(([k,v])=>{
+      const ok2=v&&v.ok;
+      const detail=v?(v.detail||v.error||""):"";
+      const ms=v&&v.durationMs!==undefined?v.durationMs+"ms":"";
+      return '<tr><td><code>'+k+'</code></td><td>'+(ok2?'<span class="badge badge-green">OK</span>':'<span class="badge badge-red">FAIL</span>')+'</td><td style="color:var(--text2)">'+(typeof detail==="string"?detail:JSON.stringify(detail))+'</td><td style="color:var(--text2);font-size:11px">'+ms+'</td></tr>';
+    }).join("");
+    // Build plugin sub-table if present
+    let pluginDetail="";
+    if(d.sections&&d.sections.plugins&&d.sections.plugins.results){
+      pluginDetail='<div style="margin-top:12px"><h4 style="margin-bottom:6px">🔌 Plugin Details</h4><table style="font-size:12px"><thead><tr><th>Plugin</th><th>Status</th><th>Items</th><th>Time</th><th>Error</th></tr></thead><tbody>'+
+      d.sections.plugins.results.map(r=>'<tr><td><code>'+r.id+'</code></td><td>'+(r.ok?'<span class="badge badge-green">OK</span>':'<span class="badge badge-red">FAIL</span>')+'</td><td>'+r.itemCount+'</td><td>'+r.durationMs+'ms</td><td style="color:var(--red);font-size:11px">'+(r.error||"")+'</td></tr>').join("")+
+      '</tbody></table></div>';
+    }
+    w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ All Tests Passed':'❌ Some Tests Failed')+'</h3><span class="badge '+(ok?"badge-green":"badge-red")+'">'+summary+'</span></div>'+
+    '<table style="font-size:13px"><thead><tr><th>Section</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead><tbody>'+secRows+'</tbody></table>'+
+    pluginDetail+
+    '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report (copyable)</h4><pre id="everything-pre" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\\'everything-pre\\')">📋 Copy Full Report</button></div></div>';
+    toast(ok?"✅ All tests passed!":"❌ Some tests failed");
+  }catch(e){
+    w.innerHTML='<div class="card">❌ Test failed: '+escapeHtml(String(e))+'</div>';
+    toast("❌ Test failed");
+  }
+}
+
+function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
 async function loadBacktest(){
   const c=document.getElementById("content");
@@ -383,7 +534,7 @@ async function loadStats(){
 }
 
 function loadAbout(){
-  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","2.2.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
+  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","3.3.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
 }
 
 async function clearLogs(){const d=await api("clear/logs","POST");toast(d.ok?"✅ Logs cleared":"❌ Failed");}

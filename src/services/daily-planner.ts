@@ -106,7 +106,9 @@ export class DailyPlanner {
   async getNextSlot(now = Date.now()): Promise<{ slot: SlotTime; plan: DailyPlan } | null> {
     const plan = await this.getOrGenerate();
     for (const s of plan.slots) {
-      if (s.epochMs > now && !(await this.isSlotFired(s))) {
+      if (s.epochMs <= now) continue;
+      const fired = await this.isSlotFired(s);
+      if (!fired) {
         return { slot: s, plan };
       }
     }

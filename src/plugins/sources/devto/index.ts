@@ -2,8 +2,13 @@
  * src/plugins/sources/devto/index.ts
  * Dev.to content source plugin.
  *
- * Fetches top articles from the Dev.to (Forem) API.
- * Category A (programming, dev tools, frameworks, best practices).
+ * Fetches top articles from Dev.to developer community.
+ * Category A (developer content, tutorials).
+ *
+ * Dev.to API: https://developers.forem.com/api
+ * GET https://dev.to/api/articles?per_page=10&top=7
+ *
+ * NOTE: Dev.to API requires a proper User-Agent. Empty UA gets 403.
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -15,11 +20,26 @@ import type { PluginLogger } from "../../../services/plugin-logger";
 import { devtoManifest } from "./manifest";
 
 const DEVTO_API = "https://dev.to/api/articles";
+const CACHE_KEY = "fredy:source:devto:top";
+const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours
 
 export interface DevToPluginDeps {
   readonly env: Env;
   readonly kv: KVStore;
   readonly logger: PluginLogger;
+}
+
+interface DevToArticle {
+  id?: number;
+  title?: string;
+  description?: string;
+  url?: string;
+  cover_image?: string | null;
+  social_image?: string | null;
+  published_at?: string;
+  reading_time_minutes?: number;
+  tags?: string[];
+  user?: { name?: string; username?: string };
 }
 
 export class DevToPlugin implements Plugin {
@@ -33,25 +53,73 @@ export class DevToPlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "devto" });
-    // TODO: implement real fetch.
-    // GET https://dev.to/api/articles?top=7&per_page=10
-    // Filter: positive_reactions_count > 50, has cover_image
-    return [];
+
+    // Check cache first
+    const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
+    if (cached && cached.length > 0) {
+      this.deps.logger.info("source.fetch_cache_hit", { plugin: "devto", count: cached.length });
+      return cached;
+    }
+
+    // Build URL — top articles from the last 7 days
+    const params = new URLSearchParams({
+      per_page: "15",
+      top: "7",
+    });
+
+    const url = `${DEVTO_API}?${params.toString()}`;
+
+    // Dev.to REQUIRES a real User-Agent or returns 403
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)",
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Dev.to API ${res.status}: ${res.statusText}`);
+    }
+
+    const articles = await res.json() as DevToArticle[];
+
+    // Filter: must have title and url
+    const filtered = articles.filter((a) => a.title && a.url);
+
+    const items = filtered.map((a) => this.normalize(a));
+
+    // Cache the result
+    if (items.length > 0) {
+      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "devto",
+      totalArticles: articles.length,
+      returned: items.length,
+    });
+
+    return items;
   }
 
   normalize(raw: unknown): SourceItem {
-    const article = raw as Record<string, unknown>;
+    const article = raw as DevToArticle;
+    const imageUrl = article.cover_image ?? article.social_image ?? undefined;
     return {
-      id: String(article["id"] ?? ""),
+      id: `devto-${article.id ?? ""}`,
       source: this.metadata.id,
       category: this.metadata.category,
-      title: String(article["title"] ?? ""),
-      body: String(article["description"] ?? ""),
-      url: String(article["url"] ?? ""),
+      title: String(article.title ?? ""),
+      body: String(article.description ?? ""),
+      url: String(article.url ?? ""),
+      imageUrl: imageUrl ?? undefined,
       language: "en",
-      publishedAt: article["published_at"] ? Date.parse(String(article["published_at"])) : undefined,
-      imageUrl: article["cover_image"] ? String(article["cover_image"]) : undefined,
-      metadata: { tags: article["tag_list"], reactions: article["positive_reactions_count"] },
+      publishedAt: article.published_at ? Date.parse(article.published_at) || undefined : undefined,
+      metadata: {
+        author: article.user?.name ?? article.user?.username,
+        readingTime: article.reading_time_minutes,
+        tags: article.tags,
+      },
       fetchedAt: Date.now(),
     };
   }

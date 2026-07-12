@@ -4,6 +4,9 @@
  *
  * Fetches top questions from Stack Overflow.
  * Category A (programming, dev tips, best practices).
+ *
+ * StackExchange API requires a User-Agent header or may return 403.
+ * See: https://api.stackexchange.com/docs
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -15,11 +18,40 @@ import type { PluginLogger } from "../../../services/plugin-logger";
 import { stackexchangeManifest } from "./manifest";
 
 const SO_API = "https://api.stackexchange.com/2.3";
+const CACHE_KEY = "fredy:source:stackexchange:top";
+const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours
+
+// Programming tags to filter by (rotates for variety)
+const TAG_SETS = [
+  ["javascript", "typescript"],
+  ["python"],
+  ["rust"],
+  ["go"],
+  ["java"],
+  ["c++"],
+  ["react"],
+  ["node.js"],
+  ["docker"],
+  ["git"],
+];
 
 export interface StackExchangePluginDeps {
   readonly env: Env;
   readonly kv: KVStore;
   readonly logger: PluginLogger;
+}
+
+interface SOQuestion {
+  question_id?: number;
+  title?: string;
+  body?: string;
+  excerpt?: string;
+  link?: string;
+  score?: number;
+  tags?: string[];
+  is_answered?: boolean;
+  creation_date?: number;
+  owner?: { display_name?: string };
 }
 
 export class StackExchangePlugin implements Plugin {
@@ -33,24 +65,87 @@ export class StackExchangePlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "stackexchange" });
-    // TODO: implement real fetch.
-    // GET /questions?order=desc&sort=hot&site=stackoverflow&filter=withbody
-    // Filter: score > 10, is_answered
-    return [];
+
+    // Check cache first
+    const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
+    if (cached && cached.length > 0) {
+      this.deps.logger.info("source.fetch_cache_hit", { plugin: "stackexchange", count: cached.length });
+      return cached;
+    }
+
+    // Pick a random tag set for variety
+    const tags = TAG_SETS[Math.floor(Math.random() * TAG_SETS.length)]!;
+    const tagged = tags.join(";");
+
+    // Build URL with filter to get question body
+    // filter=withbody returns the question body as HTML
+    const params = new URLSearchParams({
+      order: "desc",
+      sort: "votes",
+      tagged,
+      site: "stackoverflow",
+      pagesize: "20",
+      filter: "!nNPvSNdWme",
+      key: "fredy)1Lx0pGRM5DO4nH5TQ((",
+    });
+
+    const url = `${SO_API}/questions?${params.toString()}`;
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`SO API ${res.status}: ${res.statusText}`);
+    }
+
+    const data = await res.json() as { items?: SOQuestion[] };
+    const questions = data.items ?? [];
+
+    // Filter: score > 5, is_answered
+    const filtered = questions
+      .filter((q) => (q.score ?? 0) > 5 && q.is_answered)
+      .slice(0, 10);
+
+    const items = filtered.map((q) => this.normalize(q));
+
+    // Cache the result
+    if (items.length > 0) {
+      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "stackexchange",
+      tags,
+      totalQuestions: questions.length,
+      filtered: filtered.length,
+      returned: items.length,
+    });
+
+    return items;
   }
 
   normalize(raw: unknown): SourceItem {
-    const q = raw as Record<string, unknown>;
+    const q = raw as SOQuestion;
     return {
-      id: String(q["question_id"] ?? ""),
+      id: String(q.question_id ?? ""),
       source: this.metadata.id,
       category: this.metadata.category,
-      title: String(q["title"] ?? ""),
-      body: String(q["body"] ?? q["excerpt"] ?? ""),
-      url: String(q["link"] ?? ""),
+      title: String(q.title ?? ""),
+      body: String(q.body ?? q.excerpt ?? ""),
+      url: String(q.link ?? ""),
       language: "en",
-      publishedAt: q["creation_date"] ? Number(q["creation_date"]) * 1000 : undefined,
-      metadata: { score: q["score"], tags: q["tags"], isAnswered: q["is_answered"] },
+      publishedAt: q.creation_date ? q.creation_date * 1000 : undefined,
+      metadata: {
+        score: q.score,
+        tags: q.tags,
+        isAnswered: q.is_answered,
+        author: q.owner?.display_name,
+      },
       fetchedAt: Date.now(),
     };
   }

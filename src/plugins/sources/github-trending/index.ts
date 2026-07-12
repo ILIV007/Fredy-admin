@@ -1,9 +1,10 @@
 /**
  * src/plugins/sources/github-trending/index.ts
- * GitHub Trending content source plugin (open source spotlight).
+ * GitHub Trending content source plugin.
  *
- * Fetches trending repos created in the last 7 days, sorted by stars.
- * Category C (open source spotlight / tool of the day).
+ * Fetches trending GitHub repositories using the GitHub search API
+ * as a substitute for the unofficial /trending endpoint.
+ * Category C (open source spotlight).
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -14,12 +15,27 @@ import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { githubTrendingManifest } from "./manifest";
 
-const GH_API = "https://api.github.com/search/repositories";
+const GH_API = "https://api.github.com";
+const CACHE_KEY = "fredy:source:github-trending:daily";
+const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours
 
 export interface GitHubTrendingPluginDeps {
   readonly env: Env;
   readonly kv: KVStore;
   readonly logger: PluginLogger;
+}
+
+interface GHRepo {
+  id?: number;
+  name?: string;
+  full_name?: string;
+  html_url?: string;
+  description?: string | null;
+  stargazers_count?: number;
+  language?: string | null;
+  topics?: string[];
+  created_at?: string;
+  owner?: { login?: string; avatar_url?: string };
 }
 
 export class GitHubTrendingPlugin implements Plugin {
@@ -33,24 +49,79 @@ export class GitHubTrendingPlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "github-trending" });
-    // TODO: implement real fetch.
-    // GET /search/repositories?q=created:>YYYY-MM-DD&sort=stars&order=desc&per_page=10
-    // Filter: stars > 100, has description
-    return [];
+
+    // Check cache first
+    const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
+    if (cached && cached.length > 0) {
+      this.deps.logger.info("source.fetch_cache_hit", { plugin: "github-trending", count: cached.length });
+      return cached;
+    }
+
+    // Trending = repos created in last 7 days, sorted by stars
+    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().split("T")[0]!;
+
+    const params = new URLSearchParams({
+      q: `stars:>100 created:>${weekAgo}`,
+      sort: "stars",
+      order: "desc",
+      per_page: "10",
+    });
+
+    const url = `${GH_API}/search/repositories?${params.toString()}`;
+
+    const headers: Record<string, string> = {
+      "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy)",
+      "Accept": "application/vnd.github+json",
+    };
+
+    if (this.deps.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
+    }
+
+    const res = await fetch(url, { headers });
+
+    if (!res.ok) {
+      throw new Error(`GitHub Trending API ${res.status}: ${res.statusText}`);
+    }
+
+    const data = await res.json() as { items?: GHRepo[]; total_count?: number };
+    const repos = data.items ?? [];
+
+    const items = repos.map((r) => this.normalize(r));
+
+    // Cache the result
+    if (items.length > 0) {
+      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "github-trending",
+      totalRepos: repos.length,
+      returned: items.length,
+    });
+
+    return items;
   }
 
   normalize(raw: unknown): SourceItem {
-    const repo = raw as Record<string, unknown>;
+    const repo = raw as GHRepo;
+    const ownerAvatar = repo.owner?.avatar_url ?? undefined;
     return {
-      id: String(repo["full_name"] ?? repo["id"] ?? ""),
+      id: `trend-${repo.id ?? repo.full_name ?? ""}`,
       source: this.metadata.id,
       category: this.metadata.category,
-      title: String(repo["full_name"] ?? repo["name"] ?? ""),
-      body: String(repo["description"] ?? ""),
-      url: String(repo["html_url"] ?? ""),
+      title: String(repo.full_name ?? repo.name ?? ""),
+      body: String(repo.description ?? ""),
+      url: String(repo.html_url ?? ""),
+      imageUrl: ownerAvatar,
       language: "en",
-      publishedAt: repo["created_at"] ? Date.parse(String(repo["created_at"])) : undefined,
-      metadata: { stars: repo["stargazers_count"], language: repo["language"], topics: repo["topics"] },
+      publishedAt: repo.created_at ? Date.parse(repo.created_at) || undefined : undefined,
+      metadata: {
+        stars: repo.stargazers_count,
+        language: repo.language,
+        topics: repo.topics,
+        owner: repo.owner?.login,
+      },
       fetchedAt: Date.now(),
     };
   }
