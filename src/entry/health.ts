@@ -12,7 +12,7 @@ import type { Env } from "../types/env";
 
 const VERSION = "3.3.0";
 const PHASE = "production";
-const BUILD_DATE = "2026-07-12";
+const BUILD_DATE = "2026-07-05";
 const START_TIME = Date.now();
 
 export interface HealthResponse {
@@ -68,7 +68,7 @@ export function healthHandler(env: Env): Response {
     phase: PHASE,
     time: new Date().toISOString(),
     hasBotToken: !!env.BOT_TOKEN,
-    hasKv: !!env.Fredy_SETTINGS,
+    hasKv: !!env.SETTINGS,
     hasAdminId: !!env.ADMIN_ID,
     uptime: `${Math.floor((Date.now() - START_TIME) / 1000)}s`,
   };
@@ -95,7 +95,7 @@ export function versionHandler(): Response {
 /** GET /health — detailed system status (public, but no secrets). */
 export function detailedHealthHandler(env: Env): Response {
   const checks = {
-    kv: !!env.Fredy_SETTINGS,
+    kv: !!env.SETTINGS,
     botToken: !!env.BOT_TOKEN,
     adminId: !!env.ADMIN_ID,
     geminiKey: !!env.GEMINI_API_KEY,

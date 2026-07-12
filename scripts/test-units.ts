@@ -2,7 +2,7 @@
  * scripts/test-units.ts
  * Unit test entry point. Run with: npm test
  *
- * Uses Node's built-in test runner. Tests live in src/ star star slash star.test.ts files
+ * Uses Node's built-in test runner. Tests live in src/**/*.test.ts files
  * and are auto-discovered.
  *
  * Phase: Scaffold. Real tests added in Phase 7 (Hardening).

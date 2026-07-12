@@ -4,8 +4,8 @@
  */
 
 export interface Env {
-  // KV bindings — name must match wrangler.toml binding = "Fredy_SETTINGS"
-  Fredy_SETTINGS: KVNamespace;
+  // KV bindings
+  SETTINGS: KVNamespace;
   // FREDY_DB: D1Database; // uncomment when D1 is introduced
 
   // Non-secret vars
@@ -23,7 +23,6 @@ export interface Env {
   BOT_TOKEN: string;
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
-  CRON_KEY: string;
   GITHUB_TOKEN?: string;
   NEWSAPI_KEY?: string;
   NASA_API_KEY?: string;

@@ -48,8 +48,6 @@ export interface FredySettings {
   readonly nasa: NasaConfig;
   readonly plugins: PluginsConfig;
   readonly future: FutureConfig;
-  /** Approve mode — when true, posts require manual approval before publishing. */
-  readonly approveMode?: boolean;
 }
 
 /**
@@ -91,7 +89,6 @@ export type SettingsPatch = Partial<{
   nasa: Partial<NasaConfig>;
   plugins: Partial<PluginsConfig>;
   future: Partial<FutureConfig>;
-  approveMode: boolean;
 }>;
 
 /** Result of a config update operation. */

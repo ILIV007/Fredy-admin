@@ -90,9 +90,9 @@ Professional without sounding corporate.
  */
 export function buildContainer(env: Env): Container {
   // Layer 0: KV + Logger (no deps)
-  const kv = new KVStore({ kv: env.Fredy_SETTINGS });
+  const kv = new KVStore({ kv: env.SETTINGS });
   const logger = new Logger({
-    kv: env.Fredy_SETTINGS,
+    kv: env.SETTINGS,
     isDebugMode: () => env.DEBUG_MODE === "true",
   });
 
@@ -180,6 +180,10 @@ export function buildContainer(env: Env): Container {
   const quality = new QualityFilter({
     kv,
     checks: [],
+    settings: () => config.getSettings(Number(env.ADMIN_ID)),
+  });
+  const scheduler = new SchedulerService({
+    kv,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
 

@@ -143,10 +143,7 @@ export class SchedulerService {
     });
 
     // 1. Try to dequeue ready content for this category.
-    // contentQueue.dequeue() returns QueuedContent (which wraps ReadyContent in .content).
-    // We need to unwrap it to get the ReadyContent for publishing.
-    const queued = await this.deps.contentQueue.dequeue(slot.category);
-    let content: ReadyContent | null = queued ? queued.content : null;
+    let content: ReadyContent | null = await this.deps.contentQueue.dequeue(slot.category);
 
     // 2. If queue is empty, process a fresh item from a plugin.
     if (!content) {

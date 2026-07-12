@@ -105,14 +105,11 @@ export class DailyPlanner {
   /** Get the next unfired slot from today's plan. */
   async getNextSlot(now = Date.now()): Promise<{ slot: SlotTime; plan: DailyPlan } | null> {
     const plan = await this.getOrGenerate();
-    for (const s of plan.slots) {
-      if (s.epochMs <= now) continue;
-      const fired = await this.isSlotFired(s);
-      if (!fired) {
-        return { slot: s, plan };
-      }
-    }
-    return null;
+    const nextSlot = plan.slots.find(
+      (s) => s.epochMs > now && !(await this.isSlotFired(s)),
+    );
+    if (!nextSlot) return null;
+    return { slot: nextSlot, plan };
   }
 
   /** Check if a slot has been fired. */
