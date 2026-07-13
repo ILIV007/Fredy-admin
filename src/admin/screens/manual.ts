@@ -70,10 +70,12 @@ export const manualScreen: Screen = {
         return { alert: "❌ Invalid category" };
       }
       try {
+        const settings = await ctx.container.config.getSettings(ctx.adminId);
+        const lang = settings?.language?.default ?? "auto";
         const result = await ctx.container.content.processForCategory(
           arg as Category,
           null,
-          "en",
+          lang,
         );
         if (result.ok && result.content) {
           // Publish immediately.
@@ -98,7 +100,9 @@ export const manualScreen: Screen = {
         if (items.length === 0) {
           return { alert: `❌ No items from ${arg}` };
         }
-        const result = await ctx.container.content.process(items[0]!, "en", { skipDedup: true });
+        const settings = await ctx.container.config.getSettings(ctx.adminId);
+        const lang = settings?.language?.default ?? "auto";
+        const result = await ctx.container.content.process(items[0]!, lang, { skipDedup: true });
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {

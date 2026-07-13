@@ -484,10 +484,24 @@ export class TelegramService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
 
-    // Strip undefined values — Telegram rejects them.
+    // Strip undefined/null values — Telegram rejects them.
+    // Also convert string "true"/"false" to actual booleans for known boolean fields.
     const cleanPayload: Record<string, unknown> = {};
+    const booleanFields = new Set(["disable_web_page_preview", "disable_notification", "allow_sending_without_reply", "protect_content"]);
     for (const [key, value] of Object.entries(payload)) {
-      if (value !== undefined) cleanPayload[key] = value;
+      if (value === undefined || value === null) continue;
+      if (booleanFields.has(key)) {
+        // Ensure boolean type — Telegram rejects strings for these fields.
+        if (value === "true" || value === true) {
+          cleanPayload[key] = true;
+        } else if (value === "false" || value === false) {
+          cleanPayload[key] = false;
+        } else {
+          cleanPayload[key] = Boolean(value);
+        }
+      } else {
+        cleanPayload[key] = value;
+      }
     }
 
     try {

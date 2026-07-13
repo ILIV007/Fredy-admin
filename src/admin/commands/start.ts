@@ -8,7 +8,7 @@ import { mainScreen } from "../screens/main";
 
 export const startCommand: Command = {
   name: "/start",
-  description: "Open the admin panel (dashboard)",
+  description: "Welcome message and open admin panel",
 
   async handle(ctx: CommandContext): Promise<void> {
     const { container, adminId, chatId } = ctx;
@@ -22,11 +22,26 @@ export const startCommand: Command = {
       settings,
       query: {} as never,
     };
+    // Send welcome message first
+    await container.tg.sendMessage(chatId, [
+      "👋 <b>Welcome to Fredy!</b>",
+      "",
+      "Fredy is an AI-powered content engine for the ILIVIR3 Telegram channel.",
+      "",
+      "<b>Quick commands:</b>",
+      "• <code>/menu</code> — Open admin dashboard",
+      "• <code>/help</code> — Show all commands",
+      "• <code>/stats</code> — View statistics",
+      "• <code>/health</code> — System health check",
+      "",
+      "<i>Opening dashboard...</i>",
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+    // Then send the dashboard
     console.log("[start] building text...");
     const text = await mainScreen.text(screenCtx);
     console.log("[start] building keyboard...");
     const keyboard = mainScreen.keyboard(settings);
-    console.log("[start] sending message...");
+    console.log("[start] sending dashboard...");
     await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,
