@@ -17,17 +17,18 @@ export const mainScreen: Screen = {
     const { container, adminId } = ctx;
     const settings = await container.config.getSettings(adminId);
 
+    // Use optional chaining everywhere — if any section is missing, show (none) instead of crashing.
     const lines = [
       header("Fredy Dashboard", "📊"),
       "",
-      kv("Bot", settings.general.botEnabled ? "🟢 Active" : "🔴 Disabled"),
-      kv("Maintenance", settings.general.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "3.8.1"),
-      kv("Channel", settings.telegram.targetChannel),
-      kv("Language", settings.language.default),
-      kv("AI Provider", settings.ai.primaryProvider),
-      kv("Scheduler", statusBadge(settings.scheduler.enabled)),
-      kv("Approve Mode", statusBadge(settings.approveMode)),
+      kv("Bot", settings?.general?.botEnabled ? "🟢 Active" : "🔴 Disabled"),
+      kv("Maintenance", settings?.general?.maintenanceMode ? "🟡 ON" : "OFF"),
+      kv("Version", "3.9.0"),
+      kv("Channel", settings?.telegram?.targetChannel ?? "(none)"),
+      kv("Language", settings?.language?.default ?? "(none)"),
+      kv("AI Provider", settings?.ai?.primaryProvider ?? "(none)"),
+      kv("Scheduler", statusBadge(settings?.scheduler?.enabled ?? false)),
+      kv("Approve Mode", statusBadge(settings?.approveMode ?? false)),
       "",
       divider(),
       "<i>Tap a button below to navigate.</i>",
@@ -36,10 +37,13 @@ export const mainScreen: Screen = {
   },
 
   keyboard(settings: FredySettings): InlineKeyboard {
+    // Use safe defaults if settings sections are missing.
+    const botEnabled = settings?.general?.botEnabled ?? true;
+    const approveMode = settings?.approveMode ?? false;
     return buildKeyboard([
       // Bot ON/OFF — first row, ALONE
       [
-        { text: settings.general.botEnabled ? "🟢 Bot: ON" : "🔴 Bot: OFF", callback_data: "toggle:botEnabled" },
+        { text: botEnabled ? "🟢 Bot: ON" : "🔴 Bot: OFF", callback_data: "toggle:botEnabled" },
       ],
       navRow(
         { text: "📅 Scheduler", target: "menu:schedule" },
@@ -58,7 +62,7 @@ export const mainScreen: Screen = {
         { text: "🔄 Refresh", callback_data: "action:main:refresh" },
       ),
       [
-        { text: settings.approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
+        { text: approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
         { text: "📊 Stats", callback_data: "menu:stats" },
       ],
       [

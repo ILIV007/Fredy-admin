@@ -108,17 +108,29 @@ export async function webhookHandler(
   ctx.waitUntil(
     (async () => {
       try {
+        console.log("[webhook] dispatching update...");
         const admin = new AdminOrchestrator(container);
         await admin.dispatch(update);
         // Flush batched stats after every request.
         await container.kv.flushAllStats();
+        console.log("[webhook] dispatch completed");
       } catch (error) {
         console.error("[webhook] dispatch error:", error);
+        // Try to send error to the user's chat.
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const chatId = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
+        if (chatId) {
+          await container.tg.sendMessage(chatId, [
+            "❌ <b>Webhook Error</b>",
+            "",
+            `<code>${errMsg.slice(0, 500)}</code>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
         await container.logger.error("pipeline.error", {
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg,
           stack: error instanceof Error ? error.stack?.split("\n").slice(0, 4) : undefined,
           updateType: updateInfo.updateType,
-        });
+        }).catch(() => {});
       }
     })(),
   );

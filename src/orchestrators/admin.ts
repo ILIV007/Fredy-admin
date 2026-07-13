@@ -33,14 +33,18 @@ export class AdminOrchestrator {
 
   /** Dispatch a Telegram update. Routes to callback/message/channel handlers. */
   async dispatch(update: TelegramUpdate): Promise<void> {
+    console.log("[admin] dispatch — update keys:", Object.keys(update).join(", "));
     if (update.callback_query) {
+      console.log("[admin] dispatching callback_query");
       await this.handleCallback(update.callback_query);
       return;
     }
     if (update.message) {
+      console.log("[admin] dispatching message");
       await this.handleMessage(update.message);
       return;
     }
+    console.log("[admin] no handler for this update type");
   }
 
   /** Handle a callback query — route to navigation or screen handler. */
@@ -272,51 +276,85 @@ export class AdminOrchestrator {
     const chatId = message.chat?.id;
     const text = message.text ?? "";
 
-    if (!fromId || !chatId) return;
+    console.log(`[admin] handleMessage — from=${fromId} chat=${chatId} text="${text.slice(0, 50)}"`);
+
+    if (!fromId || !chatId) {
+      console.log("[admin] missing fromId or chatId, ignoring");
+      return;
+    }
 
     // Authorization check.
     if (!this.isAdmin(fromId)) {
+      console.log(`[admin] unauthorized: ${fromId} !== ${this.container.env.ADMIN_ID}`);
       await tg.sendMessage(chatId, unauthorizedMessage(fromId), {
         parse_mode: "HTML",
       }).catch(() => {});
       return;
     }
 
-    // If not a command, ignore (admin panel is keyboard-driven).
-    if (!text.startsWith("/")) {
-      return;
-    }
+    console.log("[admin] authorized, sending typing indicator");
 
-    // Typing indicator.
+    // Typing indicator — send for ALL messages (commands and non-commands).
     await tg.sendChatAction(chatId, "typing").catch(() => {});
 
-    // Match command.
-    const match = this.commands.match(text);
-    if (!match) {
-      await tg.sendMessage(
-        chatId,
-        `❓ Unknown command: <code>${escapeHtml(text)}</code>\n\nUse /help to see available commands.`,
-        { parse_mode: "HTML" },
-      ).catch(() => {});
-      return;
-    }
-
-    const ctx: CommandContext = {
-      container,
-      adminId: fromId,
-      chatId,
-      args: match.args,
-      reply: async (replyText: string) => {
-        await tg.sendMessage(chatId, replyText, { parse_mode: "HTML" }).catch(() => {});
-      },
-    };
-
     try {
+      // If not a command, respond with a helpful message.
+      if (!text.startsWith("/")) {
+        console.log("[admin] non-command message, sending help");
+        await tg.sendMessage(chatId, [
+          "👋 <b>Fredy Admin Bot</b>",
+          "",
+          "I received your message. Use these commands:",
+          "",
+          "<code>/menu</code> — Open admin dashboard",
+          "<code>/start</code> — Open admin panel",
+          "<code>/help</code> — Show help",
+          "<code>/stats</code> — Show statistics",
+          "<code>/health</code> — Health check",
+        ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        return;
+      }
+
+      // Match command.
+      console.log(`[admin] matching command: ${text}`);
+      const match = this.commands.match(text);
+      if (!match) {
+        console.log("[admin] no command matched");
+        await tg.sendMessage(
+          chatId,
+          `❓ Unknown command: <code>${escapeHtml(text)}</code>\n\nUse /help to see available commands.`,
+          { parse_mode: "HTML" },
+        ).catch(() => {});
+        return;
+      }
+
+      console.log(`[admin] found command: ${match.command.name}`);
+
+      const ctx: CommandContext = {
+        container,
+        adminId: fromId,
+        chatId,
+        args: match.args,
+        reply: async (replyText: string) => {
+          await tg.sendMessage(chatId, replyText, { parse_mode: "HTML" }).catch(() => {});
+        },
+      };
+
+      console.log("[admin] executing command handle...");
       await match.command.handle(ctx);
+      console.log("[admin] command handle completed");
     } catch (error) {
       console.error("[admin] command handler error:", error);
-      const message = error instanceof Error ? error.message : String(error);
-      await ctx.reply(`❌ Command failed: <code>${escapeHtml(message)}</code>`).catch(() => {});
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack ?? "" : "";
+      // Send error to user so they can see what went wrong.
+      await tg.sendMessage(chatId, [
+        "❌ <b>Error occurred</b>",
+        "",
+        `<code>${escapeHtml(errMsg)}</code>`,
+        "",
+        "<i>Check Manager → Logs for details.</i>",
+      ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     }
   }
 
