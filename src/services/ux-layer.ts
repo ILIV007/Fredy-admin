@@ -40,13 +40,18 @@ export class UXLayer {
   /** Transform a ReadyContent into a FinalPost. */
   async transform(content: ReadyContent): Promise<FinalPost> {
     // 1. Generate a dynamic hook.
-    const hook = this.deps.hookEngine.generate(content);
+    let hook = this.deps.hookEngine.generate(content);
 
     // 2. Humanize the body (strip metadata, shorten, restructure).
     const body = this.humanizeBody(content.text);
 
     // 3. Extract a key takeaway.
-    const takeaway = this.extractTakeaway(content.text, content.category);
+    let takeaway = this.extractTakeaway(content.text, content.category);
+
+    // CRITICAL: Strip ALL URLs from hook and takeaway — Telegram errors on
+    // URLs like https://v2.jokeapi.dev ("wrong type of the web page content").
+    hook = hook.replace(/https?:\/\/[^\s<>"']+/gi, "").trim();
+    takeaway = takeaway.replace(/https?:\/\/[^\s<>"']+/gi, "").trim();
 
     // 4. Build the source line.
     const { emoji, footer } = await this.deps.sourceFormatter.buildFooter();
@@ -54,13 +59,12 @@ export class UXLayer {
     // 5. Determine language-specific text.
     const isPersian = content.language === "fa";
     const sourceLabel = isPersian ? "منبع" : "Source";
-    const channelFooter = isPersian ? "🌀 @ILIVIR3" : "🌀 @ILIVIR3";
 
     // 6. Assemble the full text.
-    const fullText = this.assembleFullText(hook, body, takeaway, sourceLabel, channelFooter, content.sourceUrl, emoji);
+    const fullText = this.assembleFullText(hook, body, takeaway, sourceLabel, content.sourceUrl, emoji);
 
     // 7. Build a shorter caption for image posts.
-    const caption = this.assembleCaption(hook, body, takeaway, channelFooter);
+    const caption = this.assembleCaption(hook, body, takeaway);
 
     return {
       hook,
@@ -227,7 +231,6 @@ export class UXLayer {
     body: string,
     takeaway: string,
     sourceLabel: string,
-    channelFooter: string,
     sourceUrl: string,
     emoji: string,
   ): string {
@@ -256,7 +259,7 @@ export class UXLayer {
 
     // Channel footer as blockquote.
     parts.push("");
-    parts.push(`<blockquote>${channelFooter}</blockquote>`);
+    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }
@@ -266,7 +269,9 @@ export class UXLayer {
     try {
       const u = new URL(url);
       const path = u.pathname;
+      // Must have a meaningful path (more than just "/")
       if (path === "/" || path === "" || path.length < 3) return false;
+      // Skip known API endpoints
       const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com", "hacker-news.firebaseio.com"];
       if (apiHosts.includes(u.hostname)) return false;
       return true;
@@ -280,7 +285,6 @@ export class UXLayer {
     hook: string,
     body: string,
     takeaway: string,
-    channelFooter: string,
   ): string {
     const parts: string[] = [];
 
@@ -300,7 +304,7 @@ export class UXLayer {
 
     // Channel footer as blockquote.
     parts.push("");
-    parts.push(`<blockquote>${channelFooter}</blockquote>`);
+    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }

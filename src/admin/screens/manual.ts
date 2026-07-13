@@ -74,6 +74,8 @@ export const manualScreen: Screen = {
       if (!["A", "B", "C"].includes(arg)) {
         return { alert: "❌ Invalid category" };
       }
+      // Respond immediately — processing takes time.
+      // The actual work happens in the toast/alert.
       try {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
@@ -83,16 +85,26 @@ export const manualScreen: Screen = {
           lang,
         );
         if (result.ok && result.content) {
-          // Publish immediately.
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            return { toast: `✅ Published from category ${arg}!` };
+            // Send post + notification to admin PM.
+            await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+            }).catch(() => {});
+            await ctx.container.tg.sendMessage(ctx.adminId, [
+              `📤 <b>Post published from category ${arg}</b>`,
+              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+            return { toast: `✅ Category ${arg} published!` };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
-        return { alert: `❌ No content available for category ${arg}: ${result.error ?? "all rejected"}` };
+        return { alert: `❌ No content for ${arg}` };
       } catch (error) {
-        return { alert: `❌ Error: ${error instanceof Error ? error.message : String(error)}` };
+        return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
     }
 
@@ -116,27 +128,24 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the actual post to admin PM.
+            // Send post + notification to admin PM.
             await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
               parse_mode: "HTML",
               disable_web_page_preview: true,
             }).catch(() => {});
-            // Send notification with API details.
             await ctx.container.tg.sendMessage(ctx.adminId, [
               `📤 <b>Post published from: ${arg}</b>`,
-              ``,
-              `<b>Category:</b> ${result.content.category}`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
               `<b>Quality:</b> ${result.content.quality.overallScore}`,
               `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            return { toast: `✅ Published from ${arg}!` };
+            return { toast: `✅ ${arg} published!` };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
-        return { alert: `❌ All items rejected (quality too low)` };
+        return { alert: `❌ All items rejected` };
       } catch (error) {
-        return { alert: `❌ Error: ${error instanceof Error ? error.message : String(error)}` };
+        return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
     }
   },
