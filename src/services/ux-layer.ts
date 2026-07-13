@@ -235,19 +235,17 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source link — only link to real web pages, not API endpoints.
-    // URLs like https://v2.jokeapi.dev (no path) cause Telegram errors.
+    // Source link — ONLY for real web pages with meaningful paths.
+    // APIs without content URLs (joke, etc.) get NO source line at all.
     const isRealWebPage = sourceUrl && this.isLinkableUrl(sourceUrl);
     if (isRealWebPage) {
       parts.push("");
       parts.push(`<a href="${this.escapeHtml(sourceUrl)}">${sourceFooter}</a>`);
-    } else {
-      parts.push("");
-      parts.push(sourceFooter);
     }
 
-    // Channel footer.
-    parts.push("🌀 @ILIVIR3");
+    // Channel footer as blockquote.
+    parts.push("");
+    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }
@@ -260,7 +258,7 @@ export class UXLayer {
       const path = u.pathname;
       if (path === "/" || path === "" || path.length < 3) return false;
       // Skip known API endpoints
-      const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com"];
+      const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com", "hacker-news.firebaseio.com"];
       if (apiHosts.includes(u.hostname)) return false;
       return true;
     } catch {
@@ -291,10 +289,9 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source footer.
+    // Channel footer as blockquote.
     parts.push("");
-    parts.push(sourceFooter);
-    parts.push("🌀 @ILIVIR3");
+    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }

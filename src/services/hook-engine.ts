@@ -34,6 +34,12 @@ export class HookEngine {
 
   /** Generate a dynamic hook for a ReadyContent. */
   generate(content: ReadyContent): string {
+    // Use the AI-generated headline as the hook if available.
+    // This ensures the hook is in the same language as the content.
+    if (content.headline && content.headline.trim().length > 5) {
+      return content.headline.trim();
+    }
+
     const candidates = this.generateCandidates(content);
 
     // Pick the first candidate that hasn't been used recently.
