@@ -8,7 +8,6 @@
 
 import type { Category } from "./category";
 import type { AICompleteRequest, AICompleteResponse } from "./ai";
-import type { FormatInput, FormatResult } from "../services/formatter";
 import type { SourceItem } from "./api";
 import type { Env } from "./env";
 
@@ -167,16 +166,6 @@ export interface AIProvider {
     request: AICompleteRequest,
     signal: AbortSignal,
   ): Promise<AICompleteResponse>;
-}
-
-// ────────────────────────────────────────────────────────────
-// Formatter Plugin Interface
-// ────────────────────────────────────────────────────────────
-
-/** A formatter plugin. Converts AI output into Telegram-ready HTML. */
-export interface Formatter {
-  readonly name: string;
-  format(input: FormatInput): FormatResult;
 }
 
 // ────────────────────────────────────────────────────────────

@@ -66,8 +66,8 @@ export class PluginDisabledError extends SchedulerError {
 
 /** Thrown when the scheduler is disabled. */
 export class SchedulerDisabledError extends SchedulerError {
-  constructor() {
-    super("Scheduler is disabled");
+  constructor(message = "Scheduler is disabled") {
+    super(message);
   }
 }
 

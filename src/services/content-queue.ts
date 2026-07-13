@@ -9,7 +9,8 @@
 import { queueKey, dlqKey } from "../core/storage/keys";
 import { MS_PER_DAY } from "../core/constants";
 import type { Category } from "../types/category";
-import type { QueuedContent, QueueDepth, ReadyContent, DeadLetterItem } from "../types/content";
+import type { QueuedContent, QueueDepth, ReadyContent } from "../types/content";
+import type { DeadLetterItem } from "../types/queue";
 import type { KVStore } from "./kv-store";
 import type { Logger } from "./logger";
 

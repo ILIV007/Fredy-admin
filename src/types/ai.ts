@@ -5,7 +5,18 @@
 
 import type { Category } from "./category";
 import type { SourceItem } from "./api";
-import type { Soul } from "../services/soul-loader";
+
+// ────────────────────────────────────────────────────────────
+// Soul (loaded from soul.md — controls AI personality)
+// ────────────────────────────────────────────────────────────
+
+/** The parsed soul.md content. */
+export interface Soul {
+  /** The raw soul.md text. */
+  readonly raw: string;
+  /** Sections parsed from # headings. */
+  readonly sections: Readonly<Record<string, string>>;
+}
 
 // ────────────────────────────────────────────────────────────
 // Low-level provider request/response
@@ -100,10 +111,7 @@ export interface GenerateAttempt {
 }
 
 // ────────────────────────────────────────────────────────────
-// Soul (re-exported from soul-loader for convenience)
-// ────────────────────────────────────────────────────────────
-
-export type { Soul } from "../services/soul-loader";
+// Soul is defined above (interface Soul). No re-export needed.
 
 // ────────────────────────────────────────────────────────────
 // Token tracking & cost

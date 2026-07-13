@@ -6,17 +6,16 @@
 export interface Env {
   // KV bindings — name must match wrangler.toml binding = "Fredy_SETTINGS"
   Fredy_SETTINGS: KVNamespace;
-  // FREDY_DB: D1Database; // uncomment when D1 is introduced
 
   // Non-secret vars
   ADMIN_ID: string;
   TARGET_CHANNEL: string;
   FOOTER_TEXT: string;
-  DEBUG_MODE: string; // "true" | "false"
+  DEBUG_MODE: string;
   DEFAULT_AI_PROVIDER: string;
   DEFAULT_LANGUAGE: string;
   SCHEDULER_TIMEZONE: string;
-  SCHEDULE_SLOTS: string; // comma-separated "HH:MM,..."
+  SCHEDULE_SLOTS: string;
   SCHEDULE_JITTER_MINUTES: string;
 
   // Secrets
@@ -41,13 +40,10 @@ export interface Container {
   readonly kv: import("../services/kv-store").KVStore;
   readonly ai: import("../services/ai-service").AIService;
   readonly soul: import("../services/soul-loader").SoulLoader;
-  readonly sources: import("../services/source-manager").SourceManager;
   readonly plugins: import("../services/plugin-manager").PluginManager;
   readonly providers: import("../services/provider-registry").ProviderRegistry;
   readonly categories: import("../services/category-manager").CategoryManager;
   readonly scheduler: import("../services/scheduler-service").SchedulerService;
-  readonly quality: import("../services/quality-filter").QualityFilter;
-  readonly formatter: import("../services/formatter").FormatterService;
   readonly lang: import("../services/language-manager").LanguageManager;
   readonly queue: import("../services/content-queue").ContentQueue;
   readonly emoji: import("../services/emoji-rotator").EmojiRotator;
@@ -72,9 +68,8 @@ export interface Container {
   readonly jobQueue: import("../services/job-queue").JobQueue;
   readonly publishValidator: import("../services/publish-validator").PublishValidator;
   readonly retryManager: import("../services/retry-manager").RetryManager;
-  readonly publishingService: import("../services/publishing-service").PublishingService;
   readonly history: import("../services/history-service").HistoryService;
-  // Final publishing engine (Prompt 13)
+  // Final publishing engine
   readonly hookEngine: import("../services/hook-engine").HookEngine;
   readonly uxLayer: import("../services/ux-layer").UXLayer;
   readonly finalPublisher: import("../services/final-publisher").FinalPublisher;

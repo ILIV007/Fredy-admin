@@ -17,6 +17,7 @@ export interface TelegramMessage {
   readonly date: number;
   readonly chat: TelegramChat;
   readonly from?: TelegramUser;
+  readonly sender_chat?: TelegramChat;
   readonly text?: string;
   readonly caption?: string;
   readonly photo?: readonly TelegramPhotoSize[];

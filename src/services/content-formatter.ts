@@ -13,7 +13,8 @@ import type {
   ContentMedia,
   ReadyContent,
 } from "../types/content";
-import type { AIGeneratedContent, QualityResult } from "../types/ai";
+import type { AIGeneratedContent } from "../types/ai";
+import type { QualityResult } from "../types/quality";
 import type { MediaHandler } from "./media-handler";
 import type { MediaResolver } from "./media-resolver";
 import type { SourceFormatter } from "./source-formatter";

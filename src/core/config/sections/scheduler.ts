@@ -19,6 +19,7 @@ export const schedulerSchema = z.object({
   postingWindows: z.array(timeWindowSchema).default([]),
   burstPosting: z.boolean().default(false),
   skipIfLowQuality: z.boolean().default(true),
+  refreshIntervalMinutes: z.number().int().min(5).max(1440).default(15),
 });
 
 export type SchedulerConfig = z.infer<typeof schedulerSchema>;
@@ -32,6 +33,7 @@ export const schedulerDefaults: SchedulerConfig = {
   postingWindows: [],
   burstPosting: false,
   skipIfLowQuality: true,
+  refreshIntervalMinutes: 15,
 };
 
 export const schedulerSection = {

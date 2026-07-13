@@ -24,14 +24,11 @@ import { RetryHandler } from "./services/retry-handler";
 import { FallbackHandler } from "./services/fallback-handler";
 import { TokenTracker } from "./services/token-tracker";
 import { QualityEngine } from "./services/quality-engine";
-import { SourceManager } from "./services/source-manager";
 import { PluginManager } from "./services/plugin-manager";
 import { ProviderRegistry } from "./services/provider-registry";
 import { PluginLoader } from "./services/plugin-loader";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
-import { QualityFilter } from "./services/quality-filter";
-import { FormatterService } from "./services/formatter";
 import { LanguageManager } from "./services/language-manager";
 import { ContentQueue } from "./services/content-queue";
 import { EmojiRotator } from "./services/emoji-rotator";
@@ -54,20 +51,13 @@ import { DailyPlanner } from "./services/daily-planner";
 import { JobQueue } from "./services/job-queue";
 import { PublishValidator } from "./services/publish-validator";
 import { RetryManager } from "./services/retry-manager";
-import { PublishingService } from "./services/publishing-service";
 import { HistoryService } from "./services/history-service";
-// Final publishing engine (Prompt 13)
+// Final publishing engine
 import { HookEngine } from "./services/hook-engine";
 import { UXLayer } from "./services/ux-layer";
 import { FinalPublisher } from "./services/final-publisher";
 
-// Plugins are loaded by PluginLoader (no direct imports here).
-// See src/services/plugin-loader.ts.
-
-// Formatter plugin (not a content source, so not in PluginLoader).
-import { HtmlFormatter } from "./plugins/formatters/html-formatter";
-
-// Bundled default soul (full soul.md will be loaded at build time in a later phase)
+// Bundled default soul
 const BUNDLED_SOUL = `
 # Identity
 
@@ -134,11 +124,9 @@ export function buildContainer(env: Env): Container {
     pluginManager: plugins,
     providerRegistry: providers,
   });
-  // Auto-load and register all plugins.
   pluginLoader.loadAll();
 
-  // Layer 5: AI layer (PromptBuilder, LanguageInjector, ResponseParser, RetryHandler,
-  //          FallbackHandler, TokenTracker, QualityEngine, AIService)
+  // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
     config: async () => (await config.getSettings(Number(env.ADMIN_ID))).language,
   });
@@ -163,34 +151,17 @@ export function buildContainer(env: Env): Container {
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
 
-  // Layer 6: SourceManager — thin facade over PluginManager for backward compat.
-  // Existing screens use container.sources.list() etc.
-  // New code should use container.plugins directly.
-  const sourceManager = new SourceManager({
-    sources: plugins.list(),
-  });
-
-  // Layer 6: Queue + Categories + Quality + Scheduler (depend on the above)
-  const queue = new ContentQueue({ kv });
+  // Layer 6: Queue + Categories
+  // CRITICAL FIX: ContentQueue requires logger — without it, every enqueue()
+  // throws "Cannot read properties of undefined (reading 'info')"
+  const queue = new ContentQueue({ kv, logger });
   const categories = new CategoryManager({
     kv,
     config: async () => (await config.getSettings(Number(env.ADMIN_ID))).categories,
     state: () => config.getState(Number(env.ADMIN_ID)),
   });
-  const quality = new QualityFilter({
-    kv,
-    checks: [],
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
 
-  // Layer 7: Formatter (plugins)
-  const htmlFormatter = new HtmlFormatter();
-  const formatter = new FormatterService({
-    formatters: [htmlFormatter],
-    defaultName: "html",
-  });
-
-  // Layer 8: Content Engine (validator, resolver, dedup, formatters, manager)
+  // Layer 7: Content Engine
   const contentValidator = new ContentValidator({ logger, pluginManager: plugins });
   const categoryResolver = new CategoryResolver({ logger, pluginManager: plugins });
   const duplicateDetector = new DuplicateDetector({
@@ -233,7 +204,7 @@ export function buildContainer(env: Env): Container {
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
   });
 
-  // Layer 9: Scheduler & Publishing Engine
+  // Layer 8: Scheduler & Publishing Engine
   const timeGenerator = new TimeGenerator({});
   const dailyPlanner = new DailyPlanner({
     kv,
@@ -254,15 +225,7 @@ export function buildContainer(env: Env): Container {
     logger,
     timezone: async () => (await config.getSettings(Number(env.ADMIN_ID))).scheduler.timezone,
   });
-  const publishingService = new PublishingService({
-    tg,
-    validator: publishValidator,
-    retryManager,
-    history,
-    logger,
-    settings: () => config.getSettings(Number(env.ADMIN_ID)),
-  });
-  // Final publishing engine (Prompt 13)
+  // Final publishing engine
   const hookEngine = new HookEngine({ logger });
   const uxLayer = new UXLayer({
     logger,
@@ -295,13 +258,10 @@ export function buildContainer(env: Env): Container {
     kv,
     ai,
     soul,
-    sources: sourceManager,
     plugins,
     providers,
     categories,
     scheduler,
-    quality,
-    formatter,
     lang,
     queue,
     emoji,
@@ -326,9 +286,8 @@ export function buildContainer(env: Env): Container {
     jobQueue,
     publishValidator,
     retryManager,
-    publishingService,
     history,
-    // Final publishing engine (Prompt 13)
+    // Final publishing engine
     hookEngine,
     uxLayer,
     finalPublisher,

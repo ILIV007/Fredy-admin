@@ -40,10 +40,7 @@ export interface FinalPublisherDeps {
   readonly settings: () => Promise<FredySettings>;
 }
 
-/** Quality gate threshold. */
-const MIN_SCORE = 60;
-
-/** Max retries (Prompt 13: max 2 retries). */
+/** Max retries (max 2 retries). */
 const MAX_RETRIES = 2;
 
 export class FinalPublisher {
@@ -52,13 +49,15 @@ export class FinalPublisher {
   /** Full pipeline: ReadyContent → UX Layer → Telegram. */
   async publish(content: ReadyContent): Promise<PublishResult> {
     const startTime = Date.now();
+    const settings = await this.deps.settings();
+    const minScore = settings.ai.qualityThreshold;
 
     // ── Quality Gate (HARD RULE) ────────────────────────────
-    if (content.quality.overallScore < MIN_SCORE) {
+    if (content.quality.overallScore < minScore) {
       this.deps.logger.warn("quality.reject", {
         contentId: content.id,
         score: content.quality.overallScore,
-        minScore: MIN_SCORE,
+        minScore,
         message: "Quality gate: score below threshold, skipping",
       });
       return {
@@ -68,7 +67,7 @@ export class FinalPublisher {
         telegramMessageId: null,
         telegramChatId: null,
         publishedAt: Date.now(),
-        error: `Quality score ${content.quality.overallScore} < ${MIN_SCORE}`,
+        error: `Quality score ${content.quality.overallScore} < ${minScore}`,
         attempts: 0,
       };
     }

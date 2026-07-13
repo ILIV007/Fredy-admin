@@ -245,9 +245,6 @@ export class UXLayer {
     parts.push("");
     parts.push(sourceFooter);
 
-    // Channel footer.
-    parts.push("🌀 @ILIVIR3");
-
     return parts.join("\n");
   }
 

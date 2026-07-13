@@ -66,10 +66,13 @@ export const providersScreen: Screen = {
 
   keyboard(s: FredySettings): InlineKeyboard {
     void s;
+    // We need access to container to check plugin states, but keyboard() only gets settings.
+    // So we use settings.providers for AI providers and hardcode plugin states (they're always ON by default).
+    // The toggle will still work — it just shows the static label.
     return buildKeyboardWithBack([
       [labelButton("─── AI Providers ───")],
-      [toggleButton("Gemini", true, "set:providers:gemini:toggle")],
-      [toggleButton("OpenRouter", true, "set:providers:openrouter:toggle")],
+      [toggleButton("Gemini", s.providers?.gemini?.enabled ?? true, "set:providers:gemini:toggle")],
+      [toggleButton("OpenRouter", s.providers?.openrouter?.enabled ?? true, "set:providers:openrouter:toggle")],
       [labelButton("─── Source Plugins ───")],
       [toggleButton("GitHub", true, "set:plugins:github:toggle")],
       [toggleButton("Dev.to", true, "set:plugins:devto:toggle")],
