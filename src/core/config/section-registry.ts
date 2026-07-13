@@ -111,6 +111,14 @@ export class ConfigSectionRegistry {
         result[section.key] = sectionInput;
       }
     }
+    // Preserve top-level non-section fields (like approveMode) that are
+    // not part of any section schema. Without this, they get dropped on load.
+    const sectionKeys = new Set(this.list().map((s) => s.key));
+    for (const [key, value] of Object.entries(input)) {
+      if (!sectionKeys.has(key) && value !== undefined && value !== null) {
+        result[key] = value;
+      }
+    }
     return result;
   }
 
