@@ -107,24 +107,34 @@ export const manualScreen: Screen = {
         }
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
-        const result = await ctx.container.content.process(items[0]!, lang, { skipDedup: true });
-        if (result.ok && result.content) {
+        // Try up to 5 items until one passes.
+        let result = null;
+        for (let i = 0; i < Math.min(items.length, 5); i++) {
+          const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: true });
+          if (r.ok && r.content) { result = r; break; }
+        }
+        if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Also notify the admin chat with details.
+            // Send the actual post to admin PM.
+            await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+            }).catch(() => {});
+            // Send notification with API details.
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `✅ <b>Manual post published</b>`,
+              `📤 <b>Post published from: ${arg}</b>`,
               ``,
-              `<b>Source:</b> ${arg}`,
-              `<b>Message ID:</b> ${pubResult.telegramMessageId}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>Category:</b> ${result.content.category}`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Published from ${arg}!` };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
-        return { alert: `❌ Processing failed: ${result.error ?? "rejected"}` };
+        return { alert: `❌ All items rejected (quality too low)` };
       } catch (error) {
         return { alert: `❌ Error: ${error instanceof Error ? error.message : String(error)}` };
       }
