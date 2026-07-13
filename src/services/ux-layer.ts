@@ -235,9 +235,10 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source link — combined with footer to avoid duplication.
-    // Format: "🔗 Source" as a clickable link + channel footer.
-    if (sourceUrl) {
+    // Source link — only link to real web pages, not API endpoints.
+    // URLs like https://v2.jokeapi.dev (no path) cause Telegram errors.
+    const isRealWebPage = sourceUrl && this.isLinkableUrl(sourceUrl);
+    if (isRealWebPage) {
       parts.push("");
       parts.push(`<a href="${this.escapeHtml(sourceUrl)}">${sourceFooter}</a>`);
     } else {
@@ -249,6 +250,22 @@ export class UXLayer {
     parts.push("🌀 @ILIVIR3");
 
     return parts.join("\n");
+  }
+
+  /** Check if a URL points to a real web page (not just an API endpoint). */
+  private isLinkableUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      // Must have a meaningful path (more than just "/")
+      const path = u.pathname;
+      if (path === "/" || path === "" || path.length < 3) return false;
+      // Skip known API endpoints
+      const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com"];
+      if (apiHosts.includes(u.hostname)) return false;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Assemble a shorter caption for image posts. */
