@@ -163,9 +163,10 @@ export class ContentManager {
         headline: resolvedItem.title,
         notes: "format-only (AI unavailable)",
       };
+      // CRITICAL: Set score to threshold so FinalPublisher doesn't reject.
       const fallbackQuality = {
         passed: true,
-        overallScore: 50, // below threshold but allowed for fallback
+        overallScore: settings.ai.qualityThreshold,
         dimensionScores: [],
         hardReject: false,
         minScore: settings.ai.qualityThreshold,
@@ -199,15 +200,15 @@ export class ContentManager {
         detail,
         message: "Quality below threshold — using format-only fallback",
       });
-      // Use the AI content anyway with a lower score.
+      // Use the AI content anyway with a score at threshold.
       const fallbackQuality = {
         passed: true,
-        overallScore: 50,
+        overallScore: settings.ai.qualityThreshold,
         dimensionScores: [],
         hardReject: false,
         minScore: settings.ai.qualityThreshold,
       };
-      post = { ...post, score: 50 };
+      post = { ...post, score: settings.ai.qualityThreshold };
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,

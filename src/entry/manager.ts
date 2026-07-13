@@ -41,7 +41,7 @@ export async function managerHandler(
     const queueDepths = await container.queue.depth().catch(() => []);
     const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: "4.3.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: "4.3.1", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -239,7 +239,7 @@ export async function managerHandler(
 
   // ── System ──
   if (apiPath === "system" && request.method === "GET") {
-    return json({ ok: true, version: "4.3.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
+    return json({ ok: true, version: "4.3.1", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
   }
 
   // ── Test single plugin ──
@@ -265,7 +265,7 @@ export async function managerHandler(
   if (apiPath === "test/everything" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "4.3.0",
+      version: "4.3.1",
       sections: {} as Record<string, unknown>,
     };
     const sections = report["sections"] as Record<string, unknown>;
@@ -277,7 +277,7 @@ export async function managerHandler(
         ok: true,
         durationMs: Date.now() - t0,
         detail: {
-          version: "4.3.0",
+          version: "4.3.1",
           buildDate: "2026-07-12",
           kv: !!env.Fredy_SETTINGS,
           pluginCount: container.plugins.list().length,
@@ -414,12 +414,16 @@ export async function managerHandler(
       return json({ ok: false, error: "Missing pluginId" }, 400);
     }
 
+    // Load settings early — needed for language and throughout.
+    const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+
     const report: Record<string, unknown> = {
       pluginId,
       timestamp: new Date().toISOString(),
       stages: {} as Record<string, unknown>,
     };
     const stages = report["stages"] as Record<string, unknown>;
+    const lang = settings?.language?.default ?? "auto";
 
     // Stage 1: Fetch from plugin
     try {
@@ -444,20 +448,39 @@ export async function managerHandler(
         return json(report);
       }
 
-      // Stage 2: Process through pipeline (skip dedup for manual)
-      const t1 = Date.now();
-      const result = await container.content.process(items[0]!, settings?.language?.default ?? "auto", { skipDedup: true });
+      // Stage 2: Try each item through the pipeline until one succeeds.
+      // If all items fail, report the last error.
+      let result = null;
+      const attempts = [];
+      for (let idx = 0; idx < Math.min(items.length, 5); idx++) {
+        const item = items[idx]!;
+        const t1 = Date.now();
+        const r = await container.content.process(item, lang, { skipDedup: true });
+        attempts.push({
+          itemIndex: idx,
+          itemId: item.id,
+          ok: r.ok,
+          stage: r.stage,
+          error: r.error,
+          durationMs: Date.now() - t1,
+        });
+        if (r.ok && r.content) {
+          result = r;
+          break;
+        }
+      }
+
       stages["process"] = {
-        ok: result.ok,
-        durationMs: Date.now() - t1,
-        stage: result.stage,
-        error: result.error,
-        contentId: result.content?.id,
+        ok: !!result,
+        attempts,
+        totalAttempts: attempts.length,
+        contentId: result?.content?.id,
+        error: result ? undefined : (attempts[attempts.length - 1]?.error ?? "All items rejected"),
       };
 
-      if (!result.ok || !result.content) {
+      if (!result || !result.content) {
         report["ok"] = false;
-        report["error"] = `Processing failed: ${result.error ?? "unknown"}`;
+        report["error"] = `All ${attempts.length} items were rejected (quality or processing failed)`;
         return json(report);
       }
 
@@ -505,14 +528,14 @@ export async function managerHandler(
   if (apiPath === "checkup" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "4.3.0",
+      version: "4.3.1",
     };
 
     // 1. System info
     try {
       const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
       report["system"] = {
-        version: "4.3.0",
+        version: "4.3.1",
         buildDate: "2026-07-13",
         runtime: "cloudflare-workers",
         kv: !!env.Fredy_SETTINGS,
@@ -754,9 +777,11 @@ function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;
 async function loadPost(){
   const d=await api("plugins");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error loading plugins</div>';return;}
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">📤 Post to Channel</h3><p style="color:var(--text2);margin-bottom:12px">Select a source API below to fetch content, process it through the AI pipeline, and publish immediately to the channel. A detailed JSON report will appear at the bottom.</p></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">🔌 Available APIs</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
-  d.plugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel(\\''+p.id+'\\')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+' · '+(p.enabled?'ON':'OFF')+'</div></button>').join("")+
+  // Only show enabled plugins
+  const enabledPlugins=d.plugins.filter(p=>p.enabled);
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">📤 Post to Channel</h3><p style="color:var(--text2);margin-bottom:12px">Select a source API below to fetch content, process it through the AI pipeline, and publish immediately to the channel. The system tries up to 5 items per API until one passes quality. A detailed JSON report will appear at the bottom.</p></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">🔌 Available APIs ('+enabledPlugins.length+' enabled)</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
+  enabledPlugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel(\\''+p.id+'\\')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+'</div></button>').join("")+
   '</div></div><div id="post-result"></div>';
 }
 
@@ -944,7 +969,7 @@ async function loadStats(){
 }
 
 function loadAbout(){
-  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.3.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
+  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.3.1")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
 }
 
 async function clearLogs(){const d=await api("clear/logs","POST");toast(d.ok?"✅ Logs cleared":"❌ Failed");}
