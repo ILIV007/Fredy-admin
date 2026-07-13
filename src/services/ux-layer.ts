@@ -235,15 +235,18 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source link — make it a clickable hyperlink (not just raw text).
+    // Source link — combined with footer to avoid duplication.
+    // Format: "🔗 Source" as a clickable link + channel footer.
     if (sourceUrl) {
       parts.push("");
-      parts.push(`<a href="${this.escapeHtml(sourceUrl)}">🔗 Source</a>`);
+      parts.push(`<a href="${this.escapeHtml(sourceUrl)}">${sourceFooter}</a>`);
+    } else {
+      parts.push("");
+      parts.push(sourceFooter);
     }
 
-    // Source footer.
-    parts.push("");
-    parts.push(sourceFooter);
+    // Channel footer.
+    parts.push("🌀 @ILIVIR3");
 
     return parts.join("\n");
   }
@@ -274,6 +277,7 @@ export class UXLayer {
     // Source footer.
     parts.push("");
     parts.push(sourceFooter);
+    parts.push("🌀 @ILIVIR3");
 
     return parts.join("\n");
   }

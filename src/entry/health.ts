@@ -10,7 +10,7 @@
 
 import type { Env } from "../types/env";
 
-const VERSION = "4.3.1";
+const VERSION = "4.4.0";
 const PHASE = "production";
 const BUILD_DATE = "2026-07-12";
 const START_TIME = Date.now();

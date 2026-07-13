@@ -41,7 +41,7 @@ export async function managerHandler(
     const queueDepths = await container.queue.depth().catch(() => []);
     const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: "4.3.1", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: "4.4.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -239,7 +239,7 @@ export async function managerHandler(
 
   // ── System ──
   if (apiPath === "system" && request.method === "GET") {
-    return json({ ok: true, version: "4.3.1", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
+    return json({ ok: true, version: "4.4.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
   }
 
   // ── Test single plugin ──
@@ -265,7 +265,7 @@ export async function managerHandler(
   if (apiPath === "test/everything" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "4.3.1",
+      version: "4.4.0",
       sections: {} as Record<string, unknown>,
     };
     const sections = report["sections"] as Record<string, unknown>;
@@ -277,7 +277,7 @@ export async function managerHandler(
         ok: true,
         durationMs: Date.now() - t0,
         detail: {
-          version: "4.3.1",
+          version: "4.4.0",
           buildDate: "2026-07-12",
           kv: !!env.Fredy_SETTINGS,
           pluginCount: container.plugins.list().length,
@@ -495,6 +495,23 @@ export async function managerHandler(
         error: pubResult.error,
       };
 
+      // Send notification to admin PM with details.
+      if (pubResult.ok) {
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        if (adminId > 0) {
+          await container.tg.sendMessage(adminId, [
+            `✅ <b>Post published to channel</b>`,
+            ``,
+            `<b>Source API:</b> ${pluginId}`,
+            `<b>Category:</b> ${result.content.category}`,
+            `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+            `<b>Quality:</b> ${result.content.quality.overallScore}`,
+            `<b>Tokens:</b> ${result.content.tokensUsed}`,
+            `<b>Message ID:</b> ${pubResult.telegramMessageId}`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+      }
+
       report["ok"] = pubResult.ok;
       report["error"] = pubResult.error;
       report["content"] = result.content ? {
@@ -528,14 +545,14 @@ export async function managerHandler(
   if (apiPath === "checkup" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "4.3.1",
+      version: "4.4.0",
     };
 
     // 1. System info
     try {
       const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
       report["system"] = {
-        version: "4.3.1",
+        version: "4.4.0",
         buildDate: "2026-07-13",
         runtime: "cloudflare-workers",
         kv: !!env.Fredy_SETTINGS,
@@ -798,7 +815,10 @@ async function postToChannel(pluginId){
     if(d.stages){
       const st=d.stages;
       if(st.fetch)stageHtml+='<div class="test-result '+(st.fetch.ok?'test-pass':'test-fail')+'"><span>'+(st.fetch.ok?'✅':'❌')+'</span><span style="font-weight:600">Fetch</span><span style="color:var(--text2);flex:1">'+(st.fetch.ok?st.fetch.itemCount+' items':st.fetch.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.fetch.durationMs+'ms</span></div>';
-      if(st.process)stageHtml+='<div class="test-result '+(st.process.ok?'test-pass':'test-fail')+'"><span>'+(st.process.ok?'✅':'❌')+'</span><span style="font-weight:600">Process</span><span style="color:var(--text2);flex:1">'+(st.process.ok?'OK: '+st.process.contentId:st.process.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.process.durationMs+'ms</span></div>';
+      if(st.process){
+        const procMs=st.process.attempts?(st.process.attempts.reduce(function(s,a){return s+(a.durationMs||0)},0)):'?';
+        stageHtml+='<div class="test-result '+(st.process.ok?'test-pass':'test-fail')+'"><span>'+(st.process.ok?'✅':'❌')+'</span><span style="font-weight:600">Process</span><span style="color:var(--text2);flex:1">'+(st.process.ok?'OK ('+st.process.totalAttempts+' tried)':st.process.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+procMs+'ms</span></div>';
+      }
       if(st.publish)stageHtml+='<div class="test-result '+(st.publish.ok?'test-pass':'test-fail')+'"><span>'+(st.publish.ok?'✅':'❌')+'</span><span style="font-weight:600">Publish</span><span style="color:var(--text2);flex:1">'+(st.publish.ok?'Msg #'+st.publish.messageId:st.publish.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.publish.durationMs+'ms</span></div>';
     }
     // Content preview
@@ -969,7 +989,7 @@ async function loadStats(){
 }
 
 function loadAbout(){
-  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.3.1")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
+  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.4.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
 }
 
 async function clearLogs(){const d=await api("clear/logs","POST");toast(d.ok?"✅ Logs cleared":"❌ Failed");}

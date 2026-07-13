@@ -168,8 +168,10 @@ export class FinalPublisher {
     const settings = await this.deps.settings();
     const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
     const parseMode = settings?.telegram?.parseMode ?? "HTML";
-    // CRITICAL: must be boolean, not string — Telegram rejects wrong type.
-    const disablePreview = settings?.telegram?.disableWebPagePreview === true;
+    // CRITICAL: Always disable web page preview for channel posts.
+    // Telegram returns "wrong type of the web page content" when it tries
+    // to preview URLs like https://v2.jokeapi.dev (API endpoints, not web pages).
+    const disablePreview = true;
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
