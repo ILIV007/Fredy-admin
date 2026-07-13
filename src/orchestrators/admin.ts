@@ -381,7 +381,15 @@ export class AdminOrchestrator {
     if (first === "set") {
       if (second === "scheduler") return "schedule";
       if (second === "providers") return "providers";
-      if (second === "plugins") return "providers"; // plugin toggles live on providers screen
+      if (second === "plugins") return "providers";
+      // Settings sub-scopes all route to the settings screen
+      if (second === "general" || second === "language" || second === "content" || second === "quality" || second === "debug") return "settings";
+      // AI settings route to the ai screen
+      if (second === "ai") return "ai";
+      // Categories settings route to the categories screen
+      if (second === "categories") return "categories";
+      // Editor settings route to the editor screen
+      if (second === "editor") return "editor";
       return second || "main";
     }
 
@@ -391,17 +399,18 @@ export class AdminOrchestrator {
       if (second === "manual") return "manual";
       if (second === "soul") return "soul";
       if (second === "debug") return "debug";
-      if (second === "test") return "providers"; // test actions live on providers screen
+      if (second === "test") return "providers";
       if (second === "stats") return "stats";
       if (second === "plugins") return "providers";
       if (second === "providers") return "providers";
+      if (second === "main") return "main";
       return second || "main";
     }
 
     // "toggle:<scope>" → main screen handles toggles inline
     if (first === "toggle") return "main";
 
-    // Direct screen IDs: "soul:view", "scheduler:refresh", etc.
+    // Direct screen IDs
     if (first === "scheduler") return "schedule";
     if (first === "soul") return "soul";
     if (first === "manual") return "manual";

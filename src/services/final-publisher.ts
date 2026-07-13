@@ -166,9 +166,10 @@ export class FinalPublisher {
     post: FinalPost,
   ): Promise<{ messageId: number; chatId: string }> {
     const settings = await this.deps.settings();
-    const channel = settings.telegram.targetChannel;
-    const parseMode = settings.telegram.parseMode;
-    const disablePreview = settings.telegram.disableWebPagePreview;
+    const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
+    const parseMode = settings?.telegram?.parseMode ?? "HTML";
+    // CRITICAL: must be boolean, not string — Telegram rejects wrong type.
+    const disablePreview = settings?.telegram?.disableWebPagePreview === true;
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {

@@ -235,10 +235,10 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source link (blockquote).
+    // Source link — make it a clickable hyperlink (not just raw text).
     if (sourceUrl) {
       parts.push("");
-      parts.push(`<blockquote>${sourceUrl}</blockquote>`);
+      parts.push(`<a href="${this.escapeHtml(sourceUrl)}">🔗 Source</a>`);
     }
 
     // Source footer.

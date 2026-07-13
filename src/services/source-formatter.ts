@@ -61,10 +61,10 @@ export class SourceFormatter {
     return bestEmoji;
   }
 
-  /** Build the source footer line: "[emoji]Source". */
+  /** Build the source footer line: "[emoji]Source" — will be linked by ux-layer. */
   async buildFooter(): Promise<{ emoji: string; footer: string }> {
     const emoji = await this.nextEmoji();
-    return { emoji, footer: `${emoji}Source` };
+    return { emoji, footer: `${emoji} Source` };
   }
 
   /** Build a footer with a specific emoji (for testing/manual). */

@@ -23,7 +23,7 @@ export const mainScreen: Screen = {
       "",
       kv("Bot", settings?.general?.botEnabled ? "🟢 Active" : "🔴 Disabled"),
       kv("Maintenance", settings?.general?.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "4.1.0"),
+      kv("Version", "4.2.0"),
       kv("Channel", settings?.telegram?.targetChannel ?? "(none)"),
       kv("Language", settings?.language?.default ?? "(none)"),
       kv("AI Provider", settings?.ai?.primaryProvider ?? "(none)"),
@@ -58,7 +58,7 @@ export const mainScreen: Screen = {
         { text: "✍️ Manual Post", target: "menu:manual" },
       ),
       navRow(
-        { text: "📝 Edit Config", target: "menu:settings" },
+        { text: "🎨 Editor", target: "menu:editor" },
         { text: "🔄 Refresh", target: "menu:main" },
       ),
       [

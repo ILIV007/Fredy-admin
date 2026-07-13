@@ -13,3 +13,4 @@ export { scheduleScreen } from "./schedule";
 export { soulScreen } from "./soul";
 export { debugScreen } from "./debug";
 export { statsScreen } from "./stats";
+export { editorScreen } from "./editor";

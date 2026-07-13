@@ -94,16 +94,23 @@ export const manualScreen: Screen = {
         return { alert: "❌ Missing source ID" };
       }
       try {
-        // Fetch one item from the specific plugin.
         const items = await ctx.container.plugins.fetchFrom(arg);
         if (items.length === 0) {
           return { alert: `❌ No items from ${arg}` };
         }
-        // Process the first item through the pipeline — skip dedup for manual posts.
         const result = await ctx.container.content.process(items[0]!, "en", { skipDedup: true });
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
+            // Also notify the admin chat with details.
+            await ctx.container.tg.sendMessage(ctx.adminId, [
+              `✅ <b>Manual post published</b>`,
+              ``,
+              `<b>Source:</b> ${arg}`,
+              `<b>Message ID:</b> ${pubResult.telegramMessageId}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Published from ${arg}!` };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
