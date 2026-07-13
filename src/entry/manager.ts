@@ -41,7 +41,7 @@ export async function managerHandler(
     const queueDepths = await container.queue.depth().catch(() => []);
     const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: "4.0.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: "4.1.0", bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -239,7 +239,7 @@ export async function managerHandler(
 
   // ── System ──
   if (apiPath === "system" && request.method === "GET") {
-    return json({ ok: true, version: "4.0.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
+    return json({ ok: true, version: "4.1.0", buildDate: "2026-07-12", runtime: "cloudflare-workers", kv: !!env.Fredy_SETTINGS, cacheStats: container.config.cacheStats(), pluginCount: container.plugins.list().length, providerCount: container.providers.list().length, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY } });
   }
 
   // ── Test single plugin ──
@@ -265,7 +265,7 @@ export async function managerHandler(
   if (apiPath === "test/everything" && request.method === "POST") {
     const report: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
-      version: "4.0.0",
+      version: "4.1.0",
       sections: {} as Record<string, unknown>,
     };
     const sections = report["sections"] as Record<string, unknown>;
@@ -277,7 +277,7 @@ export async function managerHandler(
         ok: true,
         durationMs: Date.now() - t0,
         detail: {
-          version: "4.0.0",
+          version: "4.1.0",
           buildDate: "2026-07-12",
           kv: !!env.Fredy_SETTINGS,
           pluginCount: container.plugins.list().length,
@@ -406,6 +406,244 @@ export async function managerHandler(
     return json({ ok: true, deleted });
   }
 
+  // ── Post to Channel: send a specific plugin's content to the channel ──
+  if (apiPath === "post/channel" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as { pluginId?: string };
+    const pluginId = body.pluginId;
+    if (!pluginId) {
+      return json({ ok: false, error: "Missing pluginId" }, 400);
+    }
+
+    const report: Record<string, unknown> = {
+      pluginId,
+      timestamp: new Date().toISOString(),
+      stages: {} as Record<string, unknown>,
+    };
+    const stages = report["stages"] as Record<string, unknown>;
+
+    // Stage 1: Fetch from plugin
+    try {
+      const t0 = Date.now();
+      const items = await container.plugins.fetchFrom(pluginId);
+      stages["fetch"] = {
+        ok: true,
+        durationMs: Date.now() - t0,
+        itemCount: items.length,
+        items: items.slice(0, 3).map(i => ({
+          id: i.id,
+          title: i.title,
+          url: i.url,
+          hasBody: !!i.body,
+          hasImage: !!i.imageUrl,
+        })),
+      };
+      if (items.length === 0) {
+        stages["fetch"] = { ...stages["fetch"] as object, error: "No items returned" };
+        report["ok"] = false;
+        report["error"] = "Plugin returned no items";
+        return json(report);
+      }
+
+      // Stage 2: Process through pipeline (skip dedup for manual)
+      const t1 = Date.now();
+      const result = await container.content.process(items[0]!, "en", { skipDedup: true });
+      stages["process"] = {
+        ok: result.ok,
+        durationMs: Date.now() - t1,
+        stage: result.stage,
+        error: result.error,
+        contentId: result.content?.id,
+      };
+
+      if (!result.ok || !result.content) {
+        report["ok"] = false;
+        report["error"] = `Processing failed: ${result.error ?? "unknown"}`;
+        return json(report);
+      }
+
+      // Stage 3: Publish to channel
+      const t2 = Date.now();
+      const pubResult = await container.finalPublisher.publish(result.content);
+      stages["publish"] = {
+        ok: pubResult.ok,
+        durationMs: Date.now() - t2,
+        messageId: pubResult.telegramMessageId,
+        chatId: pubResult.telegramChatId,
+        error: pubResult.error,
+      };
+
+      report["ok"] = pubResult.ok;
+      report["error"] = pubResult.error;
+      report["content"] = result.content ? {
+        id: result.content.id,
+        pluginId: result.content.pluginId,
+        category: result.content.category,
+        headline: result.content.headline,
+        textPreview: result.content.text?.slice(0, 500),
+        sourceUrl: result.content.sourceUrl,
+        language: result.content.language,
+        aiProvider: result.content.aiProvider,
+        aiModel: result.content.aiModel,
+        qualityScore: result.content.quality.overallScore,
+        tokensUsed: result.content.tokensUsed,
+      } : null;
+
+      return json(report);
+    } catch (error) {
+      stages["error"] = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack?.split("\n").slice(0, 5) : undefined,
+      };
+      report["ok"] = false;
+      report["error"] = error instanceof Error ? error.message : String(error);
+      return json(report, 500);
+    }
+  }
+
+  // ── Full Checkup: complete system diagnostic JSON ──
+  if (apiPath === "checkup" && request.method === "POST") {
+    const report: Record<string, unknown> = {
+      generatedAt: new Date().toISOString(),
+      version: "4.1.0",
+    };
+
+    // 1. System info
+    try {
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+      report["system"] = {
+        version: "4.1.0",
+        buildDate: "2026-07-13",
+        runtime: "cloudflare-workers",
+        kv: !!env.Fredy_SETTINGS,
+        cacheStats: container.config.cacheStats(),
+        pluginCount: container.plugins.list().length,
+        providerCount: container.providers.list().length,
+        secrets: {
+          botToken: !!env.BOT_TOKEN,
+          gemini: !!env.GEMINI_API_KEY,
+          openrouter: !!env.OPENROUTER_API_KEY,
+          newsapi: !!env.NEWSAPI_KEY,
+          nasa: !!env.NASA_API_KEY,
+          github: !!env.GITHUB_TOKEN,
+          cronKey: !!env.CRON_KEY,
+          webhookSecret: !!env.WEBHOOK_SECRET,
+          debugToken: !!env.DEBUG_TOKEN,
+          adminId: !!env.ADMIN_ID,
+        },
+      };
+      report["settings"] = settings;
+    } catch (e) { report["system"] = { error: errMsg(e) }; }
+
+    // 2. KV test
+    try {
+      const t0 = Date.now();
+      await container.kv.set("fredy:_checkup", "ok", 60);
+      const val = await container.kv.get("fredy:_checkup");
+      await container.kv.delete("fredy:_checkup");
+      report["kv"] = { ok: val === "ok", durationMs: Date.now() - t0 };
+    } catch (e) { report["kv"] = { ok: false, error: errMsg(e) }; }
+
+    // 3. Telegram
+    try {
+      const t0 = Date.now();
+      const me = await container.tg.getMe();
+      report["telegram"] = {
+        ok: me.ok,
+        durationMs: Date.now() - t0,
+        bot: me.ok ? `@${me.result?.username}` : null,
+        botId: me.result?.id,
+      };
+    } catch (e) { report["telegram"] = { ok: false, error: errMsg(e) }; }
+
+    // 4. AI providers
+    try {
+      const providers = container.providers.listWithStatus();
+      report["aiProviders"] = providers;
+    } catch (e) { report["aiProviders"] = { error: errMsg(e) }; }
+
+    // 5. All plugins test
+    try {
+      const plugins = container.plugins.list();
+      const pluginResults: Array<{ id: string; name: string; category: string; enabled: boolean; ok: boolean; itemCount: number; error?: string; durationMs: number }> = [];
+      for (const p of plugins) {
+        const t0 = Date.now();
+        try {
+          const items = await container.plugins.fetchFrom(p.metadata.id);
+          pluginResults.push({
+            id: p.metadata.id,
+            name: p.metadata.name,
+            category: p.metadata.category,
+            enabled: container.plugins.isEnabled(p.metadata.id),
+            ok: true,
+            itemCount: items.length,
+            durationMs: Date.now() - t0,
+          });
+        } catch (error) {
+          pluginResults.push({
+            id: p.metadata.id,
+            name: p.metadata.name,
+            category: p.metadata.category,
+            enabled: container.plugins.isEnabled(p.metadata.id),
+            ok: false,
+            itemCount: 0,
+            error: errMsg(error),
+            durationMs: Date.now() - t0,
+          });
+        }
+      }
+      report["plugins"] = {
+        total: pluginResults.length,
+        ok: pluginResults.filter(r => r.ok).length,
+        failed: pluginResults.filter(r => !r.ok).length,
+        results: pluginResults,
+      };
+    } catch (e) { report["plugins"] = { error: errMsg(e) }; }
+
+    // 6. Queue
+    try {
+      const depths = await container.queue.depth();
+      report["queue"] = { depths, total: depths.reduce((s, d) => s + d.depth, 0) };
+    } catch (e) { report["queue"] = { error: errMsg(e) }; }
+
+    // 7. Scheduler
+    try {
+      const status = await container.scheduler.status();
+      report["scheduler"] = status;
+    } catch (e) { report["scheduler"] = { error: errMsg(e) }; }
+
+    // 8. History
+    try {
+      const today = await container.history.getToday();
+      report["history"] = { entriesToday: today.entries.length, date: today.date };
+    } catch (e) { report["history"] = { error: errMsg(e) }; }
+
+    // 9. Logs
+    try {
+      const updates = await container.debug.getRecentUpdates().catch(() => []);
+      const errors = await container.debug.getRecentErrors().catch(() => []);
+      report["logs"] = {
+        recentUpdates: updates.length,
+        recentErrors: errors.length,
+        lastErrors: errors.slice(0, 5),
+      };
+    } catch (e) { report["logs"] = { error: errMsg(e) }; }
+
+    // Compute overall health
+    const sections = ["system", "kv", "telegram", "plugins", "queue", "scheduler", "history"];
+    const healthySections = sections.filter(s => {
+      const section = report[s] as { ok?: boolean; error?: string } | undefined;
+      return section && section.ok !== false && !section.error;
+    });
+    report["overallHealth"] = {
+      healthy: healthySections.length,
+      total: sections.length,
+      percentage: Math.round((healthySections.length / sections.length) * 100),
+    };
+
+    return json(report);
+  }
+
   return new Response("Not Found", { status: 404 });
 }
 
@@ -453,7 +691,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
 <script>
 const TOKEN="${token}";const API="/Manager/api/";
-const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
+const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
 let currentPage="dashboard";
 function buildNav(){document.getElementById("nav").innerHTML=navItems.map(i=>'<div class="nav-item" onclick="navigate(\\''+i.id+'\\')" id="nav-'+i.id+'"><span class="nav-icon">'+i.icon+'</span>'+i.label+'</div>').join("");}
 function navigate(id){currentPage=id;document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));const el=document.getElementById("nav-"+id);if(el)el.classList.add("active");const item=navItems.find(i=>i.id===id);document.getElementById("page-title").textContent=item?item.label:"";loadPage(id);}
@@ -467,7 +705,7 @@ function card(l,v){return '<div class="card"><div class="card-label">'+l+'</div>
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast("📋 Copied!")).catch(()=>toast("❌ Copy failed"));}
 function copyElement(id){const el=document.getElementById(id);if(el)copyText(el.textContent);}
 function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\''+id+'\\')" style="margin-top:4px">📋 Copy</button>';}
-function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,logs:loadLogs,config:loadConfig,system:loadSystem,statistics:loadStats,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
+function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,logs:loadLogs,config:loadConfig,system:loadSystem,statistics:loadStats,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
 
 async function loadDashboard(){
   const d=await api("health");const c=document.getElementById("content");
@@ -513,9 +751,53 @@ async function testEverything(){
 
 function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
+async function loadPost(){
+  const d=await api("plugins");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error loading plugins</div>';return;}
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">📤 Post to Channel</h3><p style="color:var(--text2);margin-bottom:12px">Select a source API below to fetch content, process it through the AI pipeline, and publish immediately to the channel. A detailed JSON report will appear at the bottom.</p></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">🔌 Available APIs</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
+  d.plugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel(\\''+p.id+'\\')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+' · '+(p.enabled?'ON':'OFF')+'</div></button>').join("")+
+  '</div></div><div id="post-result"></div>';
+}
+
+async function postToChannel(pluginId){
+  const w=document.getElementById("post-result");
+  w.innerHTML='<div class="card">⏳ Fetching from '+pluginId+' and publishing to channel...</div>';
+  toast("📤 Posting from "+pluginId+"...");
+  try{
+    const d=await api("post/channel","POST",{pluginId});
+    const jsonStr=JSON.stringify(d,null,2);
+    const ok=d.ok;
+    // Build stage summary
+    let stageHtml="";
+    if(d.stages){
+      const st=d.stages;
+      if(st.fetch)stageHtml+='<div class="test-result '+(st.fetch.ok?'test-pass':'test-fail')+'"><span>'+(st.fetch.ok?'✅':'❌')+'</span><span style="font-weight:600">Fetch</span><span style="color:var(--text2);flex:1">'+(st.fetch.ok?st.fetch.itemCount+' items':st.fetch.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.fetch.durationMs+'ms</span></div>';
+      if(st.process)stageHtml+='<div class="test-result '+(st.process.ok?'test-pass':'test-fail')+'"><span>'+(st.process.ok?'✅':'❌')+'</span><span style="font-weight:600">Process</span><span style="color:var(--text2);flex:1">'+(st.process.ok?'OK: '+st.process.contentId:st.process.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.process.durationMs+'ms</span></div>';
+      if(st.publish)stageHtml+='<div class="test-result '+(st.publish.ok?'test-pass':'test-fail')+'"><span>'+(st.publish.ok?'✅':'❌')+'</span><span style="font-weight:600">Publish</span><span style="color:var(--text2);flex:1">'+(st.publish.ok?'Msg #'+st.publish.messageId:st.publish.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.publish.durationMs+'ms</span></div>';
+    }
+    // Content preview
+    let contentHtml="";
+    if(d.content){
+      contentHtml='<div class="card" style="margin-top:8px"><h4 style="margin-bottom:6px">📝 Content Published</h4>'+
+        '<div style="font-size:12px;color:var(--text2);margin-bottom:4px"><b>Plugin:</b> '+d.content.pluginId+' · <b>Category:</b> '+d.content.category+' · <b>AI:</b> '+d.content.aiProvider+'/'+d.content.aiModel+' · <b>Score:</b> '+d.content.qualityScore+' · <b>Tokens:</b> '+d.content.tokensUsed+'</div>'+
+        '<div style="background:var(--surface2);padding:8px;border-radius:4px;font-size:12px;max-height:200px;overflow-y:auto">'+escapeHtml(d.content.textPreview||'')+'</div></div>';
+    }
+    w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ Posted Successfully':'❌ Post Failed')+'</h3><span class="badge '+(ok?'badge-green':'badge-red')+'">'+pluginId+'</span></div>'+
+      stageHtml+contentHtml+
+      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\\'post-json\\')">📋 Copy Report</button></div></div>';
+    toast(ok?"✅ Posted to channel!":"❌ Post failed");
+  }catch(e){
+    w.innerHTML='<div class="card">❌ Error: '+escapeHtml(String(e))+'</div>';
+    toast("❌ Error");
+  }
+}
+
 async function loadBacktest(){
   const c=document.getElementById("content");
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🧪 Full System Back-Test</h3><p style="color:var(--text2);margin-bottom:12px">Runs all system tests: KV, Config, Telegram, AI, Plugins, Queue, Scheduler, History, Secrets.</p><button class="btn" onclick="runBacktest()">▶️ Run Back-Test</button></div><div id="backtest-results"></div>';
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🧪 Full System Back-Test</h3><p style="color:var(--text2);margin-bottom:12px">Runs all system tests: KV, Config, Telegram, AI, Plugins, Queue, Scheduler, History, Secrets.</p><button class="btn" onclick="runBacktest()">▶️ Run Back-Test</button></div>'+
+  '<div class="card" style="margin-top:12px;border:1px solid var(--accent)"><h3 style="margin-bottom:8px">🏥 Full Checkup (Complete System JSON)</h3><p style="color:var(--text2);margin-bottom:12px">Generates a comprehensive JSON report covering ALL aspects of the bot: system info, KV, Telegram, AI providers, all plugins, queue, scheduler, history, logs, and overall health score. Perfect for debugging — just copy and send!</p><button class="btn" onclick="runCheckup()">▶️ Run Full Checkup</button></div>'+
+  '<div id="backtest-results"></div><div id="checkup-results"></div>';
 }
 async function runBacktest(){
   const r=document.getElementById("backtest-results");r.innerHTML='<div class="card">Running tests…</div>';
@@ -523,6 +805,37 @@ async function runBacktest(){
   r.innerHTML='<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center"><h3>'+(d.ok?'✅ All Tests Passed':'❌ Some Tests Failed')+'</h3><span class="badge '+(d.ok?"badge-green":"badge-red")+'">'+d.summary+'</span></div></div>'+
   d.results.map(t=>'<div class="test-result '+(t.ok?"test-pass":"test-fail")+'"><span>'+(t.ok?"✅":"❌")+'</span><span style="font-weight:600">'+t.test+'</span><span style="color:var(--text2);flex:1">'+t.detail+'</span><span style="color:var(--text2);font-size:11px">'+t.durationMs+'ms</span><button class="btn btn-sm btn-ghost" onclick="copyText(\\''+t.test+": "+t.detail+'\\')">📋</button></div>').join("");
   toast(d.ok?"✅ All tests passed!":"❌ Some tests failed");
+}
+async function runCheckup(){
+  const r=document.getElementById("checkup-results");r.innerHTML='<div class="card">⏳ Running full system checkup... (this can take 30-60s)</div>';
+  toast("🏥 Running full checkup...");
+  try{
+    const d=await api("checkup","POST");
+    const jsonStr=JSON.stringify(d,null,2);
+    const health=d.overallHealth||{healthy:0,total:0,percentage:0};
+    const pct=health.percentage;
+    const color=pct>=80?'badge-green':(pct>=50?'badge-yellow':'badge-red');
+    r.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">🏥 Full System Checkup</h3><span class="badge '+color+'">'+health.healthy+'/'+health.total+' ('+pct+'%)</span></div>'+
+    '<div class="progress" style="margin-bottom:12px"><div class="progress-bar" style="width:'+pct+'%;background:'+(pct>=80?'var(--green)':(pct>=50?'var(--yellow)':'var(--red')))+'"></div></div>'+
+    '<table style="font-size:12px;margin-bottom:12px"><tbody>'+
+    '<tr><td><b>System</b></td><td>'+escapeHtml(JSON.stringify(d.system||{}))+'</td></tr>'+
+    '<tr><td><b>KV</b></td><td>'+escapeHtml(JSON.stringify(d.kv||{}))+'</td></tr>'+
+    '<tr><td><b>Telegram</b></td><td>'+escapeHtml(JSON.stringify(d.telegram||{}))+'</td></tr>'+
+    '<tr><td><b>AI Providers</b></td><td>'+escapeHtml(JSON.stringify(d.aiProviders||{}))+'</td></tr>'+
+    '<tr><td><b>Plugins</b></td><td>'+(d.plugins?d.plugins.ok+'/'+d.plugins.total+' OK':'?')+'</td></tr>'+
+    '<tr><td><b>Queue</b></td><td>'+escapeHtml(JSON.stringify(d.queue||{}))+'</td></tr>'+
+    '<tr><td><b>Scheduler</b></td><td>'+escapeHtml(JSON.stringify(d.scheduler||{}).slice(0,200))+'</td></tr>'+
+    '<tr><td><b>History</b></td><td>'+escapeHtml(JSON.stringify(d.history||{}))+'</td></tr>'+
+    '<tr><td><b>Logs</b></td><td>'+(d.logs?d.logs.recentUpdates+' updates, '+d.logs.recentErrors+' errors':'?')+'</td></tr>'+
+    '</tbody></table>'+
+    '<h4 style="margin-bottom:6px">📋 Complete JSON Report (copy and send for debugging)</h4>'+
+    '<pre id="checkup-json" style="max-height:600px">'+escapeHtml(jsonStr)+'</pre>'+
+    '<button class="btn" onclick="copyElement(\\'checkup-json\\')">📋 Copy Full JSON Report</button></div>';
+    toast(pct>=80?"✅ System healthy!":(pct>=50?"⚠️ Some issues":"❌ Critical issues"));
+  }catch(e){
+    r.innerHTML='<div class="card">❌ Checkup failed: '+escapeHtml(String(e))+'</div>';
+    toast("❌ Checkup failed");
+  }
 }
 
 async function loadPlugins(){
@@ -631,7 +944,7 @@ async function loadStats(){
 }
 
 function loadAbout(){
-  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.0.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
+  document.getElementById("content").innerHTML='<div class="card"><h1 style="font-size:24px;margin-bottom:12px">🤖 Fredy</h1><p style="color:var(--text2);margin-bottom:16px">AI-powered Telegram Content Engine</p><div class="card-grid">'+card("Version","4.1.0")+card("License","MIT")+card("Runtime","Cloudflare Workers")+card("Language","TypeScript")+card("AI","Gemini + OpenRouter")+card("Storage","Cloudflare KV")+'</div><p style="color:var(--text2)">Built for the developer community.</p></div>';
 }
 
 async function clearLogs(){const d=await api("clear/logs","POST");toast(d.ok?"✅ Logs cleared":"❌ Failed");}
