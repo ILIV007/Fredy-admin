@@ -1,22 +1,20 @@
 /**
  * src/services/ux-layer.ts
- * Humanizes the post format. Removes all system traces.
+ * UX Layer — transforms ReadyContent into FinalPost for Telegram.
  *
- * Rules (Prompt 13):
- *   - Human-like writing
- *   - No robotic structure
- *   - No metadata visible (scores, API names, system traces)
- *   - No long paragraphs (max 2-5 lines body)
- *   - Max readability priority
+ * Post format (simplified):
+ *   <b>Hook (AI headline or title)</b>
  *
- * Final structure:
- *   [HOOK]
- *   [BODY: 2-5 lines]
- *   [TAKEAWAY]
- *   [SOURCE LINE]
+ *   Body (AI-generated text, full length, no truncation)
+ *
+ *   <blockquote>emoji Source — URL</blockquote>
+ *   <blockquote>🌀 &#64;ILIVIR3</blockquote>
+ *
+ * For short posts (body < 200 chars), hook and body are combined into one paragraph.
  */
 
-import type { ReadyContent, FinalPost, ContentMedia } from "../types/content";
+import type { ReadyContent, FinalPost } from "../types/content";
+import type { UXLayer } from "./ux-layer";
 import type { HookEngine } from "./hook-engine";
 import type { SourceFormatter } from "./source-formatter";
 import type { Logger } from "./logger";
@@ -28,48 +26,32 @@ export interface UXLayerDeps {
   readonly sourceFormatter: SourceFormatter;
 }
 
-/** Maximum body lines. */
-const MAX_BODY_LINES = 5;
-
-/** Maximum body characters. */
-const MAX_BODY_CHARS = 600;
-
-export class UXLayer {
+export class UXLayerImpl implements UXLayer {
   constructor(private readonly deps: UXLayerDeps) {}
 
   /** Transform a ReadyContent into a FinalPost. */
   async transform(content: ReadyContent): Promise<FinalPost> {
-    // 1. Generate a dynamic hook.
-    let hook = this.deps.hookEngine.generate(content);
+    // 1. Hook = AI headline (or fallback to title).
+    const hook = (content.headline ?? content.text?.split("\n")[0] ?? "").trim();
 
-    // 2. Humanize the body (strip metadata, shorten, restructure).
-    const body = this.humanizeBody(content.text);
+    // 2. Body = AI text (full, no truncation, no URL stripping).
+    //    If AI didn't run (format-only), body = content.text as-is.
+    const body = (content.text ?? "").trim();
 
-    // 3. Extract a key takeaway.
-    let takeaway = this.extractTakeaway(content.text, content.category);
+    // 3. Source line with random emoji.
+    const { emoji } = await this.deps.sourceFormatter.buildFooter();
 
-    // CRITICAL: Strip ALL URLs from hook and takeaway — Telegram errors on
-    // URLs like https://v2.jokeapi.dev ("wrong type of the web page content").
-    hook = hook.replace(/https?:\/\/[^\s<>"']+/gi, "").trim();
-    takeaway = takeaway.replace(/https?:\/\/[^\s<>"']+/gi, "").trim();
+    // 4. Assemble the full text.
+    const fullText = this.assembleFullText(hook, body, content.sourceUrl, emoji);
 
-    // 4. Build the source line.
-    const { emoji, footer } = await this.deps.sourceFormatter.buildFooter();
-
-    // 5. Source label — always English "Source" (never translated).
-    const sourceLabel = "Source";
-
-    // 6. Assemble the full text.
-    const fullText = this.assembleFullText(hook, body, takeaway, sourceLabel, content.sourceUrl, emoji);
-
-    // 7. Build a shorter caption for image posts.
-    const caption = this.assembleCaption(hook, body, takeaway);
+    // 5. Caption for image posts (shorter).
+    const caption = this.assembleCaption(hook, body, content.sourceUrl, emoji);
 
     return {
       hook,
       body,
-      takeaway,
-      sourceLine: footer,
+      takeaway: "",
+      sourceLine: `${emoji} Source`,
       sourceEmoji: emoji,
       sourceUrl: content.sourceUrl,
       media: content.media,
@@ -91,218 +73,79 @@ export class UXLayer {
     };
   }
 
-  /** Humanize the body: strip metadata, shorten, clean up. */
-  private humanizeBody(text: string | null | undefined): string {
-    if (!text) return "";
-    let body = text;
-
-    // Remove any visible metadata patterns.
-    body = this.stripMetadata(body);
-
-    // Remove AI cliché phrases.
-    body = this.stripCliches(body);
-
-    // CRITICAL: Strip ALL raw URLs from body — Telegram tries to preview them
-    // even with disable_web_page_preview:true, causing "wrong type of web page content".
-    body = body.replace(/https?:\/\/[^\s<>"']+/gi, "");
-
-    // Split into paragraphs and keep only the first few.
-    const paragraphs = body
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0)
-      .slice(0, MAX_BODY_LINES);
-
-    // Join with double newlines.
-    body = paragraphs.join("\n\n");
-
-    // Limit total length.
-    if (body.length > MAX_BODY_CHARS) {
-      body = body.slice(0, MAX_BODY_CHARS - 3) + "...";
-    }
-
-    return body;
-  }
-
-  /** Strip visible metadata (scores, API names, system traces). */
-  private stripMetadata(text: string | null | undefined): string {
-    if (!text) return "";
-    let cleaned = text;
-
-    // Remove patterns like "Score: 85", "Quality: 90/100".
-    cleaned = cleaned.replace(/(?:score|quality)\s*:\s*\d+(?:\s*\/\s*100)?/gi, "");
-
-    // Remove API names (openrouter, gemini, etc.) when they appear as metadata.
-    cleaned = cleaned.replace(/\b(?:provider|model)\s*:\s*\S+/gi, "");
-
-    // Remove "Source: @xxx" attribution tags.
-    cleaned = cleaned.replace(/via\s+@\w+/gi, "");
-    cleaned = cleaned.replace(/source\s*:\s*@\w+/gi, "");
-
-    // Remove "Join/Follow/Subscribe" promo lines.
-    cleaned = cleaned.replace(/\b(?:join|subscribe|follow)\s+(?:us\s+)?(?:on\s+)?(?:telegram\s+)?@?\w+/gi, "");
-
-    // Remove excessive hashtags (5+ consecutive).
-    cleaned = cleaned.replace(/(?:#\w+\s*){5,}/g, "");
-
-    // Clean up extra whitespace.
-    cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
-
-    return cleaned;
-  }
-
-  /** Remove AI cliché phrases. */
-  private stripCliches(text: string | null | undefined): string {
-    if (!text) return "";
-    const cliches = [
-      /in today's world,?/gi,
-      /it is worth noting that?/gi,
-      /as an ai(?:\s+language\s+model)?,?/gi,
-      /in this (?:article|post),? (?:we|i) (?:will|'ll)?/gi,
-      /let'?s dive in,?/gi,
-      /without further ado,?/gi,
-      /here'?s (?:the |a )?(?:thing|catch|twist)\s*:/gi,
-    ];
-
-    let cleaned = text;
-    for (const cliche of cliches) {
-      cleaned = cleaned.replace(cliche, "");
-    }
-
-    // Clean up double spaces left by removals.
-    cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
-
-    return cleaned;
-  }
-
-  /** Extract a key takeaway line from the body. */
-  private extractTakeaway(text: string | null | undefined, category: string): string {
-    if (!text) return "";
-    const sentences = text
-      .split(/[.!?]\s/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 15 && s.length < 150);
-
-    if (sentences.length === 0) return "";
-
-    // For Category A (dev), look for "how to" or benefit sentences.
-    if (category === "A") {
-      const benefit = sentences.find((s) =>
-        /(?:you can|lets you|allows you|makes it|helps you|enables)/i.test(s),
-      );
-      if (benefit) return this.cleanTakeaway(benefit);
-    }
-
-    // For Category B (news), look for impact sentences.
-    if (category === "B") {
-      const impact = sentences.find((s) =>
-        /(?:means|matters|affects|impacts|changes)/i.test(s),
-      );
-      if (impact) return this.cleanTakeaway(impact);
-    }
-
-    // For Category C, use the last sentence as takeaway.
-    if (category === "C") {
-      return this.cleanTakeaway(sentences[sentences.length - 1]!);
-    }
-
-    // Fallback: use the second sentence (first is usually the hook context).
-    return this.cleanTakeaway(sentences[1] ?? sentences[0] ?? "");
-  }
-
-  /** Clean a takeaway sentence. */
-  private cleanTakeaway(sentence: string | null | undefined): string {
-    if (!sentence) return "";
-    let cleaned = sentence.trim();
-    if (!cleaned) return "";
-    // Ensure it ends with a period.
-    if (!/[.!?]$/.test(cleaned)) cleaned += ".";
-    // Limit length.
-    if (cleaned.length > 120) {
-      cleaned = cleaned.slice(0, 117) + "...";
-    }
-    return cleaned;
-  }
-
   /** Assemble the full post text. */
   private assembleFullText(
     hook: string,
     body: string,
-    takeaway: string,
-    sourceLabel: string,
     sourceUrl: string,
     emoji: string,
   ): string {
     const parts: string[] = [];
 
-    // Hook (bold).
-    parts.push(`<b>${this.escapeHtml(hook)}</b>`);
-    parts.push("");
+    // Hook (bold) — only if different from body.
+    if (hook && body && !body.startsWith(hook)) {
+      parts.push(`<b>${this.escapeHtml(hook)}</b>`);
+      parts.push("");
+    }
 
-    // Body (escaped to prevent HTML parsing issues).
+    // Body (escaped HTML, full length, no truncation).
     parts.push(this.escapeHtml(body));
 
-    // Takeaway (italic, if present).
-    if (takeaway) {
+    // Source as blockquote — only for URLs with meaningful paths.
+    if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
       parts.push("");
-      parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
+      parts.push(`<blockquote><a href="${this.escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
     }
 
-    // Source link — show as clickable <a href> for real web pages only.
-    // For APIs without content URLs (joke, etc.), no source line at all.
-    const isRealWebPage = sourceUrl && this.isLinkableUrl(sourceUrl);
-    if (isRealWebPage) {
-      parts.push("");
-      parts.push(`<a href="${this.escapeHtml(sourceUrl)}">${emoji} ${sourceLabel}</a>`);
-    }
-
-    // Channel footer — use HTML entity for @ to prevent Telegram mention parsing.
+    // Channel footer as blockquote.
     parts.push("");
     parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
     return parts.join("\n");
-  }
-
-  /** Check if a URL points to a real web page (not just an API endpoint). */
-  private isLinkableUrl(url: string): boolean {
-    try {
-      const u = new URL(url);
-      const path = u.pathname;
-      // Must have a meaningful path (more than just "/")
-      if (path === "/" || path === "" || path.length < 3) return false;
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   /** Assemble a shorter caption for image posts. */
   private assembleCaption(
     hook: string,
     body: string,
-    takeaway: string,
+    sourceUrl: string,
+    emoji: string,
   ): string {
     const parts: string[] = [];
 
     // Hook (bold).
-    parts.push(`<b>${this.escapeHtml(hook)}</b>`);
-    parts.push("");
-
-    // Body (shortened + escaped).
-    const shortBody = body.length > 300 ? body.slice(0, 297) + "..." : body;
-    parts.push(this.escapeHtml(shortBody));
-
-    // Takeaway (if room).
-    if (takeaway && parts.join("\n").length < 800) {
+    if (hook && body && !body.startsWith(hook)) {
+      parts.push(`<b>${this.escapeHtml(hook)}</b>`);
       parts.push("");
-      parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Channel footer — use HTML entity for @ to prevent Telegram mention parsing.
+    // Body — for captions, limit to 800 chars but don't add "...".
+    const shortBody = body.length > 800 ? body.slice(0, 797) : body;
+    parts.push(this.escapeHtml(shortBody));
+
+    // Source as blockquote.
+    if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
+      parts.push("");
+      parts.push(`<blockquote><a href="${this.escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+    }
+
+    // Channel footer as blockquote.
     parts.push("");
     parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
     return parts.join("\n");
+  }
+
+  /** Check if a URL has a meaningful path (not just "/"). */
+  private isLinkableUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      const path = u.pathname;
+      if (path === "/" || path === "" || path.length < 3) return false;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Escape HTML special characters. */
@@ -314,3 +157,6 @@ export class UXLayer {
       .replace(/>/g, "&gt;");
   }
 }
+
+// Re-export the class as UXLayer for backward compatibility.
+export { UXLayerImpl as UXLayer };

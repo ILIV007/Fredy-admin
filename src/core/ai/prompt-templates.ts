@@ -32,21 +32,24 @@ HARD RULES (violating any of these is a critical failure):
 6. NEVER add promotional phrases: "join", "subscribe", "follow", "buy now".
 7. NEVER add attribution tags: "via @xxx", "source: @xxx".
 8. NEVER start with "Here is", "Sure", "I'll", "As an AI".
-9. PRESERVE all GitHub links, docs, downloads, APIs, commands, code blocks, filenames.
+9. NEVER include URLs in the text field. The system adds source links automatically.
 10. RESPECT the soul.md personality injected below.
 
 OUTPUT FORMAT:
 Return a single JSON object with this exact shape:
 {
-  "text": "<the post body, plain text with markdown for code/bold>",
+  "text": "<the post body, plain text. Can use **bold** for emphasis>",
   "aiConfidence": <number 0-100>,
   "generatedLanguage": "<the language code you actually used: en|fa>",
-  "headline": "<optional, a short headline for the post>",
-  "keyPoints": ["<optional, 1-3 bullet points>"],
+  "headline": "<a short headline for the post, in the same language as text>",
   "notes": "<optional, any concerns about the content>"
 }
 
-The "text" field is the post. It must be in the requested language.
+The "text" field is the main content. Write it naturally — explain, edit, and improve the source material.
+For short content (jokes, simple facts), the text can be just 1-2 sentences.
+For longer content (tutorials, releases, news), write 2-4 paragraphs with full explanation.
+DO NOT truncate or add "..." — write the COMPLETE post.
+DO NOT include source URLs in the text — the system adds them separately.
 The "aiConfidence" is your honest self-assessment of quality (0-100).
 Do NOT wrap the JSON in markdown code fences. Output raw JSON.`;
 
@@ -56,33 +59,19 @@ Do NOT wrap the JSON in markdown code fences. Output raw JSON.`;
 const CATEGORY_PROMPTS: Readonly<Record<Category, string>> = {
   A: `CATEGORY A — Developer Content (programming, AI, GitHub, dev tools, frameworks, dev tips)
 
-Structure the post as:
-- Opening line: a hook or headline (what is this? why does it matter?)
-- Body: 2-4 short paragraphs explaining the what and why.
-- Code example: if applicable, a SHORT code block (≤8 lines) showing basic usage.
-- Links: each URL on its own line, wrapped in blockquotes.
-
-Bold the name of the tool/library once. Bold version numbers.
-Keep technical accuracy: preserve every URL, command, and code snippet from the source.`,
+Write a clear, engaging post about the source content. Explain what it is, why it matters, and how developers can use it. Include version numbers and tool names. 2-4 paragraphs for substantial content, 1-2 for simple items.`,
 
   B: `CATEGORY B — Technology News (only tech news, no politics, no general news)
 
-Structure the post as:
-- Headline: the news itself (1 line).
-- What happened: 2-3 sentences, factual, no speculation.
-- Why it matters: 2-3 sentences, your analysis — no fluff.
-- Source link: required. If the source has no link, note it in "notes".
-
-If the news is political, opinion, rumor, or celebrity tech gossip, set aiConfidence below 40 and explain in "notes".`,
+Write a factual news post. What happened, why it matters. 2-3 paragraphs. No speculation, no rumor. If the content is political or gossip, set aiConfidence below 40.`,
 
   C: `CATEGORY C — Support Content (NASA, jokes, quotes, dev facts)
 
-For NASA: short caption (≤400 chars). Explain what the image shows. No deep astrophysics.
-For jokes: setup + punchline. No explanation. Keep it respectful.
-For quotes: the quote + author (em-dash, not hyphen). No motivational-poster quotes.
-For dev facts: the fact + 1-2 sentences of context. Must be verifiable.
-
-If you cannot verify a fact, set aiConfidence below 50 and explain in "notes".`,
+For NASA: explain what the image shows in 2-4 sentences. No deep astrophysics.
+For jokes: just the joke, 1-2 sentences. No explanation needed.
+For quotes: the quote + author. No motivational-poster quotes.
+For dev facts: the fact + 1-2 sentences of context.
+Keep it short and engaging.`,
 };
 
 /**
