@@ -126,6 +126,7 @@ export class FinalPublisher {
         cleanTextLength: cleanText.length,
         hasUrl: /https?:\/\//i.test(cleanText),
         hasHref: /<a\s+href/i.test(cleanText),
+        hasAtMention: /@[a-zA-Z]/.test(cleanText),
         channel: settings?.telegram?.targetChannel ?? "@ILIVIR3",
         parseMode: settings?.telegram?.parseMode ?? "HTML",
         sourceUrl: content.sourceUrl,
@@ -135,6 +136,13 @@ export class FinalPublisher {
         hook: finalPost.hook,
         body: finalPost.body,
         takeaway: finalPost.takeaway,
+        fullPostKeys: Object.keys(finalPost),
+        hasMedia: !!finalPost.media,
+        mediaType: finalPost.media?.type,
+        mediaUrl: finalPost.media?.url,
+        caption: finalPost.caption,
+        retryAttempts: retryResult.attempts,
+        retryErrors: retryResult.attempts.map(a => ({ provider: a.provider, ok: a.ok, error: a.error })),
       };
       
       this.deps.logger.error("telegram.error", {
@@ -236,7 +244,7 @@ export class FinalPublisher {
       );
 
       if (!result.ok || !result.result) {
-        throw new Error(`Telegram sendPhoto failed: ${result.description ?? "unknown"}`);
+        throw new Error(`Telegram sendPhoto failed: ${result.description ?? "unknown"} (error_code: ${result.error_code ?? "?"})`);
       }
 
       return {
@@ -255,7 +263,7 @@ export class FinalPublisher {
     });
 
     if (!result.ok || !result.result) {
-      throw new Error(`Telegram sendMessage failed: ${result.description ?? "unknown"}`);
+      throw new Error(`Telegram sendMessage failed: ${result.description ?? "unknown"} (error_code: ${result.error_code ?? "?"})`);
     }
 
     return {

@@ -261,7 +261,7 @@ export class UXLayer {
 
     // Channel footer as blockquote.
     parts.push("");
-    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
+    parts.push(`<blockquote>🌀 <code>ILIVIR3</code></blockquote>`);
 
     return parts.join("\n");
   }
@@ -306,7 +306,7 @@ export class UXLayer {
 
     // Channel footer as blockquote.
     parts.push("");
-    parts.push(`<blockquote>🌀 @ILIVIR3</blockquote>`);
+    parts.push(`<blockquote>🌀 <code>ILIVIR3</code></blockquote>`);
 
     return parts.join("\n");
   }
