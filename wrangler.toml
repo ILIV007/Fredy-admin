@@ -49,16 +49,13 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # ============================================================
 # Cron Triggers
 # ============================================================
-# DISABLED — Fredy uses external cron-job.org to call /internal/tick.
-# This avoids double-execution and reduces Cloudflare request count.
-# The external cron calls: https://<worker>/internal/tick?key=<CRON_KEY>
-#
-# To re-enable internal cron, uncomment the lines below.
-# WARNING: If you enable internal cron AND use external cron-job.org,
-# you will get DOUBLE execution and ~1500+ extra requests/day.
+# Backup cron: runs every 24 hours as a fallback in case
+# the external cron-job.org stops working.
+# The external cron (cron-job.org) calls /internal/tick every 2 hours.
+# This internal cron is a safety net only.
 
-# [triggers]
-# crons = ["* * * * *", "*/15 * * * *"]
+[triggers]
+crons = ["0 */24 * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

@@ -29,7 +29,28 @@ export async function cronHandler(
   const { env, container, ctx } = deps;
   console.log(`[cron] tick — cron="${event.cron}" at ${new Date().toISOString()}`);
 
-  // Run the silent scheduling fallback queue on every minute tick.
+  // 24-hour backup cron — runs the full tick as a safety net.
+  if (event.cron === "0 */24 * * *") {
+    console.log("[cron] 24h backup tick — running full pipeline");
+    ctx.waitUntil(processScheduledQueue(env, container));
+    ctx.waitUntil(
+      (async () => {
+        const scheduler = new SchedulerOrchestrator(container);
+        const result = await scheduler.tick();
+        if (result.fired) {
+          console.log(`[cron] slot fired: index=${result.slot?.index ?? "?"} category=${result.slot?.category ?? "?"}`);
+        } else if (result.skipped) {
+          console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
+        }
+        // Also refresh sources.
+        await scheduler.refreshSources();
+        console.log("[cron] 24h backup complete");
+      })(),
+    );
+    return;
+  }
+
+  // Every-minute tick (if enabled).
   if (event.cron === "* * * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
@@ -41,18 +62,6 @@ export async function cronHandler(
         } else if (result.skipped) {
           console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
         }
-      })(),
-    );
-    return;
-  }
-
-  // Refresh source caches every 15 minutes.
-  if (event.cron === "*/15 * * * *") {
-    ctx.waitUntil(
-      (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
-        await scheduler.refreshSources();
-        console.log("[cron] source refresh complete");
       })(),
     );
     return;
