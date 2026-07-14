@@ -16,8 +16,11 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const OPENROUTER_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen-2.5-72b-instruct:free",
-  "google/gemini-2.0-flash-exp:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "google/gemma-4-31b-it:free",
+  "openai/gpt-oss-120b:free",
+  "nousresearch/hermes-3-llama-3.1-405b:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
 ] as const;
 
 export class OpenRouterProvider implements AIProvider {
