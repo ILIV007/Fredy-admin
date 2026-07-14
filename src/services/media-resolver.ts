@@ -223,7 +223,8 @@ export class MediaResolver {
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-      return true;
+      // Also check file extension — reject .ico, .gif, .svg, .bmp, .tiff
+      return isUsableImageUrl(url);
     } catch {
       return false;
     }

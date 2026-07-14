@@ -232,24 +232,31 @@ export class FinalPublisher {
     console.log("[publish] ====== END DEBUG ======");
 
     // If content has media (image), send as photo with caption.
+    // FINAL SAFETY: check that media URL is a usable image format.
     if (post.media && post.media.type === "image" && post.media.url) {
-      const result = await this.deps.tg.sendPhoto(
-        channel,
-        post.media.url,
-        cleanCaption,
-        {
-          parse_mode: parseMode,
-        },
-      );
+      const mediaUrl = post.media.url.toLowerCase().split("?")[0] ?? "";
+      if (mediaUrl.match(/\.(ico|gif|svg|bmp|tiff)$/)) {
+        // Bad image format — send as text-only instead.
+        console.log("[publish] Skipping media (bad format):", mediaUrl);
+      } else {
+        const result = await this.deps.tg.sendPhoto(
+          channel,
+          post.media.url,
+          cleanCaption,
+          {
+            parse_mode: parseMode,
+          },
+        );
 
-      if (!result.ok || !result.result) {
-        throw new Error(`Telegram sendPhoto failed: ${result.description ?? "unknown"} (error_code: ${result.error_code ?? "?"})`);
+        if (!result.ok || !result.result) {
+          throw new Error(`Telegram sendPhoto failed: ${result.description ?? "unknown"} (error_code: ${result.error_code ?? "?"})`);
+        }
+
+        return {
+          messageId: result.result.message_id,
+          chatId: String(result.result.chat?.id ?? channel),
+        };
       }
-
-      return {
-        messageId: result.result.message_id,
-        chatId: String(result.result.chat?.id ?? channel),
-      };
     }
 
     // Text-only post.
