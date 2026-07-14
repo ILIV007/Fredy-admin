@@ -248,14 +248,12 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Source link — show as plain text (NOT clickable <a href>).
-    // Telegram validates URLs inside <a href> tags even with disable_web_page_preview,
-    // and rejects messages if the URL returns non-HTML content.
-    // By showing the URL as plain text, Telegram doesn't try to validate it.
+    // Source link — show as clickable <a href> for real web pages only.
+    // For APIs without content URLs (joke, etc.), no source line at all.
     const isRealWebPage = sourceUrl && this.isLinkableUrl(sourceUrl);
     if (isRealWebPage) {
       parts.push("");
-      parts.push(`${emoji} ${sourceLabel}`);
+      parts.push(`<a href="${this.escapeHtml(sourceUrl)}">${emoji} ${sourceLabel}</a>`);
     }
 
     // Channel footer — use HTML entity for @ to prevent Telegram mention parsing.
