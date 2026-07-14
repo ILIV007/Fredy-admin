@@ -152,8 +152,12 @@ export class ContentManager {
       this.deps.logger.warn("ai.fallback", {
         contentId: resolvedItem.id,
         error: aiResult.error ?? "AI failed",
+        attempts: aiResult.attempts,
         message: "AI failed — using format-only fallback",
       });
+      console.log("[content] AI FAILED — format-only fallback triggered");
+      console.log("[content] AI error:", aiResult.error);
+      console.log("[content] AI attempts:", JSON.stringify(aiResult.attempts));
       const fallbackContent = {
         text: resolvedItem.body || resolvedItem.title,
         aiConfidence: 0,

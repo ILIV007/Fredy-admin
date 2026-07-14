@@ -107,6 +107,7 @@ export class AIService {
         message: "All providers failed",
         attempts: attempts.length,
         durationMs: totalTime,
+        attemptDetails: attempts.map(a => ({ provider: a.provider, model: a.model, ok: a.ok, error: a.error })),
       });
 
       return {
@@ -119,7 +120,7 @@ export class AIService {
         estimatedCost: 0,
         attempts,
         quality: null,
-        error: "All AI providers failed",
+        error: `All AI providers failed: ${attempts.map(a => `${a.provider}/${a.model}: ${a.error}`).join("; ")}`,
       };
     }
 

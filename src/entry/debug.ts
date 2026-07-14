@@ -238,7 +238,7 @@ function debugDashboardHtml(): string {
 </head>
 <body>
   <h1>🐛 Fredy Debug Dashboard</h1>
-  <p class="subtitle">v5.4.1 — Cloudflare Core</p>
+  <p class="subtitle">v5.5.0 — Cloudflare Core</p>
 
   <h2>Status</h2>
   <div id="status" class="grid"><div class="card"><div class="card-label">Loading…</div></div></div>
