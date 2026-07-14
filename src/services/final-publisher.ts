@@ -142,7 +142,6 @@ export class FinalPublisher {
         mediaUrl: finalPost.media?.url,
         caption: finalPost.caption,
         retryAttempts: retryResult.attempts,
-        retryErrors: retryResult.attempts.map(a => ({ provider: a.provider, ok: a.ok, error: a.error })),
       };
       
       this.deps.logger.error("telegram.error", {
