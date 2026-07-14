@@ -44,6 +44,9 @@ export interface FinalPublisherDeps {
 const MAX_RETRIES = 2;
 
 export class FinalPublisher {
+  /** Debug info from last publish attempt (for error reporting). */
+  public _lastPublishDebug: Record<string, unknown> | null = null;
+
   constructor(private readonly deps: FinalPublisherDeps) {}
 
   /** Full pipeline: ReadyContent → UX Layer → Telegram. */
@@ -113,6 +116,27 @@ export class FinalPublisher {
     if (!retryResult.ok || !retryResult.value) {
       // All retries failed — log, skip, continue.
       const error = retryResult.error ?? "Unknown error";
+      
+      // Capture debug info for the error report.
+      const cleanText = this.stripBareUrls(finalPost.fullText);
+      this._lastPublishDebug = {
+        error,
+        fullText: finalPost.fullText,
+        cleanText,
+        cleanTextLength: cleanText.length,
+        hasUrl: /https?:\/\//i.test(cleanText),
+        hasHref: /<a\s+href/i.test(cleanText),
+        channel: settings?.telegram?.targetChannel ?? "@ILIVIR3",
+        parseMode: settings?.telegram?.parseMode ?? "HTML",
+        sourceUrl: content.sourceUrl,
+        contentText: content.text,
+        contentTextLength: content.text?.length ?? 0,
+        headline: content.headline,
+        hook: finalPost.hook,
+        body: finalPost.body,
+        takeaway: finalPost.takeaway,
+      };
+      
       this.deps.logger.error("telegram.error", {
         contentId: content.id,
         error,
