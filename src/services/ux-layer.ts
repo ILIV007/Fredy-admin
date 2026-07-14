@@ -88,8 +88,8 @@ export class UXLayerImpl implements UXLayer {
       parts.push("");
     }
 
-    // Body (escaped HTML, full length, no truncation).
-    parts.push(this.escapeHtml(body));
+    // Body — convert AI markdown to HTML.
+    parts.push(this.formatBody(body));
 
     // Source as blockquote — only for URLs with meaningful paths.
     if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
@@ -102,6 +102,86 @@ export class UXLayerImpl implements UXLayer {
     parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
     return parts.join("\n");
+  }
+
+  /** Convert AI markdown to Telegram HTML.
+   *  **bold** → <b>bold</b>
+   *  > quote → <blockquote>quote</blockquote>
+   *  >! collapsible → <blockquote expandable="true">collapsible</blockquote>
+   */
+  private formatBody(text: string): string {
+    if (!text) return "";
+
+    // 1. Escape HTML first.
+    let html = this.escapeHtml(text);
+
+    // 2. Convert **bold** to <b>bold</b>.
+    html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+
+    // 3. Convert >! collapsible quotes to <blockquote expandable="true">.
+    //    Lines starting with >! are collapsible.
+    const lines = html.split("\n");
+    const result: string[] = [];
+    let inCollapsible = false;
+    let collapsibleBuffer: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("&gt;! ")) {
+        // Start or continuation of collapsible quote.
+        if (!inCollapsible) {
+          inCollapsible = true;
+          collapsibleBuffer = [];
+        }
+        collapsibleBuffer.push(line.replace(/^&gt;! /, ""));
+      } else if (line.startsWith("&gt;!")) {
+        if (!inCollapsible) {
+          inCollapsible = true;
+          collapsibleBuffer = [];
+        }
+        collapsibleBuffer.push(line.replace(/^&gt;!/, ""));
+      } else {
+        // End of collapsible quote if we were in one.
+        if (inCollapsible) {
+          result.push(`<blockquote expandable="true">${collapsibleBuffer.join("\n")}</blockquote>`);
+          inCollapsible = false;
+          collapsibleBuffer = [];
+        }
+        result.push(line);
+      }
+    }
+    // Don't forget trailing collapsible.
+    if (inCollapsible && collapsibleBuffer.length > 0) {
+      result.push(`<blockquote expandable="true">${collapsibleBuffer.join("\n")}</blockquote>`);
+    }
+
+    // 4. Convert > regular quotes to <blockquote>.
+    //    Group consecutive > lines into a single blockquote.
+    const finalResult: string[] = [];
+    let inQuote = false;
+    let quoteBuffer: string[] = [];
+
+    for (const line of result) {
+      if (line.startsWith("&gt; ") || line.startsWith("&gt;")) {
+        const content = line.replace(/^&gt;\s?/, "");
+        if (!inQuote) {
+          inQuote = true;
+          quoteBuffer = [];
+        }
+        quoteBuffer.push(content);
+      } else {
+        if (inQuote) {
+          finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
+          inQuote = false;
+          quoteBuffer = [];
+        }
+        finalResult.push(line);
+      }
+    }
+    if (inQuote && quoteBuffer.length > 0) {
+      finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
+    }
+
+    return finalResult.join("\n");
   }
 
   /** Assemble a shorter caption for image posts. */
@@ -119,9 +199,9 @@ export class UXLayerImpl implements UXLayer {
       parts.push("");
     }
 
-    // Body — for captions, limit to 800 chars but don't add "...".
+    // Body — for captions, limit to 800 chars.
     const shortBody = body.length > 800 ? body.slice(0, 797) : body;
-    parts.push(this.escapeHtml(shortBody));
+    parts.push(this.formatBody(shortBody));
 
     // Source as blockquote.
     if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
