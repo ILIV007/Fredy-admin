@@ -188,9 +188,6 @@ export class SchedulerService {
     // 2. If queue is empty, process a fresh item from a plugin.
     if (!content) {
       const settings = await this.deps.settings();
-      // Load state for anti-repeat (lastSource).
-      const state = await this.deps.contentQueue.depth(); // placeholder — real state loaded below
-      void state;
       const pipelineResult = await this.deps.contentManager.processForCategory(
         slot.category,
         null, // anti-repeat handled by ContentManager via PluginManager

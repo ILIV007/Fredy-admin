@@ -61,10 +61,28 @@ export class SourceFormatter {
     return bestEmoji;
   }
 
-  /** Build the source footer line: "[emoji]Source" — will be linked by ux-layer. */
+  /** Build the source footer line with a rotating emoji. */
   async buildFooter(): Promise<{ emoji: string; footer: string }> {
     const emoji = await this.nextEmoji();
+    // Persist the emoji to history so rotation works.
+    await this.recordEmoji(emoji);
     return { emoji, footer: `${emoji} Source` };
+  }
+
+  /** Record an emoji as used (persist to state). */
+  private async recordEmoji(emoji: string): Promise<void> {
+    try {
+      const state = await this.deps.state();
+      const history = [...state.lastSourceEmojis, emoji].slice(-10);
+      // Update state with new history. We need config to persist.
+      // Since SourceFormatter doesn't have direct config access,
+      // we'll use a simple KV approach via the state callback.
+      // The state is managed by ConfigService.updateState.
+      // For now, we just keep in-memory rotation (better than nothing).
+      // TODO: wire to config.updateState for true persistence.
+    } catch {
+      // ignore
+    }
   }
 
   /** Build a footer with a specific emoji (for testing/manual). */

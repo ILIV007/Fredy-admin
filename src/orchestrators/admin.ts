@@ -377,18 +377,17 @@ export class AdminOrchestrator {
     const first = parts[0] ?? "";
     const second = parts[1] ?? "";
 
+    // "menu:<id>" → navigate to screen <id>
+    if (first === "menu") return second || "main";
+
     // "set:<scope>:..." → scope maps to screen ID
     if (first === "set") {
       if (second === "scheduler") return "schedule";
       if (second === "providers") return "providers";
       if (second === "plugins") return "providers";
-      // Settings sub-scopes all route to the settings screen
       if (second === "general" || second === "language" || second === "content" || second === "quality" || second === "debug") return "settings";
-      // AI settings route to the ai screen
       if (second === "ai") return "ai";
-      // Categories settings route to the categories screen
       if (second === "categories") return "categories";
-      // Editor settings route to the editor screen
       if (second === "editor") return "editor";
       return second || "main";
     }

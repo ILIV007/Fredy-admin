@@ -221,8 +221,10 @@ export class FinalPublisher {
 
   /** Simulate publishing (for debug/testing — no Telegram call). */
   async simulate(content: ReadyContent): Promise<{ finalPost: FinalPost; wouldPublish: boolean }> {
+    const settings = await this.deps.settings();
+    const minScore = settings.ai.qualityThreshold;
     // Quality gate check.
-    if (content.quality.overallScore < MIN_SCORE) {
+    if (content.quality.overallScore < minScore) {
       const finalPost = await this.deps.uxLayer.transform(content);
       return { finalPost, wouldPublish: false };
     }

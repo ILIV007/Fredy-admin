@@ -85,18 +85,20 @@ export const manualScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the formatted post to admin PM.
-            await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
-              parse_mode: "HTML",
-              disable_web_page_preview: true,
-            }).catch(() => {});
+            // Send the formatted post to admin PM (transformed via UX layer).
+            try {
+              const finalPost = await ctx.container.uxLayer.transform(result.content);
+              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+              }).catch(() => {});
+            } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               `📤 <b>Published from category ${arg}</b>`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
               `<b>Quality:</b> ${result.content.quality.overallScore}`,
               `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            // Redirect to main so the manual screen doesn't re-render.
             return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
@@ -127,18 +129,20 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the formatted post to admin PM.
-            await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
-              parse_mode: "HTML",
-              disable_web_page_preview: true,
-            }).catch(() => {});
+            // Send the formatted post to admin PM (transformed via UX layer).
+            try {
+              const finalPost = await ctx.container.uxLayer.transform(result.content);
+              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+              }).catch(() => {});
+            } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               `📤 <b>Published from: ${arg}</b>`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
               `<b>Quality:</b> ${result.content.quality.overallScore}`,
               `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            // Redirect to main so the manual screen doesn't re-render.
             return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };

@@ -145,17 +145,15 @@ export class ContentManager {
       promptProfile: settings.ai.promptProfile,
     });
 
-    if (!aiResult.ok || !aiResult.content) {
-      // ── FORMAT-ONLY FALLBACK ──────────────────────────────
-      // When AI fails (rate limit, timeout, etc.), publish with format-only mode.
-      // This uses the cleaned title/body directly without AI rewrite.
-      // Pattern from ai-admin: "NEVER stop publishing because AI failed"
+    if (!aiResult.content) {
+      // ── FORMAT-ONLY FALLBACK (AI truly failed) ────────────
+      // When AI fails completely (rate limit, timeout, parse error),
+      // publish with format-only mode using the raw source body.
       this.deps.logger.warn("ai.fallback", {
         contentId: resolvedItem.id,
         error: aiResult.error ?? "AI failed",
         message: "AI failed — using format-only fallback",
       });
-      // Build a minimal AIGeneratedContent from the source item.
       const fallbackContent = {
         text: resolvedItem.body || resolvedItem.title,
         aiConfidence: 0,
@@ -163,7 +161,6 @@ export class ContentManager {
         headline: resolvedItem.title,
         notes: "format-only (AI unavailable)",
       };
-      // CRITICAL: Set score to threshold so FinalPublisher doesn't reject.
       const fallbackQuality = {
         passed: true,
         overallScore: settings.ai.qualityThreshold,
@@ -190,8 +187,9 @@ export class ContentManager {
     }
 
     // ── Stage 8: Quality Score ─────────────────────────────
+    // AI succeeded but quality may be below threshold.
+    // Use AI content anyway with threshold-bumped score (format-only fallback).
     if (!aiResult.quality || !aiResult.quality.passed) {
-      // If quality fails but AI succeeded, still allow format-only fallback.
       const reason = aiResult.quality?.hardReject ? "quality_hard_reject" : "quality_below_threshold";
       const detail = aiResult.quality?.hardRejectReason ?? `Score ${aiResult.quality?.overallScore ?? 0} < ${settings.ai.qualityThreshold}`;
       this.deps.logger.warn("quality.reject_fallback", {
@@ -247,7 +245,7 @@ export class ContentManager {
     }
 
     // ── Stage 8: Record in dedup store ──────────────────────
-    await this.deps.duplicateDetector.record(item);
+    if (!skipDedup) await this.deps.duplicateDetector.record(item);
 
     // ── Stage 9: Enqueue ────────────────────────────────────
     await this.deps.queue.enqueue(readyContent);

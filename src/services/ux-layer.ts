@@ -240,8 +240,8 @@ export class UXLayer {
     parts.push(`<b>${this.escapeHtml(hook)}</b>`);
     parts.push("");
 
-    // Body.
-    parts.push(body);
+    // Body (escaped to prevent HTML parsing issues).
+    parts.push(this.escapeHtml(body));
 
     // Takeaway (italic, if present).
     if (takeaway) {
@@ -292,9 +292,9 @@ export class UXLayer {
     parts.push(`<b>${this.escapeHtml(hook)}</b>`);
     parts.push("");
 
-    // Body (shortened more aggressively).
+    // Body (shortened + escaped).
     const shortBody = body.length > 300 ? body.slice(0, 297) + "..." : body;
-    parts.push(shortBody);
+    parts.push(this.escapeHtml(shortBody));
 
     // Takeaway (if room).
     if (takeaway && parts.join("\n").length < 800) {
