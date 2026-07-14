@@ -172,9 +172,13 @@ export class FinalPublisher {
     // CRITICAL: Strip ALL bare URLs from text before sending to Telegram.
     // Telegram validates ALL URLs in messages, even with disable_web_page_preview:true.
     // URLs like https://v2.jokeapi.dev cause "wrong type of the web page content".
-    // Strategy: preserve <a href="URL">text</a> links, strip everything else.
     const cleanText = this.stripBareUrls(post.fullText);
     const cleanCaption = this.stripBareUrls(post.caption || "");
+
+    // Debug: log what we're actually sending to Telegram.
+    console.log("[publish] cleanText:", JSON.stringify(cleanText).slice(0, 500));
+    console.log("[publish] has <a href:", /<a\s+href/i.test(cleanText));
+    console.log("[publish] has bare URL:", /https?:\/\//i.test(cleanText.replace(/<a\s+href="[^"]*"/gi, "")));
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
