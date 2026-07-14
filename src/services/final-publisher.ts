@@ -169,17 +169,12 @@ export class FinalPublisher {
     const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
     const parseMode = settings?.telegram?.parseMode ?? "HTML";
 
-    // CRITICAL: Strip ALL raw URLs from the text before sending.
-    // Telegram tries to preview URLs even with disable_web_page_preview:true,
-    // and returns "wrong type of the web page content" for API endpoints.
-    // We keep <a href="URL">text</a> links (those are fine) but strip bare URLs.
-    const cleanText = post.fullText.replace(/(?<!href=")https?:\/\/[^\s<>"']+/gi, (match) => {
-      // If this URL is inside an href attribute, keep it.
-      // The negative lookbehind handles most cases.
-      return "";
-    }).replace(/\n{3,}/g, "\n\n").trim();
-
-    const cleanCaption = (post.caption || "").replace(/(?<!href=")https?:\/\/[^\s<>"']+/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+    // CRITICAL: Strip ALL bare URLs from text before sending to Telegram.
+    // Telegram validates ALL URLs in messages, even with disable_web_page_preview:true.
+    // URLs like https://v2.jokeapi.dev cause "wrong type of the web page content".
+    // Strategy: preserve <a href="URL">text</a> links, strip everything else.
+    const cleanText = this.stripBareUrls(post.fullText);
+    const cleanCaption = this.stripBareUrls(post.caption || "");
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
@@ -231,5 +226,21 @@ export class FinalPublisher {
 
     const finalPost = await this.deps.uxLayer.transform(content);
     return { finalPost, wouldPublish: true };
+  }
+
+  /** Strip bare URLs from text, preserving <a href="URL">text</a> links. */
+  private stripBareUrls(text: string): string {
+    // 1. Extract <a href="URL">text</a> tags and replace with placeholders.
+    const links: string[] = [];
+    let work = text.replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (match) => {
+      links.push(match);
+      return `\x00LINK${links.length - 1}\x00`;
+    });
+    // 2. Strip ALL remaining bare URLs.
+    work = work.replace(/https?:\/\/[^\s<>"'\x00]+/gi, "");
+    // 3. Restore <a> tags.
+    work = work.replace(/\x00LINK(\d+)\x00/g, (_, i) => links[Number(i)] || "");
+    // 4. Clean up extra whitespace.
+    return work.replace(/\n{3,}/g, "\n\n").trim();
   }
 }

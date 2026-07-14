@@ -85,10 +85,16 @@ export const manualScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the formatted post to admin PM (transformed via UX layer).
+            // Send the same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
-              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+              // Strip bare URLs the same way final-publisher does.
+              const cleanText = finalPost.fullText
+                .replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (m) => `\x00L${m}\x00`)
+                .replace(/https?:\/\/[^\s<>"'\x00]+/gi, "")
+                .replace(/\x00L([\s\S]*?)\x00/g, "$1")
+                .replace(/\n{3,}/g, "\n\n").trim();
+              await ctx.container.tg.sendMessage(ctx.adminId, cleanText, {
                 parse_mode: "HTML",
                 disable_web_page_preview: true,
               }).catch(() => {});
@@ -129,10 +135,15 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the formatted post to admin PM (transformed via UX layer).
+            // Send the same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
-              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+              const cleanText = finalPost.fullText
+                .replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (m) => `\x00L${m}\x00`)
+                .replace(/https?:\/\/[^\s<>"'\x00]+/gi, "")
+                .replace(/\x00L([\s\S]*?)\x00/g, "$1")
+                .replace(/\n{3,}/g, "\n\n").trim();
+              await ctx.container.tg.sendMessage(ctx.adminId, cleanText, {
                 parse_mode: "HTML",
                 disable_web_page_preview: true,
               }).catch(() => {});
