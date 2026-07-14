@@ -56,9 +56,8 @@ export class UXLayer {
     // 4. Build the source line.
     const { emoji, footer } = await this.deps.sourceFormatter.buildFooter();
 
-    // 5. Determine language-specific text.
-    const isPersian = content.language === "fa";
-    const sourceLabel = isPersian ? "منبع" : "Source";
+    // 5. Source label — always English "Source" (never translated).
+    const sourceLabel = "Source";
 
     // 6. Assemble the full text.
     const fullText = this.assembleFullText(hook, body, takeaway, sourceLabel, content.sourceUrl, emoji);
@@ -259,9 +258,9 @@ export class UXLayer {
       parts.push(`${emoji} ${sourceLabel}`);
     }
 
-    // Channel footer as blockquote.
+    // Channel footer — use HTML entity for @ to prevent Telegram mention parsing.
     parts.push("");
-    parts.push(`<blockquote>🌀 @<code>ILIVIR3</code></blockquote>`);
+    parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }
@@ -304,9 +303,9 @@ export class UXLayer {
       parts.push(`<i>${this.escapeHtml(takeaway)}</i>`);
     }
 
-    // Channel footer as blockquote.
+    // Channel footer — use HTML entity for @ to prevent Telegram mention parsing.
     parts.push("");
-    parts.push(`<blockquote>🌀 @<code>ILIVIR3</code></blockquote>`);
+    parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
     return parts.join("\n");
   }

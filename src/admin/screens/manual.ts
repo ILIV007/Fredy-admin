@@ -85,19 +85,18 @@ export const manualScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the same formatted post to admin PM as what went to channel.
+            // Send the EXACT same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
-              // Strip bare URLs the same way final-publisher does.
-              const cleanText = finalPost.fullText
-                .replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (m) => `\x00L${m}\x00`)
-                .replace(/https?:\/\/[^\s<>"'\x00]+/gi, "")
-                .replace(/\x00L([\s\S]*?)\x00/g, "$1")
-                .replace(/\n{3,}/g, "\n\n").trim();
-              await ctx.container.tg.sendMessage(ctx.adminId, cleanText, {
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-              }).catch(() => {});
+              if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+                await ctx.container.tg.sendPhoto(ctx.adminId, finalPost.media.url, finalPost.caption, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              } else {
+                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               `📤 <b>Published from category ${arg}</b>`,
@@ -135,18 +134,18 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send the same formatted post to admin PM as what went to channel.
+            // Send the EXACT same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
-              const cleanText = finalPost.fullText
-                .replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (m) => `\x00L${m}\x00`)
-                .replace(/https?:\/\/[^\s<>"'\x00]+/gi, "")
-                .replace(/\x00L([\s\S]*?)\x00/g, "$1")
-                .replace(/\n{3,}/g, "\n\n").trim();
-              await ctx.container.tg.sendMessage(ctx.adminId, cleanText, {
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-              }).catch(() => {});
+              if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+                await ctx.container.tg.sendPhoto(ctx.adminId, finalPost.media.url, finalPost.caption, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              } else {
+                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               `📤 <b>Published from: ${arg}</b>`,

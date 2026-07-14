@@ -28,6 +28,11 @@ const FETCH_TIMEOUT_MS = 8_000;
 export class MediaResolver {
   constructor(private readonly deps: MediaResolverDeps) {}
 
+  /** Check if a URL points to an image Telegram can send as a photo. */
+  private isUsableImage(url: string): boolean {
+    return isUsableImageUrl(url);
+  }
+
   /**
    * Resolve the best media for a source item.
    * Tries each priority in order, returns the first success.
@@ -69,8 +74,10 @@ export class MediaResolver {
     }
 
     // 4. Official Logo (provider homepage favicon).
+    // Only use logos that are actual images (png, jpg, jpeg, webp).
+    // Skip .ico, .gif, .svg — Telegram can't send them as photos.
     const logo = await this.fetchOfficialLogo(item.source);
-    if (logo) {
+    if (logo && this.isUsableImage(logo.url)) {
       this.deps.logger.debug("source.fetch_success", {
         contentId: item.id,
         mediaSource: "logo",
@@ -256,3 +263,10 @@ const PROVIDER_LOGOS: Readonly<Record<string, string>> = {
   "github-trending": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
   wikimedia: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Wikipedia-logo-v2.svg/200px-Wikipedia-logo-v2.svg.png",
 };
+
+/** Check if a URL points to an image Telegram can send as a photo.
+ *  Telegram supports: jpg, jpeg, png, webp (not .ico, .gif, .svg). */
+function isUsableImageUrl(url: string): boolean {
+  const lower = url.toLowerCase().split("?")[0] ?? "";
+  return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || !lower.match(/\.(ico|gif|svg|bmp|tiff)$/);
+}
