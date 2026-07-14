@@ -133,6 +133,13 @@ export interface PipelineResult {
   readonly stage: PipelineStage;
   readonly error?: string;
   readonly rejectedReason?: RejectionReason;
+  /** AI debug info (when AI fails or format-only fallback is used). */
+  readonly aiDebug?: {
+    readonly error: string;
+    readonly attempts: ReadonlyArray<{ readonly provider: string; readonly model: string; readonly ok: boolean; readonly error?: string }>;
+    readonly usedFallback: boolean;
+    readonly fallbackReason: string;
+  };
 }
 
 /** Stages of the pipeline (for tracing). */

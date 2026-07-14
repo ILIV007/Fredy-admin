@@ -123,9 +123,9 @@ export class StackExchangePlugin implements Plugin {
     }
     const questions = data.items ?? [];
 
-    // Filter: score > 5, is_answered
+    // Filter: score > 1, is_answered (lowered threshold to get more results)
     const filtered = questions
-      .filter((q) => (q.score ?? 0) > 5 && q.is_answered)
+      .filter((q) => (q.score ?? 0) > 1 && q.is_answered)
       .slice(0, 10);
 
     const items = filtered.map((q) => this.normalize(q));

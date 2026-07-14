@@ -184,7 +184,12 @@ export class ContentManager {
         );
         if (!skipDedup) await this.deps.duplicateDetector.record(item);
         await this.deps.queue.enqueue(readyContent);
-        return { ok: true, content: readyContent, item, stage: "complete" };
+        return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
+          error: aiResult.error ?? "AI failed",
+          attempts: aiResult.attempts,
+          usedFallback: true,
+          fallbackReason: "AI returned no content",
+        } };
       } catch (error) {
         return this.reject("format", "ai_failed", `Format-only fallback failed: ${this.errMsg(error)}`, item);
       }
