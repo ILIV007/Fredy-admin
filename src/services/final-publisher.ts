@@ -232,7 +232,6 @@ export class FinalPublisher {
         cleanCaption,
         {
           parse_mode: parseMode,
-          disable_web_page_preview: true,
         },
       );
 
@@ -247,9 +246,12 @@ export class FinalPublisher {
     }
 
     // Text-only post.
+    // NOTE: Do NOT send disable_web_page_preview — it causes Telegram to
+    // validate @username mentions in the text as web pages, returning
+    // "wrong type of the web page content". Since we've stripped ALL URLs
+    // from the text, there's nothing to preview anyway.
     const result = await this.deps.tg.sendMessage(channel, cleanText, {
       parse_mode: parseMode,
-      disable_web_page_preview: true,
     });
 
     if (!result.ok || !result.result) {
