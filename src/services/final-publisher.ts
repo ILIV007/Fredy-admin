@@ -168,20 +168,28 @@ export class FinalPublisher {
     const settings = await this.deps.settings();
     const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
     const parseMode = settings?.telegram?.parseMode ?? "HTML";
-    // CRITICAL: Always disable web page preview for channel posts.
-    // Telegram returns "wrong type of the web page content" when it tries
-    // to preview URLs like https://v2.jokeapi.dev (API endpoints, not web pages).
-    const disablePreview = true;
+
+    // CRITICAL: Strip ALL raw URLs from the text before sending.
+    // Telegram tries to preview URLs even with disable_web_page_preview:true,
+    // and returns "wrong type of the web page content" for API endpoints.
+    // We keep <a href="URL">text</a> links (those are fine) but strip bare URLs.
+    const cleanText = post.fullText.replace(/(?<!href=")https?:\/\/[^\s<>"']+/gi, (match) => {
+      // If this URL is inside an href attribute, keep it.
+      // The negative lookbehind handles most cases.
+      return "";
+    }).replace(/\n{3,}/g, "\n\n").trim();
+
+    const cleanCaption = (post.caption || "").replace(/(?<!href=")https?:\/\/[^\s<>"']+/gi, "").replace(/\n{3,}/g, "\n\n").trim();
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
       const result = await this.deps.tg.sendPhoto(
         channel,
         post.media.url,
-        post.caption,
+        cleanCaption,
         {
           parse_mode: parseMode,
-          disable_web_page_preview: disablePreview,
+          disable_web_page_preview: true,
         },
       );
 
@@ -196,9 +204,9 @@ export class FinalPublisher {
     }
 
     // Text-only post.
-    const result = await this.deps.tg.sendMessage(channel, post.fullText, {
+    const result = await this.deps.tg.sendMessage(channel, cleanText, {
       parse_mode: parseMode,
-      disable_web_page_preview: disablePreview,
+      disable_web_page_preview: true,
     });
 
     if (!result.ok || !result.result) {

@@ -74,8 +74,6 @@ export const manualScreen: Screen = {
       if (!["A", "B", "C"].includes(arg)) {
         return { alert: "❌ Invalid category" };
       }
-      // Respond immediately — processing takes time.
-      // The actual work happens in the toast/alert.
       try {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
@@ -87,18 +85,19 @@ export const manualScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send post + notification to admin PM.
+            // Send the formatted post to admin PM.
             await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
               parse_mode: "HTML",
               disable_web_page_preview: true,
             }).catch(() => {});
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Post published from category ${arg}</b>`,
+              `📤 <b>Published from category ${arg}</b>`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
               `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            return { toast: `✅ Category ${arg} published!` };
+            // Redirect to main so the manual screen doesn't re-render.
+            return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
@@ -128,18 +127,19 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            // Send post + notification to admin PM.
+            // Send the formatted post to admin PM.
             await ctx.container.tg.sendMessage(ctx.adminId, result.content.text, {
               parse_mode: "HTML",
               disable_web_page_preview: true,
             }).catch(() => {});
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Post published from: ${arg}</b>`,
+              `📤 <b>Published from: ${arg}</b>`,
               `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
               `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            return { toast: `✅ ${arg} published!` };
+            // Redirect to main so the manual screen doesn't re-render.
+            return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
