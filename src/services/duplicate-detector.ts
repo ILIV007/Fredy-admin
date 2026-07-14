@@ -33,21 +33,28 @@ export class DuplicateDetector {
    * Checks: URL, content hash, similar title.
    */
   async check(item: ContentItem): Promise<DuplicateCheckResult> {
-    // 1. URL check.
+    // 1. URL check — but combine URL with item ID to avoid false positives
+    //    when multiple items share the same URL (e.g., all joke items have
+    //    url: "https://v2.jokeapi.dev").
     if (item.url) {
-      const urlRecord = await this.findByUrl(item.url);
-      if (urlRecord) {
-        this.deps.logger.info("quality.reject", {
-          contentId: item.id,
-          pluginId: item.pluginId,
-          reason: "duplicate_url",
-          existingId: urlRecord.contentId,
-        });
-        return {
-          isDuplicate: true,
-          reason: "url",
-          existingId: urlRecord.contentId,
-        };
+      // If URL is a generic API endpoint (no meaningful path), skip URL dedup
+      // and rely on content hash instead.
+      const isGenericUrl = this.isGenericApiUrl(item.url);
+      if (!isGenericUrl) {
+        const urlRecord = await this.findByUrl(item.url);
+        if (urlRecord) {
+          this.deps.logger.info("quality.reject", {
+            contentId: item.id,
+            pluginId: item.pluginId,
+            reason: "duplicate_url",
+            existingId: urlRecord.contentId,
+          });
+          return {
+            isDuplicate: true,
+            reason: "url",
+            existingId: urlRecord.contentId,
+          };
+        }
       }
     }
 
@@ -144,6 +151,24 @@ export class DuplicateDetector {
       hash = hash & hash;
     }
     return Math.abs(hash).toString(36);
+  }
+
+  /** Check if URL is a generic API endpoint (no meaningful path).
+   *  These URLs are shared by all items from that API and shouldn't be
+   *  used for dedup (e.g., https://v2.jokeapi.dev). */
+  private isGenericApiUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      const path = u.pathname;
+      // No path or just "/" = generic endpoint
+      if (path === "/" || path === "" || path.length < 3) return true;
+      // Known API hosts
+      const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com", "hacker-news.firebaseio.com"];
+      if (apiHosts.includes(u.hostname)) return true;
+      return false;
+    } catch {
+      return true; // Invalid URL = treat as generic
+    }
   }
 
   /** Find a dedup record by URL. */
