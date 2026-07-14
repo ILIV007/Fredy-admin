@@ -170,15 +170,35 @@ export class FinalPublisher {
     const parseMode = settings?.telegram?.parseMode ?? "HTML";
 
     // CRITICAL: Strip ALL bare URLs from text before sending to Telegram.
-    // Telegram validates ALL URLs in messages, even with disable_web_page_preview:true.
-    // URLs like https://v2.jokeapi.dev cause "wrong type of the web page content".
     const cleanText = this.stripBareUrls(post.fullText);
     const cleanCaption = this.stripBareUrls(post.caption || "");
 
-    // Debug: log what we're actually sending to Telegram.
-    console.log("[publish] cleanText:", JSON.stringify(cleanText).slice(0, 500));
+    // EXTENSIVE DEBUG: log everything about the message.
+    console.log("[publish] ====== PUBLISH DEBUG ======");
+    console.log("[publish] post.fullText:", JSON.stringify(post.fullText));
+    console.log("[publish] post.caption:", JSON.stringify(post.caption));
+    console.log("[publish] cleanText:", JSON.stringify(cleanText));
+    console.log("[publish] cleanCaption:", JSON.stringify(cleanCaption));
+    console.log("[publish] cleanText length:", cleanText.length);
+    console.log("[publish] channel:", channel);
+    console.log("[publish] parseMode:", parseMode);
     console.log("[publish] has <a href:", /<a\s+href/i.test(cleanText));
-    console.log("[publish] has bare URL:", /https?:\/\//i.test(cleanText.replace(/<a\s+href="[^"]*"/gi, "")));
+    console.log("[publish] has bare URL:", /https?:\/\//i.test(cleanText));
+    console.log("[publish] has <blockquote:", /<blockquote/i.test(cleanText));
+    console.log("[publish] has <b>:", /<b>/i.test(cleanText));
+    console.log("[publish] has <i>:", /<i>/i.test(cleanText));
+    console.log("[publish] has <code>:", /<code>/i.test(cleanText));
+    console.log("[publish] has <pre>:", /<pre>/i.test(cleanText));
+    // Check for unbalanced HTML tags
+    const tagCounts = ["b", "i", "u", "s", "code", "pre", "blockquote", "a"];
+    for (const tag of tagCounts) {
+      const opens = (cleanText.match(new RegExp(`<${tag}[\\s>]`, "gi")) || []).length;
+      const closes = (cleanText.match(new RegExp(`</${tag}>`, "gi")) || []).length;
+      if (opens !== closes) {
+        console.log(`[publish] UNBALANCED <${tag}>: ${opens} opens, ${closes} closes`);
+      }
+    }
+    console.log("[publish] ====== END DEBUG ======");
 
     // If content has media (image), send as photo with caption.
     if (post.media && post.media.type === "image" && post.media.url) {
