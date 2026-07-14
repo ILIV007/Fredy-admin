@@ -25,40 +25,9 @@ export class SourceFormatter {
 
   /** Pick the next emoji for the source footer. */
   async nextEmoji(): Promise<string> {
-    const state = await this.deps.state();
-    const history = state.lastSourceEmojis;
-
-    // For each emoji in the pool, find when it was last used.
-    // Pick the one with the oldest (or no) last use.
-    let bestEmoji = SOURCE_EMOJI_POOL[0]!;
-    let bestLastUse = Infinity;
-
-    for (const emoji of SOURCE_EMOJI_POOL) {
-      const lastUseIndex = history.lastIndexOf(emoji);
-      // lastUseIndex of -1 means "never used" → treat as -Infinity (oldest).
-      const effective = lastUseIndex === -1 ? -1 : lastUseIndex;
-      if (effective < bestLastUse) {
-        bestLastUse = effective;
-        bestEmoji = emoji;
-      }
-    }
-
-    // Avoid same emoji twice in a row.
-    if (history.length > 0 && bestEmoji === history[history.length - 1]) {
-      // Pick the second-oldest.
-      for (const emoji of SOURCE_EMOJI_POOL) {
-        if (emoji === bestEmoji) continue;
-        const lastUseIndex = history.lastIndexOf(emoji);
-        const effective = lastUseIndex === -1 ? -1 : lastUseIndex;
-        if (effective < bestLastUse || bestEmoji === history[history.length - 1]) {
-          bestEmoji = emoji;
-          bestLastUse = effective;
-          break;
-        }
-      }
-    }
-
-    return bestEmoji;
+    // Simple random selection — no persistence needed.
+    const idx = Math.floor(Math.random() * SOURCE_EMOJI_POOL.length);
+    return SOURCE_EMOJI_POOL[idx]!;
   }
 
   /** Build the source footer line with a rotating emoji. */

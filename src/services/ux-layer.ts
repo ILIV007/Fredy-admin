@@ -270,9 +270,6 @@ export class UXLayer {
       const path = u.pathname;
       // Must have a meaningful path (more than just "/")
       if (path === "/" || path === "" || path.length < 3) return false;
-      // Skip known API endpoints
-      const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com", "hacker-news.firebaseio.com"];
-      if (apiHosts.includes(u.hostname)) return false;
       return true;
     } catch {
       return false;

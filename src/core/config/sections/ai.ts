@@ -25,7 +25,7 @@ export const aiDefaults: AIConfig = {
   fallbackProvider: "openrouter",
   temperature: 0.7,
   maxTokens: 2500,
-  retryCount: 2,
+  retryCount: 0,
   promptProfile: "default",
   qualityThreshold: 60,
   timeoutMs: 15000,

@@ -40,8 +40,8 @@ export interface FinalPublisherDeps {
   readonly settings: () => Promise<FredySettings>;
 }
 
-/** Max retries (max 2 retries). */
-const MAX_RETRIES = 2;
+/** Max retries (0 = no retries, just 1 attempt). */
+const MAX_RETRIES = 0;
 
 export class FinalPublisher {
   /** Debug info from last publish attempt (for error reporting). */
