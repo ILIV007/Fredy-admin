@@ -209,7 +209,11 @@ export class FinalPublisher {
 
     // If content has media (image), send as photo with caption.
     // FINAL SAFETY: check that media URL is a usable image format.
-    if (post.media && post.media.type === "image" && post.media.url) {
+    // Also: if post has no media but has a sourceUrl that's an image, use it as cover.
+    const coverUrl = (post.media && post.media.type === "image" && post.media.url)
+      ? post.media.url
+      : null;
+    if (coverUrl) {
       const mediaUrl = post.media.url.toLowerCase().split("?")[0] ?? "";
       if (mediaUrl.match(/\.(ico|gif|svg|bmp|tiff)$/)) {
         // Bad image format — send as text-only instead.
