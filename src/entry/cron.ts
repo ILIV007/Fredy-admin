@@ -67,18 +67,6 @@ export async function cronHandler(
     return;
   }
 
-  // Every 15 minutes — source cache refresh.
-  if (event.cron === "*/15 * * * *") {
-    ctx.waitUntil(
-      (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
-        await scheduler.refreshSources();
-        console.log("[cron] source refresh complete");
-      })(),
-    );
-    return;
-  }
-
   console.log(`[cron] unknown schedule: ${event.cron}`);
 }
 

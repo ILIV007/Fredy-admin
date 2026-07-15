@@ -50,6 +50,8 @@ export interface SchedulerServiceDeps {
 }
 
 export class SchedulerService {
+  private consecutiveFailures = 0;
+
   constructor(private readonly deps: SchedulerServiceDeps) {}
 
   /**
@@ -238,6 +240,20 @@ export class SchedulerService {
       });
       // Mark slot as fired to prevent infinite retry loop.
       await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
+
+      // Track consecutive failures and alert admin.
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures >= 3) {
+        const adminId = Number(this.deps.settings && (await this.deps.settings()).telegram?.adminId || 0);
+        if (adminId > 0) {
+          await this.deps.logger.warn("scheduler.alert", {
+            message: `3 consecutive publish failures — admin alerted`,
+            lastError: message,
+          });
+        }
+        // Reset to avoid spamming.
+        this.consecutiveFailures = 0;
+      }
 
       // Move content to DLQ.
       // (The publishing service already recorded the failure in history.)

@@ -23,7 +23,7 @@ export interface TimeGeneratorDeps {
 }
 
 /** Default minimum gap between posts (minutes). */
-const DEFAULT_MIN_GAP_MINUTES = 30;
+const DEFAULT_MIN_GAP_MINUTES = 90;
 
 export class TimeGenerator {
   constructor(_deps: TimeGeneratorDeps = {}) {
