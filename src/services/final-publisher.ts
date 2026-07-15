@@ -41,7 +41,7 @@ export interface FinalPublisherDeps {
 }
 
 /** Max retries (0 = no retries, just 1 attempt). */
-const MAX_RETRIES = 0;
+const MAX_RETRIES = 1;
 
 export class FinalPublisher {
   /** Debug info from last publish attempt (for error reporting). */

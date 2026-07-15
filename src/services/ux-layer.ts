@@ -19,6 +19,7 @@ import type { HookEngine } from "./hook-engine";
 import type { SourceFormatter } from "./source-formatter";
 import type { Logger } from "./logger";
 import { TELEGRAM_TEXT_LIMIT, TELEGRAM_CAPTION_LIMIT } from "../core/constants";
+import { fixPersianHalfSpaces } from "../primitives/strings";
 
 export interface UXLayerDeps {
   readonly logger: Logger;
@@ -37,15 +38,17 @@ export class UXLayerImpl implements UXLayer {
     // 2. Body = AI text (full, no truncation, no URL stripping).
     //    If AI didn't run (format-only), body = content.text as-is.
     const body = (content.text ?? "").trim();
+    // Apply Persian half-space fixing if language is fa.
+    const fixedBody = content.language === "fa" ? fixPersianHalfSpaces(body) : body;
 
     // 3. Source line with random emoji.
     const { emoji } = await this.deps.sourceFormatter.buildFooter();
 
     // 4. Assemble the full text.
-    const fullText = this.assembleFullText(hook, body, content.sourceUrl, emoji);
+    const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, emoji);
 
     // 5. Caption for image posts (shorter).
-    const caption = this.assembleCaption(hook, body, content.sourceUrl, emoji);
+    const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, emoji);
 
     return {
       hook,
@@ -55,8 +58,8 @@ export class UXLayerImpl implements UXLayer {
       sourceEmoji: emoji,
       sourceUrl: content.sourceUrl,
       media: content.media,
-      fullText: fullText.slice(0, TELEGRAM_TEXT_LIMIT),
-      caption: caption.slice(0, TELEGRAM_CAPTION_LIMIT),
+      fullText: this.safeTruncate(fullText, TELEGRAM_TEXT_LIMIT),
+      caption: this.safeTruncate(caption, TELEGRAM_CAPTION_LIMIT),
       language: content.language,
       category: content.category,
       score: content.quality.overallScore,
@@ -226,6 +229,39 @@ export class UXLayerImpl implements UXLayer {
     } catch {
       return false;
     }
+  }
+
+
+  /** Truncate HTML text safely — closes any open tags. */
+  private safeTruncate(text: string, maxLen: number): string {
+    if (text.length <= maxLen) return text;
+    let truncated = text.slice(0, maxLen);
+    // Find last complete tag boundary.
+    const lastTagStart = truncated.lastIndexOf("<");
+    const lastTagEnd = truncated.lastIndexOf(">");
+    if (lastTagStart > lastTagEnd) {
+      // We're inside a tag — cut back to before it.
+      truncated = truncated.slice(0, lastTagStart);
+    }
+    // Close any open tags.
+    const openTags: string[] = [];
+    const tagRegex = /<(\/?)(b|i|u|s|code|pre|blockquote|a)\b[^>]*>/gi;
+    let match;
+    while ((match = tagRegex.exec(truncated)) !== null) {
+      const isClosing = match[1] === "/";
+      const tag = match[2].toLowerCase();
+      if (isClosing) {
+        const idx = openTags.lastIndexOf(tag);
+        if (idx >= 0) openTags.splice(idx, 1);
+      } else {
+        openTags.push(tag);
+      }
+    }
+    // Close remaining open tags in reverse order.
+    for (let i = openTags.length - 1; i >= 0; i--) {
+      truncated += `</${openTags[i]}>`;
+    }
+    return truncated;
   }
 
   /** Escape HTML special characters. */

@@ -53,8 +53,23 @@ export function isMostlyUppercase(input: string, threshold = 0.7): boolean {
 
 /** Insert half-space (ZWNJ) after common Persian prefixes. Stub — real impl in Phase 1.4. */
 export function fixPersianHalfSpaces(input: string): string {
-  // TODO: implement in Phase 1.4 (Persian language rules).
-  return input;
+  if (!input) return input;
+  const ZWNJ = "\u200c"; // Zero-Width Non-Joiner
+  let result = input;
+  // Common prefixes that need ZWNJ
+  const prefixes = ["می", "نمی", "بی", "می‌"];
+  for (const p of prefixes) {
+    result = result.replace(new RegExp(p + " ", "gi"), p + ZWNJ);
+  }
+  // Common suffixes that need ZWNJ
+  const suffixes = ["ها", "های", "تر", "ترین", "گر", "گری", "شناس", "شناسی", "سازی", "گذار", "گذاری"];
+  for (const s of suffixes) {
+    result = result.replace(new RegExp(" " + s + "(?=[ \n.،؟!؛]|$)", "gi"), ZWNJ + s);
+  }
+  // Fix "می شود" -> "می‌شود" (common mistake)
+  result = result.replace(/می\s+شود/gi, "می" + ZWNJ + "شود");
+  result = result.replace(/نمی\s+شد/gi, "نمی" + ZWNJ + "شد");
+  return result;
 }
 
 /** Insert RTL mark (U+200F) at the start of mixed-direction text. */

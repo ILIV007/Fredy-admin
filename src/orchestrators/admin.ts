@@ -346,7 +346,7 @@ export class AdminOrchestrator {
     } catch (error) {
       console.error("[admin] command handler error:", error);
       const errMsg = error instanceof Error ? error.message : String(error);
-      const errStack = error instanceof Error ? error.stack ?? "" : "";
+      
       // Send error to user so they can see what went wrong.
       await tg.sendMessage(chatId, [
         "❌ <b>Error occurred</b>",

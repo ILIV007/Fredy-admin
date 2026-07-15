@@ -161,17 +161,18 @@ export class ContentManager {
       const fallbackContent = {
         text: resolvedItem.body || resolvedItem.title,
         aiConfidence: 0,
-        generatedLanguage: lang,
+        generatedLanguage: lang === "auto" ? "en" : lang,
         headline: resolvedItem.title,
         notes: "format-only (AI unavailable)",
       };
       const fallbackQuality = {
         passed: true,
-        overallScore: settings.ai.qualityThreshold,
+        overallScore: Math.max(aiResult.quality?.overallScore ?? 0, 1), // Keep real score
         dimensionScores: [],
         hardReject: false,
         minScore: settings.ai.qualityThreshold,
       };
+      const isFallback = true;
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,
@@ -208,14 +209,16 @@ export class ContentManager {
         message: "Quality below threshold — using format-only fallback",
       });
       // Use the AI content anyway with a score at threshold.
+      const realScore = aiResult.quality?.overallScore ?? 0;
       const fallbackQuality = {
         passed: true,
-        overallScore: settings.ai.qualityThreshold,
-        dimensionScores: [],
+        overallScore: realScore, // Keep real score
+        dimensionScores: aiResult.quality?.dimensionScores ?? [],
         hardReject: false,
         minScore: settings.ai.qualityThreshold,
       };
-      post = { ...post, score: settings.ai.qualityThreshold };
+      post = { ...post, score: realScore };
+      const isFallback = true;
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,

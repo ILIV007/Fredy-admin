@@ -3,7 +3,7 @@
  * Stats screen — global and per-admin statistics.
  */
 
-import type { Screen } from "../registry";
+import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
 import { buildKeyboardWithBack, labelButton } from "../keyboards";
@@ -46,8 +46,28 @@ export const statsScreen: Screen = {
     void s;
     return buildKeyboardWithBack([
       [labelButton("─── Actions ───")],
-      [{ text: "🔄 Refresh", callback_data: "ignore" }],
+      [{ text: "🔄 Refresh", callback_data: "action:stats:refresh" }],
       [{ text: "🗑️ Reset Stats", callback_data: "action:stats:reset" }],
     ]);
+  },
+
+  async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {
+    const parts = data.split(":");
+    if (parts.length < 3 || parts[0] !== "action" || parts[1] !== "stats") return;
+    const action = parts[2];
+
+    if (action === "refresh") {
+      return { toast: "🔄 Stats refreshed" };
+    }
+
+    if (action === "reset") {
+      // Reset global stats.
+      await ctx.container.kv.set("fredy:global:stats", JSON.stringify({
+        processed: 0, published: 0, rejected: 0, failed: 0, _count: 0,
+      })).catch(() => {});
+      // Reset state stats.
+      await ctx.container.config.resetState(ctx.adminId).catch(() => {});
+      return { toast: "🗑️ Stats reset" };
+    }
   },
 };

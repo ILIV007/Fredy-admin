@@ -236,6 +236,8 @@ export class SchedulerService {
         error: message,
         message: "Publish failed",
       });
+      // Mark slot as fired to prevent infinite retry loop.
+      await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
 
       // Move content to DLQ.
       // (The publishing service already recorded the failure in history.)

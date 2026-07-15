@@ -55,7 +55,7 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # This internal cron is a safety net only.
 
 [triggers]
-crons = ["0 */24 * * *"]
+crons = ["0 */24 * * *", "*/15 * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)
