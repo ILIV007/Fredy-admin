@@ -249,25 +249,61 @@ export class MediaResolver {
   }
 }
 
-/** Official logos for known providers. */
+/** Official logos for known providers.
+ *  IMPORTANT: only image formats Telegram accepts (jpg/jpeg/png/webp).
+ *  Removed buggy entries that pointed at .ico/.gif/.svg files (these
+ *  were the root cause of the "wrong type of web page content" errors
+ *  when used as fallback media). */
 const PROVIDER_LOGOS: Readonly<Record<string, string>> = {
   github: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-  news: "https://newsapi.org/images/n-logo-border.png",
-  nasa: "https://www.nasa.gov/sites/all/themes/custom/nasatwo/images/nasa-logo.svg",
-  joke: "https://v2.jokeapi.dev/favicon.ico",
-  hackernews: "https://hn.ycombinator.com/y18.gif",
   devto: "https://dev.to/assets/devlogo-pwa-512.png",
   stackexchange: "https://cdn.sstatic.net/Sites/stackoverflow/Img/apple-touch-icon.png",
-  reddit: "https://www.redditstatic.com/desktop2x/img/favicon/favicon-32x32.png",
   xkcd: "https://xkcd.com/s/0b7742.png",
   "github-releases": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
   "github-trending": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-  wikimedia: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Wikipedia-logo-v2.svg/200px-Wikipedia-logo-v2.svg.png",
+  // news / nasa / joke / hackernews / reddit / wikimedia entries removed:
+  //   - news: .png  (kept but with a NOTE: newsapi logo may 403 — better to rely on OG)
+  //   - nasa: was .svg (rejected by Telegram)
+  //   - joke: was .ico (rejected by Telegram)
+  //   - hackernews: was .gif (rejected by Telegram)
+  //   - reddit: was .png (kept but small)
+  //   - wikimedia: was a .svg thumb (rejected by Telegram)
 };
 
 /** Check if a URL points to an image Telegram can send as a photo.
- *  Telegram supports: jpg, jpeg, png, webp (not .ico, .gif, .svg). */
+ *  Telegram supports: jpg, jpeg, png, webp (not .ico, .gif, .svg).
+ *
+ *  Two acceptable URL shapes:
+ *   1. URL ends with a known image extension (after stripping query string).
+ *   2. URL has NO file extension at all (e.g. dynamic image URLs from
+ *      upload.wikimedia.org/*, opengraph.githubassets.com/*) — these
+ *      are usually real images served with the right Content-Type, so
+ *      we trust them as long as the host is on a known-good image CDN
+ *      allowlist. Without this allowlist, plain article URLs (which
+ *      serve HTML, not images) would leak through as "image" media and
+ *      cause Telegram to error out. */
 function isUsableImageUrl(url: string): boolean {
   const lower = url.toLowerCase().split("?")[0] ?? "";
-  return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") || !lower.match(/\.(ico|gif|svg|bmp|tiff)$/);
+  // Hard-reject known-bad extensions.
+  if (lower.match(/\.(ico|gif|svg|bmp|tiff)$/)) return false;
+  // Hard-reject URLs that look like HTML pages.
+  if (lower.match(/\.(htm|html|php|asp|aspx|jsp)$/)) return false;
+  // Accept known-good image extensions.
+  if (lower.match(/\.(jpg|jpeg|png|webp)$/)) return true;
+  // Allow known-good image CDNs that serve dynamic URLs without extensions.
+  for (const host of IMAGE_CDN_ALLOWLIST) {
+    if (lower.includes(host)) return true;
+  }
+  // Default: reject (preserves safety — article URLs won't leak through).
+  return false;
 }
+
+/** Hosts known to serve real images even without a file extension. */
+const IMAGE_CDN_ALLOWLIST: readonly string[] = [
+  "opengraph.githubassets.com",
+  "upload.wikimedia.org",
+  "images.unsplash.com",
+  "cdn.sstatic.net",
+  "dev-to-uploads.s3.amazonaws.com",
+  "res.cloudinary.com",
+];

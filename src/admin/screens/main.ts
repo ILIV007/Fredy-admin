@@ -9,6 +9,7 @@ import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
 import { buildKeyboard, navRow } from "../keyboards";
 import { header, kv, statusBadge, divider } from "../helpers/formatting";
+import { APP_VERSION } from "../../core/constants";
 
 export const mainScreen: Screen = {
   id: "main",
@@ -23,7 +24,7 @@ export const mainScreen: Screen = {
       "",
       kv("Bot", settings?.general?.botEnabled ? "🟢 Active" : "🔴 Disabled"),
       kv("Maintenance", settings?.general?.maintenanceMode ? "🟡 ON" : "OFF"),
-      kv("Version", "6.2.0"),
+      kv("Version", APP_VERSION),
       kv("Channel", settings?.telegram?.targetChannel ?? "(none)"),
       kv("Language", settings?.language?.default ?? "(none)"),
       kv("AI Provider", settings?.ai?.primaryProvider ?? "(none)"),

@@ -172,7 +172,6 @@ export class ContentManager {
         hardReject: false,
         minScore: settings.ai.qualityThreshold,
       };
-      const isFallback = true;
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,
@@ -218,7 +217,6 @@ export class ContentManager {
         minScore: settings.ai.qualityThreshold,
       };
       post = { ...post, score: realScore };
-      const isFallback = true;
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,

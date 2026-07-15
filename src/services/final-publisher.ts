@@ -28,7 +28,6 @@ import type { HistoryService } from "./history-service";
 import type { TelegramService } from "./telegram";
 import type { FredySettings } from "../types/config";
 import type { Logger } from "./logger";
-import { PublishFailedError } from "../core/scheduler/errors";
 
 export interface FinalPublisherDeps {
   readonly tg: TelegramService;
@@ -207,25 +206,35 @@ export class FinalPublisher {
     // Minimal debug log.
     console.log("[publish] cleanText length:", cleanText.length, "hasHref:", /<a\s+href/i.test(cleanText));
 
-    // If content has media (image), send as photo with caption.
-    // FINAL SAFETY: check that media URL is a usable image format.
-    // Also: if post has no media but has a sourceUrl that's an image, use it as cover.
-    const coverUrl = (post.media && post.media.type === "image" && post.media.url)
-      ? post.media.url
-      : null;
+    // ── Cover image resolution ──────────────────────────────
+    // Priority: explicit post.media → source URL OG image → none.
+    // The source-image fallback is the new feature: when a post has no
+    // media of its own but the source URL exposes an OpenGraph image
+    // (or is itself an image URL), Telegram displays it above the text
+    // post as a cover photo.
+    let coverUrl: string | null = null;
+    if (post.media && post.media.type === "image" && post.media.url) {
+      coverUrl = post.media.url;
+    } else if (post.sourceUrl) {
+      coverUrl = await this.resolveSourceCoverImage(post.sourceUrl);
+    }
+
     if (coverUrl) {
-      const mediaUrl = post.media.url.toLowerCase().split("?")[0] ?? "";
-      if (mediaUrl.match(/\.(ico|gif|svg|bmp|tiff)$/)) {
+      const normalized = coverUrl.toLowerCase().split("?")[0] ?? "";
+      if (normalized.match(/\.(ico|gif|svg|bmp|tiff|html?|php)$/)) {
         // Bad image format — send as text-only instead.
-        console.log("[publish] Skipping media (bad format):", mediaUrl);
-      } else {
+        console.log("[publish] Skipping cover (bad format):", normalized);
+        coverUrl = null;
+      }
+    }
+
+    if (coverUrl) {
+      try {
         const result = await this.deps.tg.sendPhoto(
           channel,
-          post.media.url,
+          coverUrl,
           cleanCaption,
-          {
-            parse_mode: parseMode,
-          },
+          { parse_mode: parseMode },
         );
 
         if (!result.ok || !result.result) {
@@ -236,10 +245,15 @@ export class FinalPublisher {
           messageId: result.result.message_id,
           chatId: String(result.result.chat?.id ?? channel),
         };
+      } catch (err) {
+        // sendPhoto failed (often: bad URL, 404, server-side content type
+        // mismatch, etc.). Fall through to text-only publish so the post
+        // still goes out instead of being skipped entirely.
+        console.log("[publish] sendPhoto failed, falling back to text-only:", err instanceof Error ? err.message : err);
       }
     }
 
-    // Text-only post.
+    // ── Text-only post ──────────────────────────────────────
     // NOTE: Do NOT send disable_web_page_preview — it causes Telegram to
     // validate @username mentions in the text as web pages, returning
     // "wrong type of the web page content". Since we've stripped ALL URLs
@@ -256,6 +270,76 @@ export class FinalPublisher {
       messageId: result.result.message_id,
       chatId: String(result.result.chat?.id ?? channel),
     };
+  }
+
+  /**
+   * Resolve a cover image for a source URL when the post has no media of
+   * its own. Three cases:
+   *   1. Source URL itself is an image URL (extension or known image CDN).
+   *      → use it directly.
+   *   2. Source URL is an HTML page → fetch og:image (already cached by
+   *      MediaResolver during the content pipeline, but we re-derive here
+   *      since the post may have arrived from the queue without media).
+   *   3. GitHub repo URL → use opengraph.githubassets.com social preview.
+   *
+   * Returns null if no usable image is found.
+   */
+  private async resolveSourceCoverImage(sourceUrl: string): Promise<string | null> {
+    try {
+      const parsed = new URL(sourceUrl);
+      const lower = sourceUrl.toLowerCase().split("?")[0] ?? "";
+
+      // Case 1: source URL is itself an image.
+      if (lower.match(/\.(jpg|jpeg|png|webp)$/)) {
+        return sourceUrl;
+      }
+      // Known image CDNs without extensions.
+      const imageCdnHosts = [
+        "opengraph.githubassets.com",
+        "upload.wikimedia.org",
+        "images.unsplash.com",
+      ];
+      if (imageCdnHosts.some((h) => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`))) {
+        return sourceUrl;
+      }
+
+      // Case 3: GitHub repo → social preview.
+      const ghMatch = parsed.hostname === "github.com"
+        ? /github\.com\/([^/]+)\/([^/]+)/i.exec(sourceUrl)
+        : null;
+      if (ghMatch) {
+        const [, owner, repo] = ghMatch;
+        return `https://opengraph.githubassets.com/1/${owner}/${repo}`;
+      }
+
+      // Case 2: HTML page → fetch og:image.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 6_000);
+      try {
+        const response = await fetch(sourceUrl, {
+          signal: controller.signal,
+          headers: { "User-Agent": "Fredy/1.0 (Telegram Content Bot)" },
+        });
+        clearTimeout(timeout);
+        if (!response.ok) return null;
+        const html = await response.text();
+        const ogMatch = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)
+          ?? /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html);
+        if (!ogMatch?.[1]) return null;
+        // Resolve relative URLs against the page URL.
+        const absolute = new URL(ogMatch[1], sourceUrl).href;
+        const absLower = absolute.toLowerCase().split("?")[0] ?? "";
+        if (absLower.match(/\.(jpg|jpeg|png|webp)$/)) return absolute;
+        // Accept known image CDNs even without extension.
+        if (imageCdnHosts.some((h) => absolute.includes(h))) return absolute;
+        return null;
+      } catch {
+        clearTimeout(timeout);
+        return null;
+      }
+    } catch {
+      return null;
+    }
   }
 
   /** Simulate publishing (for debug/testing — no Telegram call). */

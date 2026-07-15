@@ -25,6 +25,8 @@ export type DebugEventName =
   | "scheduler.tick"
   | "scheduler.slot_fired"
   | "scheduler.skip"
+  | "scheduler.stale_language"
+  | "scheduler.alert"
   | "quality.reject"
   | "quality.reject_fallback"
   | "quality.pass"

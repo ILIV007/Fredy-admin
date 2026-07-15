@@ -2,6 +2,38 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.4.0] — 2026-07-15 — Auto-Publish Bug Fixes + Source Image Feature
+
+### Critical Fixes
+
+- **Auto-published posts now use Persian when DEFAULT_LANGUAGE=fa** — root cause: `LanguageInjector.resolve("auto")` returned `"en"` whenever `config.default === "auto"` (the schema default), ignoring the operator's env-var intent. Resolution order is now: concrete request → config default → env DEFAULT_LANGUAGE → final fallback `"fa"` (Fredy's primary audience is Persian). Container now wires `envDefaultLanguage: () => env.DEFAULT_LANGUAGE` into the injector.
+
+- **Auto-published posts now send to admin PM** — `SchedulerService.fireSlot()` previously published to the channel silently. Manual posts (admin/screens/manual.ts and entry/manager.ts post/channel) had a full admin-PM notification path, but the auto path did not. Added `notifyAdminPm()` that mirrors the manual path: sends the same formatted post (text or photo) + a short summary (slot, AI provider/model, quality, tokens, channel message ID). Wired via new optional `tg`, `uxLayer`, `adminId` deps in `SchedulerServiceDeps`.
+
+- **Stale-language queued content is now skipped** — when a slot fires, items dequeued from the content queue are checked against the current effective language. Items generated under a previous language setting are dropped (logged at `scheduler.stale_language`) instead of being published. This prevents English posts from showing up in the channel after the operator switches to Persian, even if the queue was filled with English content earlier.
+
+- **`isUsableImageUrl()` no longer leaks non-image URLs** — the previous logic had a tautology that made it return `true` for almost every URL, including plain article URLs that serve HTML. New logic: hard-reject bad extensions → hard-reject HTML/PHP/etc. → accept known-good image extensions → accept a small allowlist of image CDNs that serve dynamic URLs without extensions → reject everything else by default. Article URLs no longer leak through as "image" media and break `sendPhoto`.
+
+- **Removed broken provider logos** — the `PROVIDER_LOGOS` table had entries for `nasa` (.svg), `joke` (.ico), `hackernews` (.gif), and `wikimedia` (.svg thumbnail) — all rejected by Telegram's `sendPhoto` with "wrong type of the web page content". Only `.jpg/.jpeg/.png/.webp` logos are kept now.
+
+### Added
+
+- **Source image cover for text-only posts** — when a post has no media of its own, `FinalPublisher` now tries to derive a cover image from the source URL:
+  1. If the source URL itself is an image (extension or known image CDN), use it directly.
+  2. If it's a GitHub repo URL, use `opengraph.githubassets.com/1/<owner>/<repo>` social preview.
+  3. Otherwise fetch the page and extract `og:image` (6s timeout, relative URLs resolved against the page).
+  If `sendPhoto` fails for any reason, the post gracefully falls back to text-only instead of being skipped entirely.
+
+- **`APP_VERSION` and `APP_BUILD_DATE` constants** — single source of truth for the version string, defined in `src/core/constants.ts`. All previously-hardcoded `"6.2.0"` strings in `entry/manager.ts` (7 occurrences), `entry/health.ts`, and `admin/screens/main.ts` now read from these constants. Bumping the version is now a one-line change.
+
+### Changed
+
+- **Scheduler failure alerts go to admin PM** — previously the `consecutiveFailures >= 3` branch only logged a warning. Now it sends a real Telegram message to the admin (when `tg` + `adminId` are wired) with the last error, slot info, and content ID. The counter is reset on the next successful publish, not just on alert.
+
+- **`LanguageInjector` now exposes `envDefaultLanguage` dep** — optional `() => string` callback used as a tiebreaker when both the request and the config default are `"auto"`. Container passes `() => env.DEFAULT_LANGUAGE`.
+
+- **`SchedulerServiceDeps` extended** — three new optional fields: `tg`, `uxLayer`, `adminId`. All backward-compatible (existing callers that don't pass them keep working, just without admin PM notifications).
+
 ## [6.3.1] — 2026-07-15 — Replace Gemini Previews with New 3.x Stable Models
 
 ### Removed

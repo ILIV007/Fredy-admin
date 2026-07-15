@@ -129,6 +129,7 @@ export function buildContainer(env: Env): Container {
   // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
     config: async () => (await config.getSettings(Number(env.ADMIN_ID))).language,
+    envDefaultLanguage: () => env.DEFAULT_LANGUAGE,
   });
   const promptBuilder = new PromptBuilder({ languageInjector });
   const responseParser = new ResponseParser({});
@@ -250,6 +251,10 @@ export function buildContainer(env: Env): Container {
     contentQueue: queue,
     history,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
+    // Auto-publish admin PM notification (mirrors manual publish path).
+    tg,
+    uxLayer,
+    adminId: () => Number(env.ADMIN_ID ?? "0"),
   });
 
   return {

@@ -31,6 +31,8 @@ import type { ContentManager } from "./content-manager";
 import type { ContentQueue } from "./content-queue";
 import type { HistoryService } from "./history-service";
 import type { Logger } from "./logger";
+import type { TelegramService } from "./telegram";
+import type { UXLayer } from "./ux-layer";
 import { SchedulerDisabledError } from "../core/scheduler/errors";
 
 /** Publisher interface — both PublishingService and FinalPublisher implement this. */
@@ -47,6 +49,15 @@ export interface SchedulerServiceDeps {
   readonly contentQueue: ContentQueue;
   readonly history: HistoryService;
   readonly settings: () => Promise<FredySettings>;
+  /**
+   * Optional — when provided, every successful auto-publish also sends the
+   * formatted post + a notification summary to the admin PM, mirroring the
+   * manual publish path. This closes the gap where manual posts reached the
+   * admin PM but auto-published posts did not.
+   */
+  readonly tg?: TelegramService;
+  readonly uxLayer?: UXLayer;
+  readonly adminId?: () => number;
 }
 
 export class SchedulerService {
@@ -181,15 +192,42 @@ export class SchedulerService {
       message: "Firing slot",
     });
 
+    // 0. Load current settings once — used for language validation and
+    //    as the language argument when generating fresh content.
+    const settings = await this.deps.settings();
+    // Resolve the *effective* target language (auto → fa/en) so we can
+    // reject stale queued content that was generated under a different
+    // language. Without this check, old English posts would keep being
+    // published even after the operator switched the bot to Persian.
+    const expectedLang = (settings.language.default === "fa" || settings.language.default === "en")
+      ? settings.language.default
+      : (settings.language.autoDetect ? "fa" : "en"); // matches language-injector's fallback
+
     // 1. Try to dequeue ready content for this category.
     // contentQueue.dequeue() returns QueuedContent (which wraps ReadyContent in .content).
     // We need to unwrap it to get the ReadyContent for publishing.
-    const queued = await this.deps.contentQueue.dequeue(slot.category);
-    let content: ReadyContent | null = queued ? queued.content : null;
+    // Stale-language items are skipped (dropped from queue) so the next
+    // item or a fresh generation can take over.
+    let content: ReadyContent | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const queued = await this.deps.contentQueue.dequeue(slot.category);
+      if (!queued) break;
+      const queuedLang = queued.content.language;
+      if (queuedLang === expectedLang || queuedLang === settings.language.default) {
+        content = queued.content;
+        break;
+      }
+      // Stale language — log and try the next item.
+      this.deps.logger.warn("scheduler.stale_language", {
+        contentId: queued.content.id,
+        queuedLanguage: queuedLang,
+        expectedLanguage: expectedLang,
+        message: "Dropping stale-language queued content",
+      });
+    }
 
-    // 2. If queue is empty, process a fresh item from a plugin.
+    // 2. If queue is empty (or all stale), process a fresh item from a plugin.
     if (!content) {
-      const settings = await this.deps.settings();
       const pipelineResult = await this.deps.contentManager.processForCategory(
         slot.category,
         null, // anti-repeat handled by ContentManager via PluginManager
@@ -229,6 +267,15 @@ export class SchedulerService {
       // 4. Mark slot as fired.
       await this.deps.dailyPlanner.markSlotFired(slot, content.id);
 
+      // 5. Notify admin PM (mirrors the manual publish path).
+      //    Only on success, and only when tg + uxLayer + adminId are wired.
+      if (result.ok) {
+        this.consecutiveFailures = 0; // reset failure counter on success.
+        await this.notifyAdminPm(content, result, slot).catch(() => {
+          // PM notification failures must not affect the publish result.
+        });
+      }
+
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -244,12 +291,15 @@ export class SchedulerService {
       // Track consecutive failures and alert admin.
       this.consecutiveFailures++;
       if (this.consecutiveFailures >= 3) {
-        const adminId = Number(this.deps.settings && (await this.deps.settings()).telegram?.adminId || 0);
-        if (adminId > 0) {
-          await this.deps.logger.warn("scheduler.alert", {
-            message: `3 consecutive publish failures — admin alerted`,
-            lastError: message,
-          });
+        const adminId = this.deps.adminId?.() ?? 0;
+        if (adminId > 0 && this.deps.tg) {
+          await this.deps.tg.sendMessage(adminId, [
+            `⚠️ <b>Scheduler: 3 consecutive failures</b>`,
+            ``,
+            `<b>Last error:</b> ${this.escapeHtml(message)}`,
+            `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+            `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
         // Reset to avoid spamming.
         this.consecutiveFailures = 0;
@@ -269,6 +319,56 @@ export class SchedulerService {
         attempts: 0,
       };
     }
+  }
+
+  /**
+   * Send the formatted post + a summary notification to the admin PM.
+   * Mirrors what the manual publish path (admin/screens/manual.ts and
+   * entry/manager.ts post/channel) does. Failures here are swallowed.
+   */
+  private async notifyAdminPm(
+    content: ReadyContent,
+    pubResult: PublishResult,
+    slot: SlotTime,
+  ): Promise<void> {
+    const adminId = this.deps.adminId?.() ?? 0;
+    if (adminId <= 0 || !this.deps.tg || !this.deps.uxLayer) return;
+
+    // 1. Send the EXACT same formatted post as what went to the channel.
+    try {
+      const finalPost = await this.deps.uxLayer.transform(content);
+      if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+        await this.deps.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, {
+          parse_mode: "HTML",
+        });
+      } else {
+        await this.deps.tg.sendMessage(adminId, finalPost.fullText, {
+          parse_mode: "HTML",
+        });
+      }
+    } catch {
+      // transform/send failure must not break the publish flow.
+    }
+
+    // 2. Send a short notification summary.
+    await this.deps.tg.sendMessage(adminId, [
+      `🤖 <b>Auto-published (scheduler)</b>`,
+      ``,
+      `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+      `<b>AI:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}`,
+      `<b>Quality:</b> ${content.quality.overallScore}`,
+      `<b>Tokens:</b> ${content.tokensUsed}`,
+      `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+  }
+
+  /** Escape HTML special characters for safe Telegram display. */
+  private escapeHtml(input: string | null | undefined): string {
+    if (input === null || input === undefined) return "";
+    return String(input)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   /**

@@ -4,12 +4,21 @@
  *
  * The AI must generate DIRECTLY in the selected language (never translate).
  * This module provides the writing rules for each supported language.
+ *
+ * IMPORTANT: When the requested language is "auto", we resolve to the
+ * configured default. If the configured default is ALSO "auto" (the
+ * schema default), we fall back to the env var DEFAULT_LANGUAGE, then
+ * to "fa" because the bot's primary audience is Persian. Previous logic
+ * returned "en" in this case, which caused all auto-published posts to
+ * be in English even when the operator expected Persian.
  */
 
 import type { LanguageConfig } from "../core/config/sections/language";
 
 export interface LanguageInjectorDeps {
   readonly config: () => Promise<LanguageConfig>;
+  /** Env-provided default language, used as tiebreaker when config is "auto". */
+  readonly envDefaultLanguage?: () => string;
 }
 
 export class LanguageInjector {
@@ -17,21 +26,39 @@ export class LanguageInjector {
 
   /** Get the language rules string for the requested language. */
   async getRules(requestedLanguage: string): Promise<string> {
-    const config = await this.deps.config();
-    const actual = requestedLanguage === "auto" ? config.default : requestedLanguage;
+    const actual = await this.resolve(requestedLanguage);
 
     if (actual === "fa") return PERSIAN_RULES;
     if (actual === "en") return ENGLISH_RULES;
     return ENGLISH_RULES; // fallback
   }
 
-  /** Resolve "auto" to a concrete language. */
+  /**
+   * Resolve a possibly-"auto" language to a concrete "en" | "fa".
+   *
+   * Resolution order:
+   *   1. If `requestedLanguage` is concrete (not "auto") → use it.
+   *   2. Else if `config.default` is concrete → use it.
+   *   3. Else if env `DEFAULT_LANGUAGE` is "fa" → use "fa".
+   *   4. Else default to "fa" (Fredy's primary audience is Persian).
+   */
   async resolve(requestedLanguage: string): Promise<"en" | "fa"> {
+    // Step 1: concrete request wins.
+    if (requestedLanguage === "fa") return "fa";
+    if (requestedLanguage === "en") return "en";
+
+    // Step 2: config default.
     const config = await this.deps.config();
-    if (requestedLanguage !== "auto") {
-      return requestedLanguage as "en" | "fa";
-    }
-    return config.default === "fa" ? "fa" : "en";
+    if (config.default === "fa") return "fa";
+    if (config.default === "en") return "en";
+
+    // Step 3: env tiebreaker.
+    const envLang = this.deps.envDefaultLanguage?.();
+    if (envLang === "fa") return "fa";
+    if (envLang === "en") return "en";
+
+    // Step 4: final fallback — Persian (Fredy's primary audience).
+    return "fa";
   }
 }
 

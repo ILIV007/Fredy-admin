@@ -4,6 +4,15 @@
  * See ARCHITECTURE_RULES.md §8.5.
  */
 
+/** Application version — single source of truth.
+ *  Bump together with VERSION file and CHANGELOG.md entry.
+ *  All "version" strings in API responses should read from here, not be
+ *  hardcoded inline (otherwise they drift, like the v6.2.0 strings did). */
+export const APP_VERSION = "6.4.0" as const;
+
+/** Build date — bump with each release. */
+export const APP_BUILD_DATE = "2026-07-15" as const;
+
 /** Telegram Bot API base URL. */
 export const TELEGRAM_API_BASE = "https://api.telegram.org/bot" as const;
 
