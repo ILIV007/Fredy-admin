@@ -2,6 +2,38 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.3.1] — 2026-07-15 — Replace Gemini Previews with New 3.x Stable Models
+
+### Removed
+
+- **Preview models dropped** — `gemini-3-flash-preview` and `gemini-3.1-flash-lite-preview` removed from both `providers.ts` defaults and the `GEMINI_MODELS` constant in `gemini.ts`, per user request. Only stable Gemini models remain in the fallback chain.
+
+### Added
+
+- **New Gemini 3.x stable models** — added the 2026 AI Studio free-tier lineup per user-supplied ranking:
+  - `gemini-3.5-flash` — best overall (frontier intelligence + 1M context + good speed)
+  - `gemini-3.1-flash-lite` — fastest stable 3.x lite, ideal for high-volume ticks
+  - `gemini-3-flash` — stable 3.x flash (alternative to 3.1-flash-lite)
+- All three new models are placed ABOVE the legacy 2.5 series, per user request ("ورژن 2.5 جمنای بعد این ها باشه").
+
+### Changed
+
+- **Final Gemini fallback chain** (stable-only, in priority order):
+  1. `gemini-3.5-flash` (primary — best overall)
+  2. `gemini-3.1-flash-lite` (fastest stable 3.x lite)
+  3. `gemini-3-flash` (stable 3.x flash alternative)
+  4. `gemini-2.5-flash` (legacy — deliberately placed AFTER all 3.x)
+  5. `gemini-2.5-flash-lite` (legacy lite)
+  6. `gemini-2.0-flash` (last resort)
+- `retryCount` kept at 0 to fail fast and move to the next model in the chain instead of burning the daily quota on a single failing model.
+- Source-of-truth comments added to both `providers.ts` and `gemini.ts` so the two lists stay in sync going forward.
+
+### Build Info
+
+- **Base:** v6.2.0 (production)
+- **Files changed:** 4 (VERSION, CHANGELOG.md, providers.ts, gemini.ts)
+- **Files added/removed:** 0 — full file inventory preserved from v6.2.0
+
 ## [3.3.0] — 2026-07-12 — Production Fixes & Real Plugin Implementations
 
 ### Critical Fixes

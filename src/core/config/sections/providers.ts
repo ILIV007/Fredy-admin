@@ -28,12 +28,20 @@ export const providersDefaults: ProvidersConfig = {
   _version: 1,
   gemini: {
     enabled: true,
+    // Order = fallback priority (first = primary, last = last resort).
+    // Only stable models are used — preview models removed per user request.
+    // 3.x stable models ranked per the 2026 free-tier ranking
+    // (3.5-flash > 3.1-flash-lite > 3-flash), all above the legacy 2.5 line.
+    // Gemini 2.5 series deliberately placed AFTER all 3.x models.
     models: [
-      "gemini-3-flash-preview",
-      "gemini-2.5-flash",
-      "gemini-3.1-flash-lite-preview",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
+      // ── 3.x stable (ranked per AI Studio 2026 free-tier guide) ──
+      "gemini-3.5-flash",                // #1 best overall — frontier + 1M ctx
+      "gemini-3.1-flash-lite",           // #2 fastest stable 3.x lite
+      "gemini-3-flash",                  // #2 alt — stable 3.x flash
+      // ── 2.5 legacy (placed AFTER all 3.x, per user request) ──
+      "gemini-2.5-flash",                // legacy reliable
+      "gemini-2.5-flash-lite",           // legacy lite
+      "gemini-2.0-flash",                // last resort
     ],
     timeoutMs: 15000,
     retryCount: 0,

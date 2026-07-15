@@ -14,12 +14,19 @@ import type { Env } from "../../types/env";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
+// Order = fallback priority (first = primary, last = last resort).
+// Only stable models are used — preview models removed per user request.
+// Must stay in sync with providersDefaults.gemini.models in
+// src/core/config/sections/providers.ts.
 const GEMINI_MODELS = [
-  "gemini-3-flash-preview",
-  "gemini-2.5-flash",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
+  // ── 3.x stable (ranked per AI Studio 2026 free-tier guide) ──
+  "gemini-3.5-flash",                // #1 best overall — frontier + 1M ctx
+  "gemini-3.1-flash-lite",           // #2 fastest stable 3.x lite
+  "gemini-3-flash",                  // #2 alt — stable 3.x flash
+  // ── 2.5 legacy (placed AFTER all 3.x, per user request) ──
+  "gemini-2.5-flash",                // legacy reliable
+  "gemini-2.5-flash-lite",           // legacy lite
+  "gemini-2.0-flash",                // last resort
 ] as const;
 
 export class GeminiProvider implements AIProvider {
