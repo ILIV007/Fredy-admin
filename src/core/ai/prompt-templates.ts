@@ -41,10 +41,30 @@ FORMATTING RULES (use these to make posts readable):
   * Long explanatory paragraphs (quote them to make them stand out)
   * Step-by-step instructions (quote each step or the whole list)
   * Important notes or warnings
-  * Code examples or commands
 - Use >! for collapsible quotes (for very long paragraphs that can be collapsed):
   * Use this for paragraphs longer than 3 lines
   * Use this for detailed technical explanations that not everyone needs to read
+
+CODE FORMATTING (IMPORTANT — Telegram renders these as code blocks):
+- Wrap code in triple backticks for multi-line code blocks:
+  \`\`\`
+  npm install foo
+  \`\`\`
+- Wrap inline code/identifiers in single backticks:
+  \`Result<T, Uninhabited>\`  \`dead_code_pub_in_binary\`  \`src/index.ts\`
+- ALWAYS use backticks for:
+  * Shell commands: \`npm install foo\` or \`\`\`npm install foo\`\`\`
+  * Code identifiers with special chars: \`Result<T, Uninhabited>\`
+  * Config keys / env vars: \`DEBUG_MODE=true\`
+  * File paths: \`src/index.ts\`
+  * Lint rule names: \`dead_code_pub_in_binary\`
+  * Type names: \`ControlFlow\`, \`Result\`
+  * Function/method names with parens: \`fn main()\`
+- This makes technical posts scannable and visually clean.
+- Do NOT use markdown headings (#, ##). Telegram doesn't render them.
+- Do NOT use markdown links [text](url). The system adds source links separately.
+
+GENERAL:
 - Use line breaks between paragraphs for readability.
 - Keep paragraphs short (2-4 sentences each).
 
@@ -78,13 +98,19 @@ Write a clear, engaging post about the source content. Explain what it is, why i
 
 Write a factual news post. What happened, why it matters. 2-3 paragraphs. No speculation, no rumor. If the content is political or gossip, set aiConfidence below 40.`,
 
-  C: `CATEGORY C — Support Content (NASA, jokes, quotes, dev facts)
+  C: `CATEGORY C — Support Content (NASA APOD, jokes, quotes, dev facts)
 
-For NASA: explain what the image shows in 2-4 sentences. No deep astrophysics.
-For jokes: just the joke, 1-2 sentences. No explanation needed.
-For quotes: the quote + author. No motivational-poster quotes.
-For dev facts: the fact + 1-2 sentences of context.
-Keep it short and engaging.`,
+For NASA APOD (image-first posts):
+- Caption: 1-2 SHORT lines in Persian (≤200 chars total). The image is the star — the caption just names what we're looking at.
+- Format: "🌟 <one-line description of what the image shows>" — no deep astrophysics, no paragraphs.
+- Example good caption: "🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری — گازهای درخشان شراره‌های ستاره‌ای جوان رو نشون میده."
+- Example BAD caption (too long): multiple paragraphs explaining the physics. The channel is a programming channel — readers want the pretty picture, not an astronomy lecture.
+
+For jokes: setup + punchline. No explanation. Keep it respectful.
+For quotes: the quote + author (em-dash, not hyphen). No motivational-poster quotes.
+For dev facts: the fact + 1-2 sentences of context. Must be verifiable.
+
+If you cannot verify a fact, set aiConfidence below 50 and explain in "notes".`,
 };
 
 /**

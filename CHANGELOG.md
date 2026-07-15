@@ -2,6 +2,55 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.6.0] — 2026-07-15 — Telegram Code Blocks + NASA Image-First + Prompt Formatting
+
+### Critical Fixes
+
+- **Telegram formatting now supports code blocks + inline code** — The UX layer's `formatBody()` now converts AI markdown to Telegram HTML:
+  - ` ```code block``` ` → `<pre><code>code block</code></pre>` (for multi-line code)
+  - `` `inline code` `` → `<code>inline code</code>` (for identifiers, commands, paths)
+  - `**bold**` → `<b>bold</b>` (existing, kept)
+  - `*italic*` → `<i>italic</i>` (NEW — single asterisks)
+  - `> quote` → `<blockquote>quote</blockquote>` (existing, kept)
+  - `>! collapsible` → `<blockquote expandable="true">collapsible</blockquote>` (existing, kept)
+  - Code blocks/inline code are extracted FIRST (before escaping) so their content survives the escape step untouched. After extraction, the remaining text is escaped, then bold/italic/quote transformations are applied, then code segments are restored.
+  - This fixes the issue where posts like the Rust 1.97.0 release showed `Result<T, Uninhabited>` and `dead_code_pub_in_binary` as plain text instead of formatted code.
+
+- **AI prompt updated to use code formatting** — Base system prompt now includes a "CODE FORMATTING" section instructing the AI to wrap technical identifiers in backticks:
+  * Shell commands: \`npm install foo\`
+  * Code identifiers with special chars: \`Result<T, Uninhabited>\`
+  * Config keys / env vars: \`DEBUG_MODE=true\`
+  * File paths: \`src/index.ts\`
+  * Lint rule names: \`dead_code_pub_in_binary\`
+  * Type names: \`ControlFlow\`, \`Result\`
+  * Function/method names with parens: \`fn main()\`
+  - Also added: "Do NOT use markdown headings (#, ##). Telegram doesn't render them." and "Do NOT use markdown links [text](url)."
+
+- **NASA prompt updated to image-first** — Category C prompt now explicitly says:
+  - "Caption: 1-2 SHORT lines in Persian (≤200 chars total). The image is the star."
+  - Includes a good example: "🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری — گازهای درخشان شراره‌های ستاره‌ای جوان رو نشون میده."
+  - Includes a bad example (multi-paragraph physics explanation) to guide the AI away from long captions.
+
+- **NASA plugin now fetches multiple days as fallback** — Previously `fetch()` only got today's APOD. If today was a video day, it returned `[]` (empty). Now it tries today + previous 2 days (3 attempts), skipping video entries, and returns up to 2 image APODs. This ensures we always have at least one image APOD to publish even on video days.
+
+### Files Changed (5)
+
+1. `VERSION` → 6.6.0
+2. `CHANGELOG.md` → this entry
+3. `src/core/constants.ts` → `APP_VERSION = "6.6.0"`
+4. `src/services/ux-layer.ts` — `formatBody()` rewritten with code block/inline code/italic support + code extraction before escaping
+5. `src/core/ai/prompt-templates.ts` — CODE FORMATTING section added to base prompt, Category C rewritten for image-first NASA
+6. `src/plugins/sources/nasa/index.ts` — multi-day fallback (today + 2 previous), skip videos, require image URL
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Type-check (edited files) | 0 errors |
+| Total errors | 33 (v6.5.1 had 34 — **1 fewer**) |
+| Files in project | 188 (unchanged from v6.5.1) |
+| New files | 0 |
+
 ## [6.5.1] — 2026-07-15 — Admin PM Notification Fix + Duplicate Post Forwarding + Code Cleanup
 
 ### Critical Fixes

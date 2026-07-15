@@ -61,40 +61,83 @@ export class NasaPlugin implements Plugin {
     // Use personal API key if available, else DEMO_KEY
     const apiKey = this.deps.env.NASA_API_KEY || "DEMO_KEY";
 
-    const params = new URLSearchParams({ api_key: apiKey });
-    const url = `${NASA_API}?${params.toString()}`;
+    // Try today + previous 2 days as fallback (in case today is a video
+    // day or the API returns an error). This ensures we always have at
+    // least one image APOD to publish.
+    const items: SourceItem[] = [];
+    for (let i = 0; i < 3; i++) {
+      const date = new Date(Date.now() - i * 24 * 3600 * 1000).toISOString().split("T")[0]!;
+      try {
+        const params = new URLSearchParams({ api_key: apiKey, date });
+        const url = `${NASA_API}?${params.toString()}`;
 
-    const res = await fetch(url, {
-      headers: { "User-Agent": "FredyBot/1.0 (Cloudflare Workers)" },
-    });
+        const res = await fetch(url, {
+          headers: { "User-Agent": "FredyBot/1.0 (Cloudflare Workers)" },
+        });
 
-    if (!res.ok) {
-      throw new Error(`NASA API ${res.status}: ${res.statusText}`);
+        if (!res.ok) {
+          this.deps.logger.warn("source.fetch_error", {
+            plugin: "nasa",
+            date,
+            status: res.status,
+          });
+          continue;
+        }
+
+        const apod = await res.json() as APODResponse;
+
+        // Only image type — skip video days (the channel is for beautiful
+        // space images, not YouTube links).
+        if (apod.media_type && apod.media_type !== "image") {
+          this.deps.logger.info("source.fetch_skip", {
+            plugin: "nasa",
+            date,
+            reason: `media_type=${apod.media_type}`,
+          });
+          continue;
+        }
+
+        // Require an image URL (hdurl preferred for quality).
+        if (!apod.hdurl && !apod.url) {
+          this.deps.logger.warn("source.fetch_error", {
+            plugin: "nasa",
+            date,
+            reason: "missing image URL",
+          });
+          continue;
+        }
+
+        items.push(this.normalize(apod));
+
+        // Stop early once we have 2 image APODs (enough variety).
+        if (items.length >= 2) break;
+      } catch (error) {
+        this.deps.logger.warn("source.fetch_error", {
+          plugin: "nasa",
+          date,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
-    const apod = await res.json() as APODResponse;
-
-    // Only image type (skip video days for now)
-    if (apod.media_type && apod.media_type !== "image") {
-      this.deps.logger.info("source.fetch_skip", {
+    if (items.length === 0) {
+      this.deps.logger.warn("source.fetch_error", {
         plugin: "nasa",
-        reason: `media_type=${apod.media_type}`,
+        reason: "No image APODs found in the last 3 days",
       });
       return [];
     }
 
-    const item = this.normalize(apod);
-
     // Cache the result
-    await this.deps.kv.setJson(CACHE_KEY, [item], CACHE_TTL_SECONDS).catch(() => {});
+    await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
 
     this.deps.logger.info("source.fetch_success", {
       plugin: "nasa",
-      title: item.title,
-      date: apod.date,
+      itemCount: items.length,
+      titles: items.map((i) => i.title),
     });
 
-    return [item];
+    return items;
   }
 
   normalize(raw: unknown): SourceItem {

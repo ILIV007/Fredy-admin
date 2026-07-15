@@ -109,19 +109,48 @@ export class UXLayerImpl implements UXLayer {
 
   /** Convert AI markdown to Telegram HTML.
    *  **bold** → <b>bold</b>
+   *  `inline code` → <code>inline code</code>
+   *  ```code block``` → <pre><code>code block</code></pre>
    *  > quote → <blockquote>quote</blockquote>
    *  >! collapsible → <blockquote expandable="true">collapsible</blockquote>
+   *
+   *  Code blocks/inline code are extracted FIRST (before escaping) so
+   *  their content survives the escape step untouched. After extraction,
+   *  the remaining text is escaped, then bold/quote transformations are
+   *  applied, then code segments are restored.
    */
   private formatBody(text: string): string {
     if (!text) return "";
 
-    // 1. Escape HTML first.
-    let html = this.escapeHtml(text);
+    // 1. Extract code blocks (```...```) and inline code (`...`) into
+    //    placeholders so their content survives the escape step untouched.
+    const codeSegments: string[] = [];
+    let work = text;
 
-    // 2. Convert **bold** to <b>bold</b>.
+    // Triple-backtick code blocks (may span multiple lines).
+    work = work.replace(/```([\s\S]*?)```/g, (_, code: string) => {
+      const escaped = this.escapeHtml(code.replace(/^\n/, "").replace(/\n$/, ""));
+      codeSegments.push(`<pre><code>${escaped}</code></pre>`);
+      return `\x00CODE${codeSegments.length - 1}\x00`;
+    });
+
+    // Single-backtick inline code (single line, no newlines inside).
+    work = work.replace(/`([^`\n]+)`/g, (_, code: string) => {
+      const escaped = this.escapeHtml(code);
+      codeSegments.push(`<code>${escaped}</code>`);
+      return `\x00CODE${codeSegments.length - 1}\x00`;
+    });
+
+    // 2. Escape HTML special chars in the remaining (non-code) text.
+    let html = this.escapeHtml(work);
+
+    // 3. Convert **bold** to <b>bold</b>.
     html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 
-    // 3. Convert >! collapsible quotes to <blockquote expandable="true">.
+    // 4. Convert *italic* to <i>italic</i> (single asterisks, not part of **).
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
+
+    // 5. Convert >! collapsible quotes to <blockquote expandable="true">.
     //    Lines starting with >! are collapsible.
     const lines = html.split("\n");
     const result: string[] = [];
@@ -157,13 +186,23 @@ export class UXLayerImpl implements UXLayer {
       result.push(`<blockquote expandable="true">${collapsibleBuffer.join("\n")}</blockquote>`);
     }
 
-    // 4. Convert > regular quotes to <blockquote>.
+    // 6. Convert > regular quotes to <blockquote>.
     //    Group consecutive > lines into a single blockquote.
     const finalResult: string[] = [];
     let inQuote = false;
     let quoteBuffer: string[] = [];
 
     for (const line of result) {
+      // Skip lines that are already inside a <blockquote> tag.
+      if (line.startsWith("<blockquote")) {
+        if (inQuote) {
+          finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
+          inQuote = false;
+          quoteBuffer = [];
+        }
+        finalResult.push(line);
+        continue;
+      }
       if (line.startsWith("&gt; ") || line.startsWith("&gt;")) {
         const content = line.replace(/^&gt;\s?/, "");
         if (!inQuote) {
@@ -184,7 +223,11 @@ export class UXLayerImpl implements UXLayer {
       finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
     }
 
-    return finalResult.join("\n");
+    // 7. Restore code segments.
+    let finalHtml = finalResult.join("\n");
+    finalHtml = finalHtml.replace(/\x00CODE(\d+)\x00/g, (_, i: string) => codeSegments[Number(i)] ?? "");
+
+    return finalHtml;
   }
 
   /** Assemble a shorter caption for image posts. */
@@ -249,7 +292,7 @@ export class UXLayerImpl implements UXLayer {
     let match;
     while ((match = tagRegex.exec(truncated)) !== null) {
       const isClosing = match[1] === "/";
-      const tag = match[2].toLowerCase();
+      const tag = (match[2] ?? "").toLowerCase();
       if (isClosing) {
         const idx = openTags.lastIndexOf(tag);
         if (idx >= 0) openTags.splice(idx, 1);
