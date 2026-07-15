@@ -210,7 +210,8 @@ export class AIService {
   }
 
   /** Order providers: preferred first, then others by priority. */
-  private orderProviders(request: GenerateRequest): readonly AIProvider[] {
+  private orderProviders(_request: GenerateRequest): readonly AIProvider[] {
+    void _request;
     const configured = this.deps.providers; // already filtered to configured in container
     if (this.deps.preferred === "auto") return configured;
 

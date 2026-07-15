@@ -14,6 +14,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { githubTrendingManifest } from "./manifest";
+export { githubTrendingManifest } from "./manifest";
 
 const GH_API = "https://api.github.com";
 const CACHE_KEY = "fredy:source:github-trending:daily";

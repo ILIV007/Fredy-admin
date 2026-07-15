@@ -13,7 +13,7 @@
  * See ARCHITECTURE_RULES.md §7.1, §21.14.
  */
 
-import { STATS_BATCH_FLUSH_THRESHOLD, MS_PER_SECOND } from "../core/constants";
+import { STATS_BATCH_FLUSH_THRESHOLD } from "../core/constants";
 import type { Result } from "../core/result";
 import { tryAsync } from "../core/result";
 import type { Env } from "../types/env";

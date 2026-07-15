@@ -18,6 +18,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { devtoManifest } from "./manifest";
+export { devtoManifest } from "./manifest";
 
 const DEVTO_API = "https://dev.to/api/articles";
 const CACHE_KEY = "fredy:source:devto:top";

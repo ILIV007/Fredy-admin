@@ -7,7 +7,7 @@ import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
 import { buildKeyboardWithBack, toggleButton, labelButton, navButton } from "../keyboards";
-import { header, kv, statusBadge, divider, yesNo } from "../helpers/formatting";
+import { header, kv, divider, yesNo } from "../helpers/formatting";
 
 export const providersScreen: Screen = {
   id: "providers",

@@ -529,8 +529,10 @@ export async function managerHandler(
 
       // ── Duplicate fallback: send to admin PM with a "duplicate" label ──
       // The user wants: if a manually-triggered post would be a duplicate,
-      // do NOT publish to channel. Instead, send the post to admin PM with
-      // a "duplicate" notice so the admin can decide.
+      // do NOT publish to channel. Instead, send the FORMATTED POST itself
+      // to admin PM (so the admin can just forward it) followed by a
+      // duplicate notice. The previous approach only sent a notice with
+      // a /force_url command that never actually worked.
       if (!result && firstDuplicate) {
         const adminId = Number(env.ADMIN_ID ?? "0");
         const dupItem = firstDuplicate.item;
@@ -540,21 +542,41 @@ export async function managerHandler(
         report["duplicateOf"] = firstDuplicate;
 
         if (adminId > 0) {
-          // Send the formatted post to admin PM anyway (so they can see what
-          // would have been published), prefixed with a "DUPLICATE" notice.
+          // 1. Build a ReadyContent-like object from the source item so we
+          //    can run it through uxLayer.transform() and get the EXACT
+          //    same formatted post that would have gone to the channel.
           try {
-            // Build a minimal ReadyContent-like preview from the source item
-            // (the pipeline never produced a full ReadyContent since it bailed
-            // out at the dedup stage).
+            // Process with skipDedup=true so it goes all the way through
+            // the AI pipeline (we already know it's a duplicate — we want
+            // the formatted output now).
+            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true });
+            if (dupProcessed.ok && dupProcessed.content) {
+              const finalPost = await container.uxLayer.transform(dupProcessed.content);
+              // Send the formatted post (photo or text) — prefixed with a
+              // "DUPLICATE — for manual forwarding" notice.
+              if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+                await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              } else {
+                await container.tg.sendMessage(adminId, finalPost.fullText, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              }
+            }
+          } catch { /* transform failed — fall through to notice */ }
+
+          // 2. Send the duplicate notice (with item info + match reason).
+          try {
             const previewLines = [
-              `🔁 <b>Duplicate detected (not published)</b>`,
+              `🔁 <b>Duplicate detected (not published to channel)</b>`,
               ``,
               `<b>Source:</b> ${pluginId}`,
               `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
               `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
               `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
               ``,
-              `<i>This post was NOT sent to the channel because it has already been published recently. Reply /force_${firstDuplicate.existingId.slice(0, 20)} to publish anyway.</i>`,
+              `<i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i>`,
             ].join("\n");
             await container.tg.sendMessage(adminId, previewLines, { parse_mode: "HTML" }).catch(() => {});
           } catch { /* skip */ }

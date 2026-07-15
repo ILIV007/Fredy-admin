@@ -61,7 +61,7 @@ export const settingsScreen: Screen = {
     // Format: set:<scope>:<field>[:value | :toggle]
     if (parts.length < 4) return;
     const [, scope, field, action] = parts;
-    const value = parts.slice(4).join(":");
+    // parts.slice(4).join(":") was assigned to `value` (unused) — removed.
 
     let patch: Partial<FredySettings> = {};
 

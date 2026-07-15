@@ -145,22 +145,46 @@ export const manualScreen: Screen = {
           }
         }
 
-        // ── Duplicate fallback: send to admin PM with a "duplicate" label ──
+        // ── Duplicate fallback: send FORMATTED POST + duplicate notice to admin PM ──
+        // The user wants: if a manually-triggered post would be a duplicate,
+        // do NOT publish to channel. Instead, send the FORMATTED POST itself
+        // (so admin can just forward it) followed by a duplicate notice.
+        // The previous /force_url command never worked.
         if (!result && firstDuplicate) {
           const dupItem = firstDuplicate.item;
+          // 1. Re-process with skipDedup=true so the AI pipeline runs and
+          //    we get a full ReadyContent we can format.
+          try {
+            const dupProcessed = await ctx.container.content.process(dupItem, lang, { skipDedup: true });
+            if (dupProcessed.ok && dupProcessed.content) {
+              const finalPost = await ctx.container.uxLayer.transform(dupProcessed.content);
+              // Send the formatted post (photo or text).
+              if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+                await ctx.container.tg.sendPhoto(ctx.adminId, finalPost.media.url, finalPost.caption, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              } else {
+                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
+                  parse_mode: "HTML",
+                }).catch(() => {});
+              }
+            }
+          } catch { /* transform failed — fall through to notice */ }
+
+          // 2. Send the duplicate notice.
           try {
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `🔁 <b>Duplicate detected (not published)</b>`,
+              `🔁 <b>Duplicate detected (not published to channel)</b>`,
               ``,
               `<b>Source:</b> ${arg}`,
               `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
               `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
               `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
               ``,
-              `<i>This post was NOT sent to the channel because it has already been published recently.</i>`,
+              `<i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
           } catch { /* skip */ }
-          return { toast: `🔁 ${arg}: duplicate — sent to PM instead of channel`, redirectTo: "menu:main" };
+          return { toast: `🔁 ${arg}: duplicate — formatted post sent to PM for forwarding`, redirectTo: "menu:main" };
         }
 
         if (result && result.content) {

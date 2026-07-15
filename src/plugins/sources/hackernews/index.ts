@@ -17,6 +17,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { hackernewsManifest } from "./manifest";
+export { hackernewsManifest } from "./manifest";
 
 const HN_API = "https://hacker-news.firebaseio.com/v0";
 const CACHE_KEY = "fredy:source:hackernews:top";

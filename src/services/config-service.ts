@@ -12,7 +12,6 @@
 
 import { ConfigSectionRegistry } from "../core/config/section-registry";
 import { registerAllSections } from "../core/config/sections";
-import { ConfigValidationError } from "../core/errors";
 import type {
   ConfigExportResult,
   ConfigImportResult,

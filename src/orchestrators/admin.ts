@@ -14,10 +14,9 @@
  */
 
 import type { Container } from "../types/env";
-import type { FredySettings } from "../types/config";
 import type { TelegramCallbackQuery, TelegramMessage, TelegramUpdate } from "../types/telegram";
 import { ScreenRegistry, CommandRegistry } from "../admin/registry";
-import type { CommandContext, Screen, ScreenAction, ScreenContext } from "../admin/registry";
+import type { CommandContext, ScreenAction, ScreenContext } from "../admin/registry";
 import { registerScreens } from "../admin/screens/register";
 import { registerCommands } from "../admin/commands/register";
 import { unauthorizedMessage } from "../admin/helpers/auth";
@@ -114,7 +113,7 @@ export class AdminOrchestrator {
     };
 
     try {
-      let action: ScreenAction | void;
+      let action: ScreenAction | void = undefined;
       if (screen.onCallback) {
         action = await screen.onCallback(data, ctx);
       }

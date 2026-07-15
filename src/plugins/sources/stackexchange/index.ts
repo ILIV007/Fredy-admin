@@ -16,6 +16,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { stackexchangeManifest } from "./manifest";
+export { stackexchangeManifest } from "./manifest";
 
 const SO_API = "https://api.stackexchange.com/2.3";
 const CACHE_KEY = "fredy:source:stackexchange:top";

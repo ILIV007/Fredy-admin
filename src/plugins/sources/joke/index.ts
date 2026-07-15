@@ -15,6 +15,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { jokeManifest } from "./manifest";
+export { jokeManifest } from "./manifest";
 
 const JOKE_API = "https://v2.jokeapi.dev/joke/Programming";
 const CACHE_KEY = "fredy:source:joke:batch";

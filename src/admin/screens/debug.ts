@@ -69,7 +69,7 @@ export const debugScreen: Screen = {
     const second = parts[1] ?? "";
     const third = parts[2] ?? "";
     const fourth = parts[3] ?? "";
-    const fifth = parts[4] ?? "";
+    // parts[4] is unused — removed.
 
     // Handle "set:debug:<field>:<action>"
     if (first === "set" && second === "debug") {

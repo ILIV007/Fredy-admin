@@ -148,7 +148,7 @@ export class HookEngine {
     for (const sentence of sentences) {
       const numbers = sentence.match(/\d+/g);
       if (numbers && numbers.length > 0) {
-        const num = numbers[0];
+        // num was unused — removed.
         hooks.push(`Did you know? ${sentence.trim().slice(0, 80)}...`.slice(0, MAX_HOOK_LENGTH));
         break;
       }
@@ -184,7 +184,8 @@ export class HookEngine {
   }
 
   /** Question hooks — provoke curiosity. */
-  private questionHooks(title: string, _body: string, category: Category): string[] {
+  private questionHooks(_title: string, _body: string, category: Category): string[] {
+    void _title;
     const hooks: string[] = [];
 
     if (category === "A") {

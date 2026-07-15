@@ -17,6 +17,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { redditManifest } from "./manifest";
+export { redditManifest } from "./manifest";
 
 const REDDIT_BASE = "https://old.reddit.com";
 const CACHE_KEY = "fredy:source:reddit:top";

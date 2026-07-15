@@ -6,7 +6,7 @@
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
 import type { InlineKeyboard } from "../../types/telegram";
-import { buildKeyboardWithBack, labelButton, navButton } from "../keyboards";
+import { buildKeyboardWithBack, navButton } from "../keyboards";
 import { header, kv, divider, truncate, codeBlock } from "../helpers/formatting";
 
 export const soulScreen: Screen = {

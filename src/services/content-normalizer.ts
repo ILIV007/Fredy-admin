@@ -16,7 +16,6 @@
  */
 
 import type { SourceItem } from "../types/api";
-import type { Category } from "../types/category";
 import type { StandardPost, ContentMedia, ProviderEnrichment } from "../types/content";
 import type { MediaResolver } from "./media-resolver";
 import type { PluginManager } from "./plugin-manager";

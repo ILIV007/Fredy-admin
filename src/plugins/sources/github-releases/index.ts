@@ -15,6 +15,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { githubReleasesManifest } from "./manifest";
+export { githubReleasesManifest } from "./manifest";
 
 const GH_API = "https://api.github.com";
 const CACHE_KEY = "fredy:source:github-releases:latest";

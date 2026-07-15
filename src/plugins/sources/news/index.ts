@@ -17,6 +17,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { newsManifest } from "./manifest";
+export { newsManifest } from "./manifest";
 
 const NEWSAPI_URL = "https://newsapi.org/v2/top-headlines";
 const CACHE_KEY = "fredy:source:news:tech";
@@ -186,4 +187,3 @@ export function createNewsPlugin(deps: NewsPluginDeps): NewsPlugin {
   return new NewsPlugin(deps);
 }
 
-export { newsManifest } from "./manifest";

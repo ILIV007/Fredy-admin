@@ -68,7 +68,9 @@ export function addMinutes(epochMs: number, minutes: number): number {
 }
 
 /** Milliseconds until the next occurrence of HH:MM in a timezone. */
-export function msUntilNext(hhmm: string, timezone: string, now = Date.now()): number {
+export function msUntilNext(hhmm: string, _timezone: string, _now = Date.now()): number {
+  void _timezone;
+  void _now;
   const target = parseTimeToMinutes(hhmm);
   if (target === null) return Number.POSITIVE_INFINITY;
   // Real implementation in Phase 4.

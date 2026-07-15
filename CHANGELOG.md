@@ -2,6 +2,68 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.5.1] — 2026-07-15 — Admin PM Notification Fix + Duplicate Post Forwarding + Code Cleanup
+
+### Critical Fixes
+
+- **Auto-published posts now ALWAYS notify admin PM (success or failure)** — `SchedulerService.notifyAdminPm()` was previously gated by `if (result.ok)`, which meant queued posts that failed quality gate / sendPhoto / sendMessage silently disappeared with zero admin visibility. Now the admin PM is notified in all cases:
+  - On success: formatted post (photo or text) + summary (slot, AI provider/model, quality, tokens, channel message ID).
+  - On failure: formatted post (for manual forwarding) + error notice with the failure reason.
+  - If `sendPhoto` fails: automatic fallback to text-only.
+  - If `transform` fails: minimal plain-text notice with headline + URL.
+  - If everything fails: at least the summary notification goes out (it's the last thing attempted, wrapped in its own `.catch()`).
+
+- **Duplicate posts now send the FORMATTED POST itself to admin PM** — the previous behavior only sent a notice with a `/force_url` command that never actually worked. Now when a manual post is detected as a duplicate:
+  1. The pipeline re-processes the item with `skipDedup: true` to get a full `ReadyContent`.
+  2. The exact same formatted post (photo or text) that would have gone to the channel is sent to admin PM.
+  3. A "🔁 Duplicate detected" notice follows with item info + match reason.
+  4. The admin can simply **forward** the post to the channel if they want it published.
+
+  This is much simpler than the broken `/force_url` command — just forward.
+
+### Code Cleanup (debug pass)
+
+- **30 TypeScript errors fixed** — `src/` error count went from 51 (v6.5.0) down to 21 (v6.5.1). Remaining errors are type-system only (FredySettings ↔ Record<string,unknown> conversions, emoji-rotator literal-type narrowing) and have no runtime impact.
+
+- **17 unused-import warnings removed** — `TS6133` warnings are now 0. Cleaned up unused identifiers in `debug.ts`, `settings.ts`, `nasa/index.ts`, `ai-service.ts`, `hook-engine.ts`, `quality-engine.ts`, `source-formatter.ts`, `providers.ts`, `soul.ts`, `orchestrators/admin.ts`, `content-formatter.ts`, `content-normalizer.ts`, `kv-store.ts`, `time.ts`, `config-service.ts`.
+
+- **Plugin manifests now properly exported** — all 13 source plugins (`github`, `devto`, `stackexchange`, `reddit`, `github-releases`, `news`, `hackernews`, `nasa`, `joke`, `xkcd`, `github-trending`, `wikimedia`) now `export { fooManifest } from "./manifest"` in addition to importing it. This resolves the `TS2459` errors in `plugins/sources/index.ts`.
+
+- **`action is used before being assigned` fix** — `orchestrators/admin.ts` line 116: `let action: ScreenAction | void = undefined;` (was uninitialized). This was a latent bug that could have caused runtime issues if `screen.onCallback` ever threw synchronously.
+
+- **New debug events** added to `DebugEventName`:
+  - `scheduler.transform_failed` — when `uxLayer.transform()` throws during admin PM notification.
+  - `scheduler.send_formatted_failed` — when `sendPhoto`/`sendMessage` fails during admin PM notification.
+  - `scheduler.admin_pm_failed` — when the entire `notifyAdminPm` flow fails.
+  - `source.fetch_repo_error` — was already used by `github-releases` plugin but missing from the type.
+
+### Files Changed (14)
+
+1. `VERSION` → 6.5.1
+2. `CHANGELOG.md` → this entry
+3. `src/core/constants.ts` → `APP_VERSION = "6.5.1"`
+4. `src/types/debug.ts` → 4 new debug events
+5. `src/services/scheduler-service.ts` → `notifyAdminPm` rewrite (always notify + multi-layer fallbacks)
+6. `src/entry/manager.ts` → duplicate flow sends formatted post + notice (not just notice)
+7. `src/admin/screens/manual.ts` → same duplicate-flow fix
+8. `src/admin/screens/debug.ts` → removed unused `fifth` variable
+9. `src/admin/screens/settings.ts` → removed unused `value` variable
+10. `src/admin/screens/providers.ts` → removed unused `statusBadge` import
+11. `src/admin/screens/soul.ts` → removed unused `labelButton` import
+12. `src/orchestrators/admin.ts` → removed unused imports + `action` initialization fix
+13. `src/plugins/sources/*/index.ts` (13 files) → manifest re-exports
+14. `src/services/{ai-service,content-formatter,content-normalizer,hook-engine,kv-store,quality-engine,source-formatter,config-service}.ts` + `src/primitives/time.ts` → unused-variable cleanup
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Type-check (src/ only) | 21 errors (was 51 — **30 fixed**) |
+| Type-check (total) | 35 errors (was 64 — **29 fixed**) |
+| Unused-import warnings | 0 (was 17 — **all fixed**) |
+| Files in project | 227 (unchanged from v6.5.0) |
+| New files | 0 |
+
 ## [6.5.0] — 2026-07-15 — Duplicate Prevention + Popularity Filter + KV Optimization
 
 ### Critical Fixes

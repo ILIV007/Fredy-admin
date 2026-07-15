@@ -16,6 +16,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { wikimediaManifest } from "./manifest";
+export { wikimediaManifest } from "./manifest";
 
 const WIKI_API_BASE = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events";
 const CACHE_KEY = "fredy:source:wikimedia:today";

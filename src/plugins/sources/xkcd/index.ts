@@ -13,6 +13,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { xkcdManifest } from "./manifest";
+export { xkcdManifest } from "./manifest";
 
 const XKCD_API = "https://xkcd.com/info.0.json";
 const CACHE_KEY = "fredy:source:xkcd:latest";

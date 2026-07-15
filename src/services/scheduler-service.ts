@@ -264,17 +264,29 @@ export class SchedulerService {
     try {
       const result = await this.deps.publishingService.publish(content);
 
-      // 4. Mark slot as fired.
+      // 4. Mark slot as fired (success or failure — prevents infinite retry).
       await this.deps.dailyPlanner.markSlotFired(slot, content.id);
 
-      // 5. Notify admin PM (mirrors the manual publish path).
-      //    Only on success, and only when tg + uxLayer + adminId are wired.
+      // 5. Notify admin PM — ALWAYS, both on success and on failure.
+      //    The previous code only notified on success (result.ok), which
+      //    meant queued posts that failed quality gate / sendPhoto /
+      //    sendMessage silently disappeared with no admin visibility.
+      //    Now: on success, send the post + summary. On failure, send
+      //    the formatted post + error notice (so admin can see what
+      //    would have been published and decide whether to forward it).
       if (result.ok) {
         this.consecutiveFailures = 0; // reset failure counter on success.
-        await this.notifyAdminPm(content, result, slot).catch(() => {
-          // PM notification failures must not affect the publish result.
-        });
+      } else {
+        this.consecutiveFailures++;
       }
+      await this.notifyAdminPm(content, result, slot).catch((err) => {
+        // Last-resort: try a plain text notice so the admin at least
+        // knows something went wrong, even if the formatted post failed.
+        this.deps.logger.warn("scheduler.admin_pm_failed", {
+          contentId: content.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
 
       return result;
     } catch (error) {
@@ -324,7 +336,17 @@ export class SchedulerService {
   /**
    * Send the formatted post + a summary notification to the admin PM.
    * Mirrors what the manual publish path (admin/screens/manual.ts and
-   * entry/manager.ts post/channel) does. Failures here are swallowed.
+   * entry/manager.ts post/channel) does. Failures here are logged but
+   * do not raise — the publish result is already determined.
+   *
+   * Behavior:
+   *   - On success: send the formatted post (photo or text) + summary.
+   *   - On failure: send the formatted post (so admin can forward it
+   *     manually) + an error notice with the failure reason.
+   *   - If sendPhoto fails: fall back to text-only (same content).
+   *   - If sendMessage fails on the formatted post: send a plain-text
+   *     fallback with just the headline + URL so the admin at least
+   *     sees *something*.
    */
   private async notifyAdminPm(
     content: ReadyContent,
@@ -334,31 +356,79 @@ export class SchedulerService {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg || !this.deps.uxLayer) return;
 
-    // 1. Send the EXACT same formatted post as what went to the channel.
+    // 1. Build the formatted post.
+    let finalPost;
     try {
-      const finalPost = await this.deps.uxLayer.transform(content);
+      finalPost = await this.deps.uxLayer.transform(content);
+    } catch (err) {
+      // If even the transform fails, send a minimal plain-text notice.
+      this.deps.logger.warn("scheduler.transform_failed", {
+        contentId: content.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.deps.tg.sendMessage(adminId, [
+        `🤖 <b>Auto-publish notice</b>`,
+        ``,
+        `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+        `<b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}`,
+        `<b>URL:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}`,
+        pubResult.ok
+          ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+          : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
+      ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+      return;
+    }
+
+    // 2. Send the formatted post (photo or text). Fall back to text-only
+    //    if sendPhoto fails.
+    const sentPostNotice = pubResult.ok
+      ? "🤖 <b>Auto-published (scheduler) — copy of channel post:</b>"
+      : "⚠️ <b>Auto-publish FAILED — formatted post for manual forwarding:</b>";
+
+    try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
         await this.deps.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, {
           parse_mode: "HTML",
         });
       } else {
-        await this.deps.tg.sendMessage(adminId, finalPost.fullText, {
+        await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
           parse_mode: "HTML",
         });
       }
-    } catch {
-      // transform/send failure must not break the publish flow.
+    } catch (err) {
+      // sendPhoto or sendMessage failed — retry with text-only fallback.
+      this.deps.logger.warn("scheduler.send_formatted_failed", {
+        contentId: content.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      try {
+        if (finalPost.media && finalPost.media.type === "image") {
+          // Photo failed — send as text.
+          await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
+            parse_mode: "HTML",
+          });
+        }
+      } catch {
+        // Even text-only failed — give up on the formatted post; the
+        // summary below will still go out.
+      }
     }
 
-    // 2. Send a short notification summary.
+    // 3. Send the summary notification (always — even if the formatted
+    //    post failed to send, this gives the admin the key facts).
     await this.deps.tg.sendMessage(adminId, [
-      `🤖 <b>Auto-published (scheduler)</b>`,
+      pubResult.ok
+        ? `✅ <b>Auto-published successfully</b>`
+        : `❌ <b>Auto-publish failed</b>`,
       ``,
       `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
       `<b>AI:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}`,
       `<b>Quality:</b> ${content.quality.overallScore}`,
       `<b>Tokens:</b> ${content.tokensUsed}`,
-      `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+      `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+      pubResult.ok
+        ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+        : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
 

@@ -42,7 +42,7 @@ export class SourceFormatter {
   private async recordEmoji(emoji: string): Promise<void> {
     try {
       const state = await this.deps.state();
-      const history = [...state.lastSourceEmojis, emoji].slice(-10);
+      // newHistory was unused — removed.
       // Update state with new history. We need config to persist.
       // Since SourceFormatter doesn't have direct config access,
       // we'll use a simple KV approach via the state callback.

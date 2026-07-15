@@ -16,6 +16,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { nasaManifest } from "./manifest";
+export { nasaManifest } from "./manifest";
 
 const NASA_API = "https://api.nasa.gov/planetary/apod";
 const CACHE_KEY = "fredy:source:nasa:apod";
@@ -130,7 +131,7 @@ export class NasaPlugin implements Plugin {
   }
 
   async health(): Promise<PluginStatus> {
-    const hasKey = !!this.deps.env.NASA_API_KEY;
+    // hasKey was unused — removed.
     return {
       pluginId: this.metadata.id,
       healthy: true, // DEMO_KEY works without a key

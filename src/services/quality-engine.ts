@@ -313,9 +313,10 @@ export class QualityEngine {
   /** Spam Detection: absence of spam/promo patterns. */
   private scoreSpamDetection(
     content: AIGeneratedContent,
-    options: QualityEngineOptions,
+    _options: QualityEngineOptions,
     weight: number,
   ): DimensionScore {
+    void _options;
     let score = 100;
     const reasons: string[] = [];
     const lower = content.text.toLowerCase();
