@@ -31,6 +31,7 @@ import type { ContentQueue } from "./content-queue";
 import type { AIService } from "./ai-service";
 import type { SoulLoader } from "./soul-loader";
 import type { Logger } from "./logger";
+import type { PopularityFilter } from "./popularity-filter";
 
 export interface ContentManagerDeps {
   readonly pluginManager: PluginManager;
@@ -41,6 +42,7 @@ export interface ContentManagerDeps {
   readonly normalizer: ContentNormalizer;
   readonly enrichmentEngine: EnrichmentEngine;
   readonly taggingSystem: TaggingSystem;
+  readonly popularityFilter: PopularityFilter;
   readonly queue: ContentQueue;
   readonly ai: AIService;
   readonly soul: SoulLoader;
@@ -112,12 +114,18 @@ export class ContentManager {
       return this.reject("validate", reason, validation.errors.join("; "), item);
     }
 
-    // ── Stage 5: Duplicate Check (skip for manual triggers) ──
+    // ── Stage 5: Duplicate Check (always run — manual posts too) ──
+    // Manual posts used to pass skipDedup=true, which skipped BOTH the
+    // check and the record. That meant a manual re-post of the same
+    // item would sail through and create a duplicate in the channel.
+    // Now dedup is always checked. The caller (manual.ts / manager.ts)
+    // reads result.duplicateOf and, when set, sends the post to the
+    // admin PM with a "duplicate" label instead of publishing to channel.
     if (!skipDedup) {
       const dupCheck = await this.deps.duplicateDetector.check(item);
       if (dupCheck.isDuplicate) {
         const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
-        return this.reject("duplicate_check", reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, item);
+        return this.rejectDuplicate(item, reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, dupCheck.existingId ?? "", dupCheck.reason ?? "hash");
       }
     }
 
@@ -286,6 +294,11 @@ export class ContentManager {
   /**
    * Fetch and process one item for a category.
    * Picks the best available plugin (enabled, healthy, anti-repeat).
+   *
+   * NEW (v6.5.0): items are pre-filtered by popularity before entering
+   * the AI pipeline. Items without popularity metadata (e.g., XKCD,
+   * jokes, NASA APOD) are exempt. For GitHub plugins, a hard minimum-
+   * stars gate is applied on top of the popularity score.
    */
   async processForCategory(
     category: Category,
@@ -297,8 +310,30 @@ export class ContentManager {
       return this.reject("normalize", "empty_content", `No items available for category ${category}`, null);
     }
 
+    // ── Pre-filter by popularity (saves AI tokens + improves quality) ──
+    // Items are sorted by popularity descending so the AI pipeline tries
+    // the most popular items first.
+    const filtered = this.deps.popularityFilter.filter([...fetchResult.items]);
+
+    // Hard minimum-stars gate for GitHub plugins (catches the
+    // "1-star repo gets through" bug even when the log-score is ok).
+    const starFiltered = filtered.filter((item) => this.deps.popularityFilter.meetsMinStars(item));
+
+    this.deps.logger.info("pipeline.popularity_filter", {
+      category,
+      pluginId: fetchResult.source,
+      rawCount: fetchResult.items.length,
+      afterPopularity: filtered.length,
+      afterStars: starFiltered.length,
+    });
+
+    // If popularity filter removed everything, fall back to original list
+    // (better to publish something than nothing — the AI quality gate will
+    // still catch low-quality content).
+    const candidates = starFiltered.length > 0 ? starFiltered : fetchResult.items;
+
     // Try each item until one passes the pipeline.
-    for (const item of fetchResult.items) {
+    for (const item of candidates) {
       const result = await this.process(item, language);
       if (result.ok) return result;
       // Otherwise, try the next item.
@@ -354,6 +389,38 @@ export class ContentManager {
       stage: "rejected",
       error,
       rejectedReason: reason,
+    };
+  }
+
+  /** Build a duplicate-rejection result. Carries info about the
+   *  previously-published item so the caller (manual path) can route
+   *  the duplicate to the admin PM instead of the channel. */
+  private rejectDuplicate(
+    item: ContentItem | null,
+    reason: RejectionReason,
+    error: string,
+    existingId: string,
+    dupReason: "url" | "hash" | "title",
+  ): PipelineResult {
+    this.deps.logger.warn("quality.reject", {
+      contentId: item?.id,
+      pluginId: item?.pluginId,
+      stage: "duplicate_check",
+      reason,
+      error,
+      existingId,
+    });
+    return {
+      ok: false,
+      content: null,
+      item,
+      stage: "rejected",
+      error,
+      rejectedReason: reason,
+      duplicateOf: {
+        contentId: existingId,
+        reason: dupReason,
+      },
     };
   }
 

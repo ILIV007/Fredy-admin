@@ -42,7 +42,7 @@ export const contentDefaults: ContentConfig = {
   randomOffsetMinutes: 30,
   burstPosting: false,
   duplicatePrevention: true,
-  duplicateTtlHours: 24 * 7,
+  duplicateTtlHours: 24 * 30, // 30 days — synced with DuplicateDetector DEFAULT_TTL_HOURS
   sourceFooterFormat: "{emoji}Source",
   sourceEmojiPool: [
     "🌌", "🚀", "🤖", "📦", "⚡", "💡", "📚", "🛠️", "🌐", "🔒",

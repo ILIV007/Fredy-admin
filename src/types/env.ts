@@ -62,6 +62,7 @@ export interface Container {
   readonly sourceFormatter: import("../services/source-formatter").SourceFormatter;
   readonly mediaHandler: import("../services/media-handler").MediaHandler;
   readonly mediaResolver: import("../services/media-resolver").MediaResolver;
+  readonly popularityFilter: import("../services/popularity-filter").PopularityFilter;
   // Scheduler & publishing engine
   readonly timeGenerator: import("../services/time-generator").TimeGenerator;
   readonly dailyPlanner: import("../services/daily-planner").DailyPlanner;

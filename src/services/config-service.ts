@@ -90,11 +90,22 @@ export class ConfigService {
     return settings;
   }
 
-  /** Load state for an admin. State is separate from settings (§8.4). */
+  /** Load state for an admin. State is separate from settings (§8.4).
+   *  Cached in-memory for 10 seconds to reduce KV reads — state is read
+   *  frequently by emoji rotator, source formatter, and category manager
+   *  on every publish, and 10s staleness is acceptable. */
   async getState(adminId: string | number): Promise<FredyState> {
+    const key = String(adminId);
+    const cached = this.stateCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) return cached.value;
     const state = await this.deps.kv.getJson<FredyState>(`fredy:state:${adminId}`);
-    return state ?? defaultState();
+    const result = state ?? defaultState();
+    this.stateCache.set(key, { value: result, expiresAt: Date.now() + 10_000 });
+    return result;
   }
+
+  /** State cache (per-isolate, 10s TTL). */
+  private readonly stateCache = new Map<string, { value: FredyState; expiresAt: number }>();
 
   /** Get a single section by key. */
   async getSection<T>(adminId: string | number, sectionKey: string): Promise<T | null> {
@@ -179,6 +190,8 @@ export class ConfigService {
     const current = await this.getState(key);
     const next = updater(current);
     await this.deps.kv.setJson(`fredy:state:${key}`, next);
+    // Invalidate state cache so the next read picks up the new value.
+    this.stateCache.delete(key);
     return next;
   }
 
@@ -187,6 +200,7 @@ export class ConfigService {
     const key = String(adminId);
     const defaults = defaultState();
     await this.deps.kv.setJson(`fredy:state:${key}`, defaults);
+    this.stateCache.delete(key);
     return defaults;
   }
 

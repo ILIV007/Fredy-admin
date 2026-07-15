@@ -478,21 +478,44 @@ export async function managerHandler(
       const attempts = [];
       // Shuffle items to get variety.
       const shuffled = [...items].sort(() => Math.random() - 0.5);
+      // Track the FIRST duplicate we encounter so we can route it to
+      // admin PM. We keep trying subsequent items because the user
+      // asked for a fresh post — only if EVERY item is a duplicate
+      // (or otherwise rejected) do we fall back to the duplicate flow.
+      let firstDuplicate: { itemId: string; existingId: string; reason: string; item: typeof items[number] } | null = null;
       for (let idx = 0; idx < Math.min(shuffled.length, 5); idx++) {
         const item = shuffled[idx]!;
         const t1 = Date.now();
-        const r = await container.content.process(item, lang, { skipDedup: true });
+        // NOTE: skipDedup is now FALSE — dedup is always checked.
+        // This is the fix for the "manual re-post creates a duplicate
+        // in the channel" bug. When a duplicate is detected, the result
+        // carries `duplicateOf` and the loop continues to try other
+        // items. If all items are duplicates, the caller routes the
+        // first one to admin PM with a "duplicate" label instead of
+        // publishing to the channel.
+        const r = await container.content.process(item, lang, { skipDedup: false });
         attempts.push({
           itemIndex: idx,
           itemId: item.id,
           ok: r.ok,
           stage: r.stage,
           error: r.error,
+          isDuplicate: !!r.duplicateOf,
+          duplicateOf: r.duplicateOf ?? undefined,
           durationMs: Date.now() - t1,
         });
         if (r.ok && r.content) {
           result = r;
           break;
+        }
+        // Capture first duplicate for fallback admin-PM routing.
+        if (!firstDuplicate && r.duplicateOf) {
+          firstDuplicate = {
+            itemId: item.id,
+            existingId: r.duplicateOf.contentId,
+            reason: r.duplicateOf.reason,
+            item,
+          };
         }
       }
 
@@ -503,6 +526,42 @@ export async function managerHandler(
         contentId: result?.content?.id,
         error: result ? undefined : (attempts[attempts.length - 1]?.error ?? "All items rejected"),
       };
+
+      // ── Duplicate fallback: send to admin PM with a "duplicate" label ──
+      // The user wants: if a manually-triggered post would be a duplicate,
+      // do NOT publish to channel. Instead, send the post to admin PM with
+      // a "duplicate" notice so the admin can decide.
+      if (!result && firstDuplicate) {
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        const dupItem = firstDuplicate.item;
+        report["ok"] = false;
+        report["duplicate"] = true;
+        report["error"] = `All ${attempts.length} items were duplicates of previously-published content`;
+        report["duplicateOf"] = firstDuplicate;
+
+        if (adminId > 0) {
+          // Send the formatted post to admin PM anyway (so they can see what
+          // would have been published), prefixed with a "DUPLICATE" notice.
+          try {
+            // Build a minimal ReadyContent-like preview from the source item
+            // (the pipeline never produced a full ReadyContent since it bailed
+            // out at the dedup stage).
+            const previewLines = [
+              `🔁 <b>Duplicate detected (not published)</b>`,
+              ``,
+              `<b>Source:</b> ${pluginId}`,
+              `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
+              `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
+              `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
+              ``,
+              `<i>This post was NOT sent to the channel because it has already been published recently. Reply /force_${firstDuplicate.existingId.slice(0, 20)} to publish anyway.</i>`,
+            ].join("\n");
+            await container.tg.sendMessage(adminId, previewLines, { parse_mode: "HTML" }).catch(() => {});
+          } catch { /* skip */ }
+        }
+
+        return json(report);
+      }
 
       if (!result || !result.content) {
         report["ok"] = false;

@@ -19,7 +19,7 @@ export interface DuplicateDetectorDeps {
   readonly ttlHours?: number;
 }
 
-const DEFAULT_TTL_HOURS = 24 * 7; // 7 days
+const DEFAULT_TTL_HOURS = 24 * 30; // 30 days — strong dedup so published posts never reappear
 
 export class DuplicateDetector {
   private readonly ttlSeconds: number;

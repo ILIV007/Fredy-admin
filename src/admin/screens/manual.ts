@@ -126,11 +126,43 @@ export const manualScreen: Screen = {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
         // Try up to 5 items until one passes.
+        // NOTE: dedup is now always checked (skipDedup=false). When the
+        // first item is a duplicate, the result carries `duplicateOf`
+        // and we route the post to admin PM with a "duplicate" notice
+        // instead of publishing to the channel.
         let result = null;
+        let firstDuplicate: { itemId: string; existingId: string; reason: string; item: typeof items[number] } | null = null;
         for (let i = 0; i < Math.min(items.length, 5); i++) {
-          const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: true });
+          const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: false });
           if (r.ok && r.content) { result = r; break; }
+          if (!firstDuplicate && r.duplicateOf) {
+            firstDuplicate = {
+              itemId: items[i]!.id,
+              existingId: r.duplicateOf.contentId,
+              reason: r.duplicateOf.reason,
+              item: items[i]!,
+            };
+          }
         }
+
+        // ── Duplicate fallback: send to admin PM with a "duplicate" label ──
+        if (!result && firstDuplicate) {
+          const dupItem = firstDuplicate.item;
+          try {
+            await ctx.container.tg.sendMessage(ctx.adminId, [
+              `🔁 <b>Duplicate detected (not published)</b>`,
+              ``,
+              `<b>Source:</b> ${arg}`,
+              `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
+              `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
+              `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
+              ``,
+              `<i>This post was NOT sent to the channel because it has already been published recently.</i>`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+          } catch { /* skip */ }
+          return { toast: `🔁 ${arg}: duplicate — sent to PM instead of channel`, redirectTo: "menu:main" };
+        }
+
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {

@@ -133,6 +133,11 @@ export interface PipelineResult {
   readonly stage: PipelineStage;
   readonly error?: string;
   readonly rejectedReason?: RejectionReason;
+  /** When the item is a duplicate, info about the previously-published item. */
+  readonly duplicateOf?: {
+    readonly contentId: string;
+    readonly reason: "url" | "hash" | "title";
+  };
   /** AI debug info (when AI fails or format-only fallback is used). */
   readonly aiDebug?: {
     readonly error: string;

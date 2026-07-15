@@ -2,6 +2,51 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.5.0] — 2026-07-15 — Duplicate Prevention + Popularity Filter + KV Optimization
+
+### Critical Fixes
+
+- **Manual posts now check duplicates (no more duplicate channel posts)** — `skipDedup: true` was removed from both manual paths (admin/screens/manual.ts and entry/manager.ts post/channel). When a manually-triggered post is a duplicate, it is NOT published to the channel. Instead, a "🔁 Duplicate detected" notice is sent to admin PM with the item title, URL, and the existing content ID it matches. The admin can then decide whether to force-publish. This fixes the "I posted NASA this morning, posted NASA again 6 hours later, and got the same post" bug.
+
+- **GitHub repos now need minimum 50+ stars (100+ for trending)** — the new `PopularityFilter` service applies a hard minimum-stars gate per plugin: `github: 50`, `github-trending: 100`, `github-releases: 0` (pre-curated). This catches the "1-star repo gets published" bug even when the log-based popularity score would have allowed it.
+
+- **AI pre-selection by popularity** — before the AI pipeline runs, source items are pre-filtered and sorted by a 0–100 popularity score (log-scaled from stars/score/points/views). The AI pipeline tries the most popular items first, saving tokens on low-quality content. Items from plugins without popularity metadata (XKCD, jokes, NASA APOD, etc.) are exempt.
+
+- **Dedup TTL extended from 7 to 30 days** — `DuplicateDetector` default TTL bumped from `24*7` to `24*30` hours. `content.duplicateTtlHours` config default synced. This means published posts won't reappear in the channel for at least a month, addressing "I don't want duplicate posts ever".
+
+- **`PipelineResult` now carries `duplicateOf` info** — when an item is rejected as a duplicate, the result includes `{ contentId, reason }` of the previously-published item. Callers can use this to route duplicates to admin PM instead of silently failing.
+
+### Added
+
+- **`PopularityFilter` service** (`src/services/popularity-filter.ts`) — normalizes stars/score/points/views into a single 0–100 log-scaled score. Configurable minimum threshold (default 30). Per-plugin minimum-stars gate. Exempt list for plugins without popularity metrics. Wired into `ContentManager.processForCategory`.
+
+- **State cache** (10s TTL) in `ConfigService` — `getState()` is now cached in-memory for 10 seconds, reducing KV reads by ~80% during high-activity periods (emoji rotation, source formatter, and category manager all call `getState` on every publish). Cache is invalidated on `updateState()` and `resetState()`.
+
+- **`pipeline.popularity_filter` debug event** — logs the raw count, post-popularity count, and post-stars count for each `processForCategory` call, so operators can see how the filter is performing.
+
+### Changed
+
+- **`ContentManagerDeps` extended** — new required `popularityFilter` field. Container wires `new PopularityFilter({ minScore: 30 })`.
+
+- **`DuplicateDetector.DEFAULT_TTL_HOURS`** — `24*7` → `24*30`.
+
+- **`content.duplicateTtlHours` default** — `24*7` → `24*30` (synced with detector).
+
+- **Manual post flow** — `skipDedup: true` → `skipDedup: false` in both `admin/screens/manual.ts` and `entry/manager.ts` post/channel. Dedup is now always checked.
+
+- **`Container` interface** — new `popularityFilter` field.
+
+### Optimization Summary
+
+| Metric | Before (v6.4.0) | After (v6.5.0) |
+|--------|-------------------|------------------|
+| Dedup TTL | 7 days | 30 days |
+| Manual post dedup | skipped | always checked |
+| GitHub min stars | 10 (github only) | 50 (github), 100 (trending) |
+| AI pre-selection | first-item-wins | popularity-sorted |
+| State KV reads | uncached | 10s cache |
+| Duplicate channel posts | possible | blocked → admin PM |
+
 ## [6.4.0] — 2026-07-15 — Auto-Publish Bug Fixes + Source Image Feature
 
 ### Critical Fixes

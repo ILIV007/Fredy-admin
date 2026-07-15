@@ -45,6 +45,7 @@ import { TaggingSystem } from "./services/tagging-system";
 import { SourceFormatter } from "./services/source-formatter";
 import { MediaHandler } from "./services/media-handler";
 import { MediaResolver } from "./services/media-resolver";
+import { PopularityFilter } from "./services/popularity-filter";
 // Scheduler & publishing engine
 import { TimeGenerator } from "./services/time-generator";
 import { DailyPlanner } from "./services/daily-planner";
@@ -189,6 +190,7 @@ export function buildContainer(env: Env): Container {
   });
   const enrichmentEngine = new EnrichmentEngine({ logger });
   const taggingSystem = new TaggingSystem({ logger });
+  const popularityFilter = new PopularityFilter({ minScore: 30 });
   const content = new ContentManager({
     pluginManager: plugins,
     validator: contentValidator,
@@ -198,6 +200,7 @@ export function buildContainer(env: Env): Container {
     normalizer: contentNormalizer,
     enrichmentEngine,
     taggingSystem,
+    popularityFilter,
     queue,
     ai,
     soul,
@@ -285,6 +288,7 @@ export function buildContainer(env: Env): Container {
     sourceFormatter,
     mediaHandler,
     mediaResolver,
+    popularityFilter,
     // Scheduler & publishing engine
     timeGenerator,
     dailyPlanner,
