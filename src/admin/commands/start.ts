@@ -12,7 +12,6 @@ export const startCommand: Command = {
 
   async handle(ctx: CommandContext): Promise<void> {
     const { container, adminId, chatId } = ctx;
-    console.log("[start] handle called");
     const settings = await container.config.getSettings(adminId);
     const screenCtx = {
       container,
@@ -37,11 +36,8 @@ export const startCommand: Command = {
       "<i>Opening dashboard...</i>",
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     // Then send the dashboard
-    console.log("[start] building text...");
     const text = await mainScreen.text(screenCtx);
-    console.log("[start] building keyboard...");
     const keyboard = mainScreen.keyboard(settings);
-    console.log("[start] sending dashboard...");
     await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,
@@ -49,7 +45,6 @@ export const startCommand: Command = {
     }).catch((e: unknown) => {
       console.error("[start] sendMessage failed:", e);
     });
-    console.log("[start] done");
     void ctx.reply;
   },
 };

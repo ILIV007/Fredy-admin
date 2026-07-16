@@ -1,6 +1,6 @@
 {
   "name": "fredy-admin",
-  "version": "6.9.0",
+  "version": "7.1.0",
   "description": "Fredy — AI-powered Content Operating System for the ILIVIR3 Telegram channel. Cloudflare Workers, serverless, plugin-architected.",
   "type": "module",
   "main": "src/index.ts",
@@ -9,8 +9,10 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx scripts/test-units.ts",
-    "test:e2e": "RUN_E2E=true node --test --import tsx scripts/test-e2e.ts"
+    "test": "npx tsx scripts/test-scheduler.ts && npx tsx scripts/test-strategy.ts && npx tsx scripts/test-pipeline.ts",
+    "test:scheduler": "npx tsx scripts/test-scheduler.ts",
+    "test:strategy": "npx tsx scripts/test-strategy.ts",
+    "test:pipeline": "npx tsx scripts/test-pipeline.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",

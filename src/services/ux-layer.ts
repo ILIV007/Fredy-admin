@@ -253,7 +253,7 @@ export class UXLayerImpl implements UXLayer {
       const path = u.pathname;
       if (path === "/" || path === "" || path.length < 3) return false;
       return true;
-    } catch {
+    } catch { /* non-fatal */
       return false;
     }
   }

@@ -257,17 +257,20 @@ The response should show `"url": "https://<WORKER_URL>/webhook"` and no `last_er
 
 ### 8. Cron Triggers
 
-Fredy uses two cron triggers (configured in `wrangler.toml`):
+Fredy uses a backup cron trigger (configured in `wrangler.toml`):
 
 ```toml
 [triggers]
-crons = ["* * * * *", "*/15 * * * *"]
+crons = ["0 */24 * * *"]
 ```
 
 | Cron | Schedule | Purpose |
 |---|---|---|
-| `* * * * *` | Every minute | Scheduler tick (check for due slots, publish) |
-| `*/15 * * * *` | Every 15 min | Source cache refresh (keep content fresh) |
+| `0 */24 * * *` | Every 24h | Backup scheduler (primary is external cron-job.org every 2h calling `/internal/tick`) |
+
+**Primary scheduler:** External service (cron-job.org) calls `POST /internal/tick` every 2 hours with `Authorization: Bearer <CRON_KEY>`. This is the main driver.
+
+**Backup scheduler:** Cloudflare internal cron fires every 24 hours as a safety net.
 
 Cron triggers are automatically deployed with `wrangler deploy`. No additional setup needed.
 

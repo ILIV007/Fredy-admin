@@ -46,6 +46,10 @@ import { SourceFormatter } from "./services/source-formatter";
 import { MediaHandler } from "./services/media-handler";
 import { MediaResolver } from "./services/media-resolver";
 import { PopularityFilter } from "./services/popularity-filter";
+import { FreshnessFilter } from "./services/freshness-filter";
+import { ContentEnricher } from "./services/content-enricher";
+import { CandidateRanker } from "./services/candidate-ranker";
+import { PipelineLogger } from "./services/pipeline-logger";
 // Scheduler & publishing engine
 import { TimeGenerator } from "./services/time-generator";
 import { DailyPlanner } from "./services/daily-planner";
@@ -53,6 +57,9 @@ import { JobQueue } from "./services/job-queue";
 import { PublishValidator } from "./services/publish-validator";
 import { RetryManager } from "./services/retry-manager";
 import { HistoryService } from "./services/history-service";
+import { QuietHoursChecker } from "./services/quiet-hours-checker";
+import { TickLogger } from "./services/tick-logger";
+import { StrategyEngine } from "./services/strategy-engine";
 // Final publishing engine
 import { HookEngine } from "./services/hook-engine";
 import { UXLayer } from "./services/ux-layer";
@@ -192,6 +199,10 @@ export function buildContainer(env: Env): Container {
   const enrichmentEngine = new EnrichmentEngine({ logger });
   const taggingSystem = new TaggingSystem({ logger });
   const popularityFilter = new PopularityFilter({ minScore: 30 });
+  const freshnessFilter = new FreshnessFilter({});
+  const contentEnricher = new ContentEnricher({ env, logger });
+  const candidateRanker = new CandidateRanker({});
+  const pipelineLogger = new PipelineLogger(kv);
   const content = new ContentManager({
     pluginManager: plugins,
     validator: contentValidator,
@@ -202,6 +213,10 @@ export function buildContainer(env: Env): Container {
     enrichmentEngine,
     taggingSystem,
     popularityFilter,
+    freshnessFilter,
+    contentEnricher,
+    candidateRanker,
+    pipelineLogger,
     queue,
     ai,
     soul,
@@ -211,6 +226,16 @@ export function buildContainer(env: Env): Container {
 
   // Layer 8: Scheduler & Publishing Engine
   const timeGenerator = new TimeGenerator({});
+  const quietHoursChecker = new QuietHoursChecker();
+  const tickLogger = new TickLogger(kv);
+  const strategyEngine = new StrategyEngine({
+    kv,
+    logger,
+    timeGenerator,
+    quietHoursChecker,
+    schedulerConfig: async () => (await config.getSettings(Number(env.ADMIN_ID))).scheduler,
+    strategyConfig: async () => (await config.getSettings(Number(env.ADMIN_ID))).strategy,
+  });
   const dailyPlanner = new DailyPlanner({
     kv,
     logger,
@@ -254,6 +279,7 @@ export function buildContainer(env: Env): Container {
     contentManager: content,
     contentQueue: queue,
     history,
+    quietHoursChecker,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
     // Auto-publish admin PM notification (mirrors manual publish path).
     tg,
@@ -290,12 +316,19 @@ export function buildContainer(env: Env): Container {
     mediaHandler,
     mediaResolver,
     popularityFilter,
+    freshnessFilter,
+    contentEnricher,
+    candidateRanker,
+    pipelineLogger,
     // Scheduler & publishing engine
     timeGenerator,
     dailyPlanner,
     jobQueue,
     publishValidator,
     retryManager,
+    quietHoursChecker,
+    tickLogger,
+    strategyEngine,
     history,
     // Final publishing engine
     hookEngine,

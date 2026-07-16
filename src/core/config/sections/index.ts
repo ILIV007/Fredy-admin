@@ -24,6 +24,7 @@ import { loggingSection } from "./logging";
 import { nasaSection } from "./nasa";
 import { pluginsSection } from "./plugins";
 import { futureSection } from "./future";
+import { strategySection } from "./strategy";
 
 // Re-export all section types and schemas for consumers.
 export * from "./general";
@@ -40,6 +41,7 @@ export * from "./logging";
 export * from "./nasa";
 export * from "./plugins";
 export * from "./future";
+export * from "./strategy";
 
 /**
  * Register all config sections with a ConfigSectionRegistry.
@@ -62,6 +64,7 @@ export function registerAllSections(registry: ConfigSectionRegistry): void {
   registry.register(nasaSection);
   registry.register(pluginsSection);
   registry.register(futureSection);
+  registry.register(strategySection);
 }
 
 /** List of all section keys in registration order. */
@@ -80,4 +83,5 @@ export const ALL_SECTION_KEYS = [
   "nasa",
   "plugins",
   "future",
+  "strategy",
 ] as const;

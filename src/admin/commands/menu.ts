@@ -13,7 +13,6 @@ export const menuCommand: Command = {
 
   async handle(ctx: CommandContext): Promise<void> {
     const { container, adminId, chatId } = ctx;
-    console.log("[menu] handle called");
     const settings = await container.config.getSettings(adminId);
     const screenCtx = {
       container,
@@ -23,11 +22,8 @@ export const menuCommand: Command = {
       settings,
       query: {} as never,
     };
-    console.log("[menu] building text...");
     const text = await mainScreen.text(screenCtx);
-    console.log("[menu] building keyboard...");
     const keyboard = mainScreen.keyboard(settings as FredySettings);
-    console.log("[menu] sending message...");
     await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,
@@ -35,6 +31,5 @@ export const menuCommand: Command = {
     }).catch((e: unknown) => {
       console.error("[menu] sendMessage failed:", e);
     });
-    console.log("[menu] done");
   },
 };

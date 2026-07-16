@@ -367,7 +367,7 @@ export class PluginManager {
   private async persistStatus(id: string, status: PluginStatus): Promise<void> {
     try {
       await this.deps.kv.setJson(sourceHealthKey(id), status);
-    } catch {
+    } catch { /* non-fatal */
       // KV write failures are non-fatal for status tracking.
     }
   }

@@ -1,6 +1,6 @@
 # Fredy — AI-Powered Telegram Content Engine
 
-[![Version](https://img.shields.io/badge/version-6.0.0-blue)](https://github.com/ILIV007/Fredy-admin)
+[![Version](https://img.shields.io/badge/version-7.1.0-blue)](https://github.com/ILIV007/Fredy-admin)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 

@@ -33,6 +33,7 @@ import type { HistoryService } from "./history-service";
 import type { Logger } from "./logger";
 import type { TelegramService } from "./telegram";
 import type { UXLayer } from "./ux-layer";
+import type { QuietHoursChecker } from "./quiet-hours-checker";
 import { SchedulerDisabledError } from "../core/scheduler/errors";
 
 /** Publisher interface — both PublishingService and FinalPublisher implement this. */
@@ -48,13 +49,8 @@ export interface SchedulerServiceDeps {
   readonly contentManager: ContentManager;
   readonly contentQueue: ContentQueue;
   readonly history: HistoryService;
+  readonly quietHoursChecker?: QuietHoursChecker;
   readonly settings: () => Promise<FredySettings>;
-  /**
-   * Optional — when provided, every successful auto-publish also sends the
-   * formatted post + a notification summary to the admin PM, mirroring the
-   * manual publish path. This closes the gap where manual posts reached the
-   * admin PM but auto-published posts did not.
-   */
   readonly tg?: TelegramService;
   readonly uxLayer?: UXLayer;
   readonly adminId?: () => number;
@@ -109,7 +105,6 @@ export class SchedulerService {
     }
 
     // 1d. Check approve mode — when ON, scheduler does NOT auto-publish.
-    // Posts are queued but wait for manual approval via the admin panel.
     if (settings.approveMode) {
       return {
         fired: false,
@@ -119,6 +114,21 @@ export class SchedulerService {
         skipped: true,
         skipReason: "Approve mode is ON (waiting for manual approval)",
       };
+    }
+
+    // 1e. Check quiet hours — no posts during this period.
+    if (this.deps.quietHoursChecker) {
+      const isQuiet = this.deps.quietHoursChecker.isQuietHours(now, settings.scheduler);
+      if (isQuiet) {
+        return {
+          fired: false,
+          slot: null,
+          job: null,
+          published: null,
+          skipped: true,
+          skipReason: `Quiet hours active (${settings.scheduler.quietHours.start}–${settings.scheduler.quietHours.end})`,
+        };
+      }
     }
 
     // 2. Get or generate today's plan.
@@ -408,7 +418,7 @@ export class SchedulerService {
             parse_mode: "HTML",
           });
         }
-      } catch {
+      } catch { /* non-fatal */
         // Even text-only failed — give up on the formatted post; the
         // summary below will still go out.
       }
@@ -545,7 +555,7 @@ export class SchedulerService {
       plan = await this.deps.dailyPlanner.getOrGenerate();
       const next = await this.deps.dailyPlanner.getNextSlot();
       nextSlot = next?.slot ?? null;
-    } catch {
+    } catch { /* non-fatal */
       // Plan generation failed — return disabled-like status.
     }
 

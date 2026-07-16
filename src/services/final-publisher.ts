@@ -204,7 +204,6 @@ export class FinalPublisher {
     const cleanCaption = this.stripBareUrls(post.caption || "");
 
     // Minimal debug log.
-    console.log("[publish] cleanText length:", cleanText.length, "hasHref:", /<a\s+href/i.test(cleanText));
 
     // ── Cover image resolution ──────────────────────────────
     // Priority: explicit post.media → source URL OG image → none.
@@ -223,7 +222,6 @@ export class FinalPublisher {
       const normalized = coverUrl.toLowerCase().split("?")[0] ?? "";
       if (normalized.match(/\.(ico|gif|svg|bmp|tiff|html?|php)$/)) {
         // Bad image format — send as text-only instead.
-        console.log("[publish] Skipping cover (bad format):", normalized);
         coverUrl = null;
       }
     }
@@ -249,7 +247,6 @@ export class FinalPublisher {
         // sendPhoto failed — log and fall through to text-only.
         // Common causes: image too large, URL 404, server-side content
         // type mismatch. The post still goes out as text so it's not lost.
-        console.log("[publish] sendPhoto failed, falling back to text-only:", err instanceof Error ? err.message : err);
       }
     }
 
@@ -333,11 +330,11 @@ export class FinalPublisher {
         // Accept known image CDNs even without extension.
         if (imageCdnHosts.some((h) => absolute.includes(h))) return absolute;
         return null;
-      } catch {
+      } catch { /* non-fatal */
         clearTimeout(timeout);
         return null;
       }
-    } catch {
+    } catch { /* non-fatal */
       return null;
     }
   }

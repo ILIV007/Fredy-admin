@@ -78,7 +78,7 @@ export function isValidPlugin(candidate: unknown): candidate is Plugin {
   try {
     validatePlugin(candidate);
     return true;
-  } catch {
+  } catch { /* non-fatal */
     return false;
   }
 }

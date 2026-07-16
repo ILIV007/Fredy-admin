@@ -64,7 +64,7 @@ export class KVStore {
     if (raw === null) return null;
     try {
       return JSON.parse(raw) as T;
-    } catch {
+    } catch { /* non-fatal */
       return null;
     }
   }
@@ -245,14 +245,14 @@ export class KVStore {
             const data = JSON.parse(raw) as Readonly<Record<string, unknown>>;
             const messageId = Number(k.name.split(":")[3] ?? 0);
             items.push({ messageId, data });
-          } catch {
+          } catch { /* non-fatal */
             // skip invalid
           }
         }
       }
       items.sort((a, b) => a.messageId - b.messageId);
       return items.map((i) => i.data);
-    } catch {
+    } catch { /* non-fatal */
       return [];
     }
   }
@@ -264,7 +264,7 @@ export class KVStore {
       for (const k of list.keys) {
         await this.deps.kv.delete(k.name);
       }
-    } catch {
+    } catch { /* non-fatal */
       // ignore
     }
   }
@@ -305,7 +305,7 @@ export class KVStore {
             try {
               const item = JSON.parse(raw) as Readonly<Record<string, unknown>>;
               due.push({ ...item, _kvKey: k.name });
-            } catch {
+            } catch { /* non-fatal */
               // skip invalid
             }
           }
@@ -313,7 +313,7 @@ export class KVStore {
       }
       due.sort((a, b) => Number(a["scheduledTime"]) - Number(b["scheduledTime"]));
       return due;
-    } catch {
+    } catch { /* non-fatal */
       return [];
     }
   }

@@ -113,7 +113,7 @@ export class ContentValidator {
     try {
       const parsed = new URL(url);
       return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch {
+    } catch { /* non-fatal */
       return false;
     }
   }

@@ -390,6 +390,93 @@ export async function managerHandler(
     return json(report);
   }
 
+  // ── Strategy: get/set strategy mode ──
+  if (apiPath === "strategy" && request.method === "GET") {
+    const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+    const strategy = settings?.strategy;
+    const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
+    return json({ ok: true, strategy, plan });
+  }
+  if (apiPath === "strategy" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const adminId = Number(env.ADMIN_ID ?? "0");
+    const cur = await container.config.getSettings(adminId);
+    const patch: Record<string, unknown> = { strategy: { ...cur.strategy, ...body } };
+    const result = await container.config.updateSettings(adminId, patch);
+    return json(result);
+  }
+
+  // ── Strategy: regenerate plan ──
+  if (apiPath === "strategy/regenerate" && request.method === "POST") {
+    const plan = await container.strategyEngine.generatePlan();
+    return json({ ok: true, plan });
+  }
+
+  // ── Debug: runtime info ──
+  if (apiPath === "debug" && request.method === "GET") {
+    const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+    const tickLog = await container.tickLogger.load().catch(() => null);
+    const pipelineLog = await container.pipelineLogger.load().catch(() => null);
+    const cacheStats = container.config.cacheStats?.() ?? { size: 0, ttlMs: 0 };
+    return json({
+      ok: true,
+      version: APP_VERSION,
+      runtime: {
+        scheduler: settings?.scheduler,
+        strategy: settings?.strategy,
+        ai: settings?.ai,
+        language: settings?.language,
+      },
+      tickLog,
+      pipelineLog,
+      cacheStats,
+      kvHealth: !!env.Fredy_SETTINGS,
+      secrets: {
+        botToken: !!env.BOT_TOKEN,
+        gemini: !!env.GEMINI_API_KEY,
+        openrouter: !!env.OPENROUTER_API_KEY,
+        cronKey: !!env.CRON_KEY,
+        github: !!env.GITHUB_TOKEN,
+        nasa: !!env.NASA_API_KEY,
+        newsapi: !!env.NEWSAPI_KEY,
+      },
+    });
+  }
+
+  // ── Scheduler: force publish ──
+  if (apiPath === "scheduler/force-publish" && request.method === "POST") {
+    try {
+      const result = await container.scheduler.tick();
+      return json({ ok: result.fired, result, message: result.fired ? "Publish triggered" : (result.skipReason ?? "No due slots") });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
+  // ── Scheduler: pause/resume ──
+  if (apiPath === "scheduler/pause" && request.method === "POST") {
+    const adminId = Number(env.ADMIN_ID ?? "0");
+    const cur = await container.config.getSettings(adminId);
+    const newVal = false;
+    await container.config.updateSettings(adminId, { scheduler: { ...cur.scheduler, enabled: newVal } });
+    return json({ ok: true, enabled: newVal, message: "Scheduler paused" });
+  }
+  if (apiPath === "scheduler/resume" && request.method === "POST") {
+    const adminId = Number(env.ADMIN_ID ?? "0");
+    const cur = await container.config.getSettings(adminId);
+    const newVal = true;
+    await container.config.updateSettings(adminId, { scheduler: { ...cur.scheduler, enabled: newVal } });
+    return json({ ok: true, enabled: newVal, message: "Scheduler resumed" });
+  }
+
+  // ── Settings: update runtime config ──
+  if (apiPath === "settings" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const adminId = Number(env.ADMIN_ID ?? "0");
+    const result = await container.config.updateSettings(adminId, body);
+    return json(result);
+  }
+
   // ── Clear actions ──
   if (apiPath === "clear/logs" && request.method === "POST") { await container.debug.clearLogs(); return json({ ok: true }); }
   if (apiPath === "clear/dedup" && request.method === "POST") { await container.duplicateDetector.clear(); return json({ ok: true }); }
@@ -665,7 +752,7 @@ export async function managerHandler(
                 parse_mode: "HTML",
               }).catch(() => {});
             }
-          } catch {
+          } catch { /* non-fatal */
             // If even the transform fails, send a plain-text fallback.
             await container.tg.sendMessage(adminId, [
               `⚠️ <b>Post REJECTED (not published to channel)</b>`,
@@ -927,7 +1014,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
 <script>
 const TOKEN="${token}";const API="/Manager/api/";
-const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
+const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"strategy",icon:"🎯",label:"Strategy"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"debug",icon:"🐞",label:"Debug"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"settings",icon:"🔧",label:"Settings"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
 let currentPage="dashboard";
 function buildNav(){document.getElementById("nav").innerHTML=navItems.map(i=>'<div class="nav-item" onclick="navigate(\\''+i.id+'\\')" id="nav-'+i.id+'"><span class="nav-icon">'+i.icon+'</span>'+i.label+'</div>').join("");}
 function navigate(id){currentPage=id;document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));const el=document.getElementById("nav-"+id);if(el)el.classList.add("active");const item=navItems.find(i=>i.id===id);document.getElementById("page-title").textContent=item?item.label:"";loadPage(id);}
@@ -941,7 +1028,7 @@ function card(l,v){return '<div class="card"><div class="card-label">'+l+'</div>
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast("📋 Copied!")).catch(()=>toast("❌ Copy failed"));}
 function copyElement(id){const el=document.getElementById(id);if(el)copyText(el.textContent);}
 function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\''+id+'\\')" style="margin-top:4px">📋 Copy</button>';}
-function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,logs:loadLogs,config:loadConfig,system:loadSystem,statistics:loadStats,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
+function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
 
 async function loadDashboard(){
   const d=await api("health");const c=document.getElementById("content");
@@ -1158,9 +1245,14 @@ async function loadScheduler(){
   const d=await api("scheduler");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.settings||{};const st=d.status||{};
-  c.innerHTML='<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Jitter","±"+(s.jitterMinutes??"0")+"min")+card("Min Gap",(s.minGapMinutes??"30")+"min")+card("Lock",(s.tickLockTimeout??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"15")+"min")+'</div>'+
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">⏯️ Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"⏸️ Pause Scheduler":"▶️ Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">⚡ Force Publish</button></div></div>'+
+  '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Slots</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.slots||[]).map(t=>'<span class="badge badge-blue">'+t+"</span>").join("")+'</div></div>';
 }
+async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
+async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
 
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");
@@ -1192,6 +1284,62 @@ async function loadStats(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Today ('+d.today.date+')</h3>'+(d.today.entries.length===0?"<p>No posts today.</p>":'<table><thead><tr><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+d.today.entries.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"❌")+'</td></tr>').join("")+'</tbody></table>')+'</div>'+
   '<div class="card"><h3>Recent (7 days): '+d.recent.length+' posts</h3></div>';
+}
+
+async function loadStrategy(){
+  const d=await api("strategy");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  const s=d.strategy||{};const plan=d.plan||{};
+  const modes=[{id:"minimal",name:"Minimal",desc:"4 posts/day"},{id:"balanced",name:"Balanced",desc:"9 posts/day (default)"},{id:"active",name:"Active",desc:"13 posts/day"},{id:"ai_priority",name:"AI Priority",desc:"8 posts/day, threshold 80"},{id:"news_priority",name:"News Priority",desc:"10 posts/day, B-heavy"},{id:"custom",name:"Custom",desc:"Admin-defined"}];
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+card("Mode",s.mode??"balanced")+card("Language",s.language??"auto")+card("Weekly Themes",s.weeklyThemesEnabled?"✅":"❌")+card("Quality Threshold",s.qualityThreshold??"80")+'</div></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy(\\''+m.id+'\\')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
+  (s.mode==="custom"?'<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>':'')+
+  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>'<tr><td>'+p.index+'</td><td>'+p.time+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td>'+p.priority+'</td><td>'+p.status+'</td></tr>').join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
+}
+async function switchStrategy(mode){const d=await api("strategy","POST",{mode});toast(d.ok?"✅ Strategy: "+mode:"❌ Failed");loadStrategy();}
+async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C}});toast(d.ok?"✅ Custom distribution saved":"❌ Failed");loadStrategy();}
+async function regeneratePlan(){toast("🔄 Regenerating plan...");const d=await api("strategy/regenerate","POST");toast(d.ok?"✅ Plan regenerated":"❌ Failed");loadStrategy();}
+
+async function loadDebug(){
+  const d=await api("debug");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  const r=d.runtime||{};
+  c.innerHTML='<div class="card-grid">'+card("Version",d.version)+card("KV Health",d.kvHealth?"✅":"❌")+card("Cache Size",d.cacheStats?.size??0)+card("Cache TTL",((d.cacheStats?.ttlMs??0)/1000)+"s")+'</div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Runtime Config</h3>'+preWithCopy("rt-cfg",JSON.stringify(r,null,2))+'</div>'+
+  (d.tickLog?'<div class="card"><h3 style="margin-bottom:8px">Last Tick Log</h3>'+preWithCopy("tick-log",JSON.stringify(d.tickLog,null,2))+'</div>':'')+
+  (d.pipelineLog?'<div class="card"><h3 style="margin-bottom:8px">Last Pipeline Log</h3>'+preWithCopy("pipe-log",JSON.stringify(d.pipelineLog,null,2))+'</div>':'')+
+  '<div class="card"><h3 style="margin-bottom:8px">Secrets Status</h3>'+Object.entries(d.secrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
+}
+
+async function loadSettings(){
+  const d=await api("config");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  const s=d.settings||{};
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🔧 Runtime Settings</h3><p style="color:var(--text2);margin-bottom:12px">Edit and save — changes apply immediately without redeployment.</p>'+
+  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+  '<div><label style="color:var(--text2);font-size:12px">Language</label><select id="set-lang" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"><option value="auto" '+(s.language?.default==="auto"?"selected":"")+'>Auto</option><option value="fa" '+(s.language?.default==="fa"?"selected":"")+'>Persian</option><option value="en" '+(s.language?.default==="en"?"selected":"")+'>English</option></select></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">Quality Threshold</label><input type="number" id="set-qt" value="'+(s.ai?.qualityThreshold??60)+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">Min Gap (minutes)</label><input type="number" id="set-gap" value="'+(s.scheduler?.minGapMinutes??90)+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">Refresh Interval (minutes)</label><input type="number" id="set-refresh" value="'+(s.scheduler?.refreshIntervalMinutes??120)+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">Quiet Hours Start</label><input type="text" id="set-qh-start" value="'+(s.scheduler?.quietHours?.start??"00:00")+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">Quiet Hours End</label><input type="text" id="set-qh-end" value="'+(s.scheduler?.quietHours?.end??"07:30")+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '</div>'+
+  '<button class="btn" style="margin-top:12px" onclick="saveSettings()">💾 Save Settings</button></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Full Config (read-only)</h3>'+preWithCopy("full-cfg",JSON.stringify(s,null,2))+'</div>';
+}
+async function saveSettings(){
+  const lang=document.getElementById("set-lang").value;
+  const qt=parseInt(document.getElementById("set-qt").value)||60;
+  const gap=parseInt(document.getElementById("set-gap").value)||90;
+  const refresh=parseInt(document.getElementById("set-refresh").value)||120;
+  const qhStart=document.getElementById("set-qh-start").value;
+  const qhEnd=document.getElementById("set-qh-end").value;
+  const d=await api("settings","POST",{
+    language:{_version:1,default:lang,supported:["en","fa"],autoDetect:true},
+    ai:{qualityThreshold:qt},
+    scheduler:{minGapMinutes:gap,refreshIntervalMinutes:refresh,quietHours:{start:qhStart,end:qhEnd}}
+  });
+  toast(d.ok?"✅ Settings saved":"❌ "+(d.error||"Failed"));
 }
 
 function loadAbout(){

@@ -37,24 +37,19 @@ export async function cronHandler(
   deps: CronHandlerDeps,
 ): Promise<void> {
   const { env, container, ctx } = deps;
-  console.log(`[cron] tick — cron="${event.cron}" at ${new Date().toISOString()}`);
 
   // 24-hour backup cron — runs the full tick as a safety net.
   if (event.cron === "0 */24 * * *") {
-    console.log("[cron] 24h backup tick — running full pipeline");
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
         const scheduler = new SchedulerOrchestrator(container);
         const result = await scheduler.tick();
         if (result.fired) {
-          console.log(`[cron] slot fired: index=${result.slot?.index ?? "?"} category=${result.slot?.category ?? "?"}`);
         } else if (result.skipped) {
-          console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
         }
         // Also refresh sources.
         await scheduler.refreshSources();
-        console.log("[cron] 24h backup complete");
       })(),
     );
     return;
@@ -68,16 +63,13 @@ export async function cronHandler(
         const scheduler = new SchedulerOrchestrator(container);
         const result = await scheduler.tick();
         if (result.fired) {
-          console.log(`[cron] slot fired: index=${result.slot?.index ?? "?"} category=${result.slot?.category ?? "?"}`);
         } else if (result.skipped) {
-          console.log(`[cron] slot skipped: ${result.skipReason ?? "unknown"}`);
         }
       })(),
     );
     return;
   }
 
-  console.log(`[cron] unknown schedule: ${event.cron}`);
 }
 
 /**
@@ -91,7 +83,6 @@ export async function processScheduledQueue(env: Env, container: Container): Pro
   const due = await container.kv.listDueScheduled();
   if (due.length === 0) return;
 
-  console.log(`[cron] found ${due.length} due scheduled messages`);
 
   for (const item of due) {
     try {
@@ -100,12 +91,6 @@ export async function processScheduledQueue(env: Env, container: Container): Pro
       const parseMode = item["parseMode"] as string | undefined;
       const mediaType = item["mediaType"] as string | undefined;
       const mediaFileId = item["mediaFileId"] as string | null | undefined;
-      const scheduledTime = item["scheduledTime"] as number;
-
-      console.log(
-        `[cron] sending scheduled message ${item["id"]} to ${chatId} ` +
-          `(was scheduled for ${new Date(scheduledTime).toISOString()})`,
-      );
 
       const res = await container.tg.publishToChannel(chatId, {
         text,
@@ -115,7 +100,6 @@ export async function processScheduledQueue(env: Env, container: Container): Pro
       });
 
       if (res.ok) {
-        console.log(`[cron] ✓ sent message ${item["id"]}`);
         await container.kv.deleteScheduledItem(item["_kvKey"]);
       } else {
         console.error(`[cron] ✗ failed: ${res.description ?? "unknown"}`);

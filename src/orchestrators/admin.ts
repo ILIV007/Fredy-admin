@@ -33,18 +33,14 @@ export class AdminOrchestrator {
 
   /** Dispatch a Telegram update. Routes to callback/message/channel handlers. */
   async dispatch(update: TelegramUpdate): Promise<void> {
-    console.log("[admin] dispatch — update keys:", Object.keys(update).join(", "));
     if (update.callback_query) {
-      console.log("[admin] dispatching callback_query");
       await this.handleCallback(update.callback_query);
       return;
     }
     if (update.message) {
-      console.log("[admin] dispatching message");
       await this.handleMessage(update.message);
       return;
     }
-    console.log("[admin] no handler for this update type");
   }
 
   /** Handle a callback query — route to navigation or screen handler. */
@@ -276,23 +272,19 @@ export class AdminOrchestrator {
     const chatId = message.chat?.id;
     const text = message.text ?? "";
 
-    console.log(`[admin] handleMessage — from=${fromId} chat=${chatId} text="${text.slice(0, 50)}"`);
 
     if (!fromId || !chatId) {
-      console.log("[admin] missing fromId or chatId, ignoring");
       return;
     }
 
     // Authorization check.
     if (!this.isAdmin(fromId)) {
-      console.log(`[admin] unauthorized: ${fromId} !== ${this.container.env.ADMIN_ID}`);
       await tg.sendMessage(chatId, unauthorizedMessage(fromId), {
         parse_mode: "HTML",
       }).catch(() => {});
       return;
     }
 
-    console.log("[admin] authorized, sending typing indicator");
 
     // Typing indicator — send for ALL messages (commands and non-commands).
     await tg.sendChatAction(chatId, "typing").catch(() => {});
@@ -300,7 +292,6 @@ export class AdminOrchestrator {
     try {
       // If not a command, respond with a helpful message.
       if (!text.startsWith("/")) {
-        console.log("[admin] non-command message, sending help");
         await tg.sendMessage(chatId, [
           "👋 <b>Fredy Admin Bot</b>",
           "",
@@ -316,10 +307,8 @@ export class AdminOrchestrator {
       }
 
       // Match command.
-      console.log(`[admin] matching command: ${text}`);
       const match = this.commands.match(text);
       if (!match) {
-        console.log("[admin] no command matched");
         await tg.sendMessage(
           chatId,
           `❓ Unknown command: <code>${escapeHtml(text)}</code>\n\nUse /help to see available commands.`,
@@ -328,7 +317,6 @@ export class AdminOrchestrator {
         return;
       }
 
-      console.log(`[admin] found command: ${match.command.name}`);
 
       const ctx: CommandContext = {
         container,
@@ -340,9 +328,7 @@ export class AdminOrchestrator {
         },
       };
 
-      console.log("[admin] executing command handle...");
       await match.command.handle(ctx);
-      console.log("[admin] command handle completed");
     } catch (error) {
       console.error("[admin] command handler error:", error);
       const errMsg = error instanceof Error ? error.message : String(error);

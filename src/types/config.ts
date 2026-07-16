@@ -27,6 +27,7 @@ import type { LoggingConfig } from "../core/config/sections/logging";
 import type { NasaConfig } from "../core/config/sections/nasa";
 import type { PluginsConfig } from "../core/config/sections/plugins";
 import type { FutureConfig } from "../core/config/sections/future";
+import type { StrategyConfig } from "../core/config/sections/strategy";
 
 /**
  * The complete Fredy settings blob.
@@ -48,6 +49,7 @@ export interface FredySettings {
   readonly nasa: NasaConfig;
   readonly plugins: PluginsConfig;
   readonly future: FutureConfig;
+  readonly strategy: StrategyConfig;
   /** Approve mode — when true, posts require manual approval before publishing. */
   readonly approveMode?: boolean;
 }

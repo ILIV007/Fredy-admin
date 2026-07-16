@@ -32,6 +32,10 @@ import type { AIService } from "./ai-service";
 import type { SoulLoader } from "./soul-loader";
 import type { Logger } from "./logger";
 import type { PopularityFilter } from "./popularity-filter";
+import type { FreshnessFilter } from "./freshness-filter";
+import type { ContentEnricher } from "./content-enricher";
+import type { CandidateRanker } from "./candidate-ranker";
+import type { PipelineLogger } from "./pipeline-logger";
 
 export interface ContentManagerDeps {
   readonly pluginManager: PluginManager;
@@ -43,6 +47,10 @@ export interface ContentManagerDeps {
   readonly enrichmentEngine: EnrichmentEngine;
   readonly taggingSystem: TaggingSystem;
   readonly popularityFilter: PopularityFilter;
+  readonly freshnessFilter: FreshnessFilter;
+  readonly contentEnricher: ContentEnricher;
+  readonly candidateRanker: CandidateRanker;
+  readonly pipelineLogger: PipelineLogger;
   readonly queue: ContentQueue;
   readonly ai: AIService;
   readonly soul: SoulLoader;
@@ -57,7 +65,10 @@ export class ContentManager {
    * Run one source item through the full pipeline.
    * Returns a PipelineResult with either a ReadyContent or a rejection reason.
    *
-   * Pipeline: Normalize → Enrich → Tag → Validate → Dedup → Category → AI → Quality → Format → Enqueue
+   * v7 Pipeline: Normalize → Enrich → Tag → Validate → Freshness → Dedup
+   *             → ContentEnricher → Category → Rank → AI → Quality → Format → Enqueue
+   *
+   * Each stage is isolated. If one fails, the pipeline continues when possible.
    */
   async process(
     sourceItem: SourceItem,
@@ -107,20 +118,27 @@ export class ContentManager {
       raw: sourceItem,
     };
 
-    // ── Stage 4: Validate ──────────────────────────────────
+    // ── Stage 4: Local Validation ─────────────────────────
     const validation = this.deps.validator.validate(item);
     if (!validation.ok) {
       const reason = this.categorizeValidationErrors(validation.errors);
       return this.reject("validate", reason, validation.errors.join("; "), item);
     }
 
-    // ── Stage 5: Duplicate Check (always run — manual posts too) ──
-    // Manual posts used to pass skipDedup=true, which skipped BOTH the
-    // check and the record. That meant a manual re-post of the same
-    // item would sail through and create a duplicate in the channel.
-    // Now dedup is always checked. The caller (manual.ts / manager.ts)
-    // reads result.duplicateOf and, when set, sends the post to the
-    // admin PM with a "duplicate" label instead of publishing to channel.
+    // ── Stage 5: Freshness Filter (NEW — reject stale content) ──
+    const freshnessResult = this.deps.freshnessFilter.check(sourceItem, item.category);
+    if (!freshnessResult.fresh) {
+      this.deps.logger.info("pipeline.popularity_filter", {
+        contentId: item.id,
+        stage: "freshness",
+        reason: freshnessResult.reason,
+        ageHours: freshnessResult.ageHours.toFixed(1),
+        message: "Content rejected by freshness filter",
+      });
+      return this.reject("validate", "empty_content", `Stale content: ${freshnessResult.reason}`, item);
+    }
+
+    // ── Stage 6: Duplicate Check ──────────────────────────
     if (!skipDedup) {
       const dupCheck = await this.deps.duplicateDetector.check(item);
       if (dupCheck.isDuplicate) {
@@ -129,7 +147,34 @@ export class ContentManager {
       }
     }
 
-    // ── Stage 6: Category Resolve ──────────────────────────
+    // ── Stage 7: Content Enrichment (NEW — enrich without AI) ──
+    // This is the user's suggestion: fetch additional metadata from APIs
+    // (GitHub stars, HN score, etc.) BEFORE sending to AI. This way AI
+    // works on richer data without additional token cost.
+    let enrichedItem = sourceItem;
+    try {
+      enrichedItem = await this.deps.contentEnricher.enrich(sourceItem);
+    } catch (error) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: sourceItem.source,
+        step: "content_enricher",
+        error: this.errMsg(error),
+        message: "Content enrichment failed, continuing with original data",
+      });
+    }
+
+    // Re-normalize the enriched item if enrichment changed it.
+    if (enrichedItem !== sourceItem) {
+      try {
+        const enrichedPost = await this.deps.normalizer.normalize(enrichedItem, lang);
+        // Preserve tags from the original post.
+        post = { ...enrichedPost, tags: post.tags, score: post.score };
+      } catch { /* non-fatal */
+        // If re-normalization fails, keep the original post.
+      }
+    }
+
+    // ── Stage 8: Category Resolve ──────────────────────────
     const categoryResult = this.deps.categoryResolver.resolve(item);
     if (categoryResult.mismatch) {
       this.deps.logger.warn("quality.reject", {
@@ -139,10 +184,19 @@ export class ContentManager {
         message: "Category mismatch — using plugin category anyway",
       });
     }
-    // Use the resolved category (trusts plugin).
     const resolvedItem: ContentItem = { ...item, category: categoryResult.category };
 
-    // ── Stage 7: AI Generate ───────────────────────────────
+    // ── Stage 9: Candidate Ranking (NEW — local scoring) ──
+    const rankResult = this.deps.candidateRanker.score(enrichedItem, resolvedItem.category);
+    this.deps.logger.info("pipeline.start", {
+      contentId: item.id,
+      stage: "candidate_ranking",
+      score: rankResult.score,
+      factors: rankResult.factors,
+      message: "Candidate ranked",
+    });
+
+    // ── Stage 10: AI Generate ──────────────────────────────
     const soul = await this.deps.soul.load();
     const aiResult = await this.deps.ai.generate({
       category: resolvedItem.category,
@@ -163,9 +217,6 @@ export class ContentManager {
         attempts: aiResult.attempts,
         message: "AI failed — using format-only fallback",
       });
-      console.log("[content] AI FAILED — format-only fallback triggered");
-      console.log("[content] AI error:", aiResult.error);
-      console.log("[content] AI attempts:", JSON.stringify(aiResult.attempts));
       const fallbackContent = {
         text: resolvedItem.body || resolvedItem.title,
         aiConfidence: 0,

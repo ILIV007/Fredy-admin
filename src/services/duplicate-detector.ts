@@ -175,7 +175,7 @@ export class DuplicateDetector {
       const apiHosts = ["v2.jokeapi.dev", "api.nasa.gov", "api.stackexchange.com", "api.github.com", "hacker-news.firebaseio.com"];
       if (apiHosts.includes(u.hostname)) return true;
       return false;
-    } catch {
+    } catch { /* non-fatal */
       return true; // Invalid URL = treat as generic
     }
   }

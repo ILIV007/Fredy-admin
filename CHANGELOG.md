@@ -2,6 +2,291 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [7.0.4] — 2026-07-16 — Phase 4: Manager Dashboard & Runtime Control
+
+### Overview
+
+Fourth and final phase of the v7 roadmap. The Manager Dashboard has been upgraded to a full Mission Control interface with 15 pages, new API endpoints, and real-time runtime configuration.
+
+### New Dashboard Pages (3 new)
+
+1. **Strategy Page** (`🎯 Strategy`) — switch between 6 strategy modes (Minimal, Balanced, Active, AI Priority, News Priority, Custom). View the daily publish plan with posts, times, categories, providers, priorities, and validation results. Regenerate plan on demand. Edit custom distribution (A/B/C counts) when Custom mode is selected.
+
+2. **Debug Page** (`🐞 Debug`) — developer tools showing: runtime config (scheduler, strategy, AI, language), last tick log (structured), last pipeline log (structured), cache stats, KV health, and secrets status (configured/missing only — never values).
+
+3. **Settings Page** (`🔧 Settings`) — editable runtime configuration with form inputs for: language (auto/fa/en), quality threshold, min gap, refresh interval, quiet hours start/end. Save button applies changes immediately via `POST /Manager/api/settings`. No redeployment required.
+
+### Enhanced Existing Pages
+
+- **Scheduler Page** — added controls: Pause/Resume Scheduler, Force Publish, posting windows display, quiet hours display, lock timeout display, min gap display.
+
+- **Dashboard** — nav expanded to 15 items (was 12). Strategy, Debug, Settings added.
+
+### New API Endpoints (8)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/Manager/api/strategy` | GET | Get strategy config + daily plan |
+| `/Manager/api/strategy` | POST | Update strategy mode/config |
+| `/Manager/api/strategy/regenerate` | POST | Regenerate daily plan |
+| `/Manager/api/debug` | GET | Runtime config, tick log, pipeline log, secrets |
+| `/Manager/api/scheduler/force-publish` | POST | Force a scheduler tick |
+| `/Manager/api/scheduler/pause` | POST | Pause scheduler |
+| `/Manager/api/scheduler/resume` | POST | Resume scheduler |
+| `/Manager/api/settings` | POST | Update runtime settings (language, quality, etc.) |
+
+### Files Changed (5)
+
+1. `VERSION` → 7.0.4
+2. `package.json` → 7.0.4
+3. `src/core/constants.ts` → APP_VERSION = "7.0.4"
+4. `src/entry/manager.ts` — 8 new API endpoints + 3 new dashboard pages + enhanced scheduler page
+5. `CHANGELOG.md` → this entry
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | ✅ 0 errors |
+| Scheduler tests | ✅ 41 passed |
+| Strategy tests | ✅ 34 passed |
+| Pipeline tests | ✅ 41 passed |
+| Total tests | ✅ 116 passed, 0 failed |
+| Regression | None |
+
+### v7 Architecture (Complete)
+
+```
+Manager Dashboard (15 pages, full Mission Control)
+         │
+    Runtime Configuration (KV, no redeployment)
+         │
+    Strategy Engine (6 modes, weekly themes, daily plan)
+         │
+    Scheduler Core (quiet hours, posting windows, distributed lock)
+         │
+    Content Queue (single source of truth for publishing)
+         │
+    ┌────┴────┬─────────┐
+    │         │         │
+  AI Pipeline  Providers  Plugins
+    │
+  Freshness → Dedup → ContentEnricher → Rank → AI → Format → Queue
+    │
+  Telegram Publisher
+    │
+  ILIVIR3 Channel
+```
+
+## [7.0.3] — 2026-07-16 — Phase 3: Smart Content Pipeline & Quality Engine
+
+### Overview
+
+Third phase of the v7 roadmap. The content pipeline has been enhanced with 4 new modular stages that run BEFORE AI, minimizing token usage and improving post quality.
+
+### New Modules (4)
+
+1. **FreshnessFilter** (`src/services/freshness-filter.ts`) — rejects stale content before AI:
+   - News (Category B): max 48h old
+   - NASA APOD: max 7 days old, rejects future dates
+   - General: max 7 days old
+   - All thresholds configurable
+
+2. **ContentEnricher** (`src/services/content-enricher.ts`) — enriches content WITHOUT AI (user's suggestion):
+   - GitHub: fetches stars, forks, language, license, topics from GitHub REST API
+   - HackerNews: fetches score, comments, author from Firebase API
+   - NASA: ensures title, date, explanation are complete
+   - Runs AFTER dedup, BEFORE AI — so AI works on richer data at no extra token cost
+
+3. **CandidateRanker** (`src/services/candidate-ranker.ts`) — scores candidates locally (0–100):
+   - Freshness (15%): newer = better
+   - Credibility (20%): known sources score higher
+   - Content length (10%): optimal range
+   - Image availability (10%): has image = bonus
+   - Technical relevance (15%): matches tech keywords
+   - Category priority (10%): A > B > C
+   - Trending score (20%): stars/score/reactions
+   - Only top-ranked candidates sent to AI
+
+4. **PipelineLogger** (`src/services/pipeline-logger.ts`) — structured pipeline logging:
+   - Records each stage (normalize, validate, freshness, dedup, enrich, rank, AI, format)
+   - Captures: provider, ranking score, AI provider/model, quality score, queue depth, errors
+   - Last pipeline log stored in KV for dashboard
+
+### Pipeline Architecture (v7)
+
+```
+Provider → Normalizer → Local Validation → Freshness Filter → Duplicate Detection
+    → Content Enrichment → Category Resolve → Candidate Ranking
+    → AI Quality Review → Humanizer → Telegram Formatter → Queue
+```
+
+Each stage is independent and isolated. If one fails, the pipeline continues when possible.
+
+### Files Changed (12)
+
+1. `VERSION` → 7.0.3
+2. `package.json` → 7.0.3
+3. `src/core/constants.ts` → APP_VERSION = "7.0.3"
+4. `src/services/freshness-filter.ts` — NEW: freshness filter
+5. `src/services/content-enricher.ts` — NEW: content enricher (no AI)
+6. `src/services/candidate-ranker.ts` — NEW: local candidate ranking
+7. `src/services/pipeline-logger.ts` — NEW: structured pipeline logging
+8. `src/services/content-manager.ts` — pipeline refactored with 4 new stages
+9. `src/container.ts` — wires new modules
+10. `src/types/env.ts` — adds new modules to Container
+11. `scripts/test-pipeline.ts` — NEW: 41 unit tests
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | ✅ 0 errors |
+| Scheduler tests | ✅ 41 passed |
+| Strategy tests | ✅ 34 passed |
+| Pipeline tests | ✅ 41 passed |
+| Total tests | ✅ 116 passed, 0 failed |
+| Regression | None |
+
+## [7.0.2] — 2026-07-16 — Phase 2: Strategy Engine & Content Planning
+
+### Overview
+
+Second phase of the v7 roadmap. The Strategy Engine is the brain of Fredy's content planning system. It decides what to publish, when, which providers to use, and which categories to prioritize — without directly publishing any content.
+
+### New Features
+
+- **Strategy Engine** (`src/services/strategy-engine.ts`) — independent module that generates `DailyPublishPlan` objects. The Scheduler consumes these plans. The engine never interacts with Telegram.
+
+- **6 Built-in Strategies**:
+  | Mode | A | B | C | Total | Notes |
+  |------|---|---|---|-------|-------|
+  | Minimal | 2 | 1 | 1 | 4 | Low activity |
+  | Balanced (default) | 4 | 2 | 3 | 9 | Normal operation |
+  | Active | 6 | 3 | 4 | 13 | High activity |
+  | AI Priority | 5 | 1 | 2 | 8 | Quality threshold 80 |
+  | News Priority | 3 | 5 | 2 | 10 | Fast tech updates |
+  | Custom | configurable | configurable | configurable | configurable | Admin-defined |
+
+- **Weekly Themes** — 7 daily themes that influence provider selection:
+  - Monday: AI, Open Source, GitHub
+  - Tuesday: Frameworks, Libraries, Developer Tools
+  - Wednesday: Cloud, Backend, DevOps
+  - Thursday: Security, Networking, Infrastructure
+  - Friday: Machine Learning, Research, NASA
+  - Saturday: Open Source, Community, Projects
+  - Sunday: Light Content, Quotes, XKCD, Developer Facts
+
+- **Priority System** — each planned post gets a priority level:
+  - High: Category A (core dev content), Category B in news_priority mode
+  - Normal: Category B (default)
+  - Low: Category C (support content)
+
+- **DailyPublishPlan** — complete plan stored in KV with:
+  - Planned posts (time, category, provider, strategy, language, priority, queue target, status)
+  - Strategy mode used
+  - Weekly theme for the day
+  - Category distribution
+  - Validation result (errors + warnings)
+
+- **Plan Validation** — before saving, the engine validates:
+  - No duplicate providers consecutively
+  - No duplicate categories more than twice in a row
+  - Posts respect quiet hours
+  - Posts respect minimum gap
+  - At least one post exists
+
+- **Runtime Configuration** (`src/core/config/sections/strategy.ts`) — new config section:
+  - `mode`: active strategy
+  - `customDistribution`: for custom mode
+  - `weeklyThemesEnabled`: toggle weekly themes
+  - `language`: fa/en/auto
+  - `qualityThreshold`: for ai_priority mode
+
+- **Category → Provider Mapping** — defines which providers belong to each category (A: GitHub/DevTo/StackExchange, B: News/HN, C: NASA/XKCD/Wikimedia/Joke).
+
+- **Unit Tests** — 34 tests covering strategy selection, custom distribution, weekly themes, plan generation, validation, priority assignment, language resolution, and built-in strategy distributions.
+
+### Files Changed (11)
+
+1. `VERSION` → 7.0.2
+2. `package.json` → 7.0.2
+3. `src/core/constants.ts` → APP_VERSION = "7.0.2"
+4. `src/types/strategy.ts` — NEW: all strategy types
+5. `src/core/config/sections/strategy.ts` — NEW: config + built-in strategies + weekly themes + provider mapping
+6. `src/core/config/sections/index.ts` — register strategy section
+7. `src/services/strategy-engine.ts` — NEW: StrategyEngine module
+8. `src/types/config.ts` — add `strategy` field to FredySettings
+9. `src/container.ts` — wire StrategyEngine
+10. `src/types/env.ts` — add strategyEngine to Container
+11. `scripts/test-strategy.ts` — NEW: 34 unit tests
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | ✅ 0 errors (exit code 0) |
+| Scheduler tests | ✅ 41 passed, 0 failed |
+| Strategy tests | ✅ 34 passed, 0 failed |
+| Total tests | ✅ 75 passed, 0 failed |
+| Version sync | ✅ 7.0.2 in all files |
+| Regression | None |
+
+## [7.0.1] — 2026-07-16 — Phase 1: Scheduler Core Refactor
+
+### Overview
+
+First phase of the v7 roadmap. The scheduler has been refactored into a modular, queue-first, runtime-configurable architecture with quiet hours, posting windows, and structured logging.
+
+### New Features
+
+- **Quiet Hours** — configurable period (default 00:00–07:30) during which no posts are published. If a tick fires during quiet hours, the scheduler skips with a clear reason. Supports midnight-spanning periods (e.g., 22:00–07:30). New `QuietHoursChecker` module handles the logic.
+
+- **Posting Windows** — replaces fixed slot times with configurable windows. Each window generates ONE random publish time per day. Default windows:
+  - Morning: 08:00–10:00
+  - Noon: 12:00–14:00
+  - Afternoon: 16:00–18:00
+  - Evening: 18:00–20:00
+  - Night: 20:00–22:00
+
+- **Structured Tick Logging** — new `TickLogger` and `TickLogBuilder` modules. Every tick produces a structured `TickLog` entry with: tick ID, start/end timestamps, duration, lock status, published/skipped counts, queue depths, refresh status, errors, quiet hours status. Last tick log is stored in KV for dashboard display.
+
+- **Runtime-Configurable Lock Timeout** — the distributed lock timeout is now loaded from `scheduler.lockTimeoutSec` (default 90s). Previously hardcoded.
+
+- **Runtime-Configurable Min Gap** — `scheduler.minGapMinutes` (default 90) controls the minimum gap between posts. Previously hardcoded.
+
+- **Publishing Mode** — new `scheduler.publishingMode` field: `"auto"` (default), `"manual"`, or `"scheduled"`.
+
+- **Scheduler Config v2** — `_version` bumped to 2. New fields: `quietHours`, `lockTimeoutSec`, `minGapMinutes`, `publishingMode`. Default `postingWindows` populated with 5 windows (was empty array).
+
+- **Unit Tests** — 41 tests covering QuietHoursChecker (isQuietHours, midnight-spanning, deferPastQuietHours), TimeGenerator (within windows, one-per-window, minGap, empty distribution, more-categories-than-windows), and TickLogBuilder. All pass.
+
+### Files Changed (14)
+
+1. `VERSION` → 7.0.1
+2. `package.json` → 7.0.1
+3. `CHANGELOG.md` → this entry
+4. `src/core/constants.ts` → APP_VERSION = "7.0.1"
+5. `src/core/config/sections/scheduler.ts` — v2 schema with quietHours, lockTimeoutSec, minGapMinutes, publishingMode, default postingWindows
+6. `src/services/quiet-hours-checker.ts` — NEW: quiet hours checker with midnight-spanning support
+7. `src/services/tick-logger.ts` — NEW: structured tick logger + TickLogBuilder
+8. `src/services/time-generator.ts` — one-slot-per-window, config-driven minGap
+9. `src/services/scheduler-service.ts` — quiet hours gate in tick pipeline
+10. `src/entry/tick.ts` — configurable lock timeout from runtime config
+11. `src/container.ts` — wires quietHoursChecker + tickLogger
+12. `src/types/env.ts` — adds quietHoursChecker + tickLogger to Container interface
+13. `scripts/test-scheduler.ts` — NEW: 41 unit tests
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` | ✅ 0 errors (exit code 0) |
+| Unit tests | ✅ 41 passed, 0 failed |
+| Version sync | ✅ 7.0.1 in all files |
+| Files in project | 190 (188 + 2 new: quiet-hours-checker.ts, tick-logger.ts) |
+| Regression | None |
+
 ## [6.9.0] — 2026-07-16 — Full Debug Pass: 0 TypeScript Errors + Quality Gate Fix + Anti-Repeat + Code Consolidation
 
 ### Critical: TypeScript Errors — 33 → 0

@@ -181,7 +181,7 @@ export class AIService {
     if (this.deps.kv) {
       try {
         recentHashes = await this.deps.kv.getJson<string[]>("fredy:ai:recent-hashes") ?? [];
-      } catch {
+      } catch { /* non-fatal */
         recentHashes = [];
       }
     }
@@ -206,7 +206,7 @@ export class AIService {
         const newHash = await this.computeContentHash(content.text);
         const updated = [...recentHashes, newHash].slice(-50);
         await this.deps.kv.setJson("fredy:ai:recent-hashes", updated, 7 * 24 * 3600);
-      } catch {
+      } catch { /* non-fatal */
         // non-fatal — anti-repeat is best-effort
       }
     }

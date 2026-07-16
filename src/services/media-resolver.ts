@@ -151,7 +151,7 @@ export class MediaResolver {
         alt: this.extractOgTitle(html) ?? "OpenGraph image",
         source: "opengraph",
       };
-    } catch {
+    } catch { /* non-fatal */
       return null;
     }
   }
@@ -225,7 +225,7 @@ export class MediaResolver {
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
       // Also check file extension — reject .ico, .gif, .svg, .bmp, .tiff
       return isUsableImageUrl(url);
-    } catch {
+    } catch { /* non-fatal */
       return false;
     }
   }
@@ -243,7 +243,7 @@ export class MediaResolver {
   private resolveUrl(relative: string, base: string): string | null {
     try {
       return new URL(relative, base).href;
-    } catch {
+    } catch { /* non-fatal */
       return null;
     }
   }

@@ -30,7 +30,6 @@ export interface TickHandlerDeps {
 }
 
 const LOCK_KEY = "fredy:tick:lock";
-const LOCK_TIMEOUT_SECONDS = 90;
 const REFRESH_KEY = "fredy:tick:lastRefresh";
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
@@ -55,8 +54,10 @@ export async function tickHandler(
     return json({ ok: false, error: "Unauthorized" }, 403);
   }
 
-  // ── 2. Acquire KV lock ──────────────────────────────────
-  const lockAcquired = await acquireLock(container);
+  // ── 2. Acquire KV lock (timeout from runtime config) ───
+  const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+  const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
+  const lockAcquired = await acquireLock(container, lockTimeoutSec);
   if (!lockAcquired) {
     return json({
       ok: true, skipped: true, reason: "lock_held",
@@ -153,13 +154,13 @@ async function runTickWork(container: Container, env: Env): Promise<string[]> {
 // KV Lock
 // ────────────────────────────────────────────────────────────
 
-async function acquireLock(container: Container): Promise<boolean> {
+async function acquireLock(container: Container, lockTimeoutSec: number): Promise<boolean> {
   try {
     const existing = await container.kv.get(LOCK_KEY);
     if (existing) return false; // Lock held.
-    await container.kv.set(LOCK_KEY, String(Date.now()), LOCK_TIMEOUT_SECONDS);
+    await container.kv.set(LOCK_KEY, String(Date.now()), lockTimeoutSec);
     return true;
-  } catch {
+  } catch { /* non-fatal */
     return true; // On KV error, allow execution.
   }
 }
@@ -167,7 +168,7 @@ async function acquireLock(container: Container): Promise<boolean> {
 async function releaseLock(container: Container): Promise<void> {
   try {
     await container.kv.delete(LOCK_KEY);
-  } catch {
+  } catch { /* non-fatal */
     // ignore
   }
 }

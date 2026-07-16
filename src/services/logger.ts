@@ -62,8 +62,7 @@ export class Logger {
       readonly detail: string;
     },
   ): Promise<void> {
-    const consoleMsg = `[rawReq] ${info.method} ${info.path} | ${info.updateType} | ${info.status}`;
-    console.log(consoleMsg);
+    void `[rawReq] ${info.method} ${info.path} | ${info.updateType} | ${info.status}`;
     if (!this.deps.isDebugMode()) return;
 
     const entry: BufferedEvent = {
@@ -92,7 +91,6 @@ export class Logger {
     } else if (full.level === "warn") {
       console.warn(consoleMsg);
     } else {
-      console.log(consoleMsg);
     }
 
     // KV ring buffer only when debug mode is on.
@@ -121,7 +119,7 @@ export class Logger {
   private safeStringify(obj: unknown): string {
     try {
       return JSON.stringify(obj);
-    } catch {
+    } catch { /* non-fatal */
       return "[unserializable]";
     }
   }
@@ -146,7 +144,7 @@ export class Logger {
     try {
       const raw = await this.deps.kv.get(key);
       return raw ? (JSON.parse(raw) as DebugEvent[]) : [];
-    } catch {
+    } catch { /* non-fatal */
       return [];
     }
   }

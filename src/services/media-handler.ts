@@ -46,7 +46,7 @@ export class MediaHandler {
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         return { ok: false, reason: `Unsupported protocol: ${parsed.protocol}` };
       }
-    } catch {
+    } catch { /* non-fatal */
       return { ok: false, reason: "Invalid URL format" };
     }
 

@@ -63,7 +63,7 @@ export async function webhookHandler(
     const text = await request.text();
     bodySize = text.length;
     update = JSON.parse(text) as TelegramUpdate;
-  } catch {
+  } catch { /* non-fatal */
     console.warn("[webhook] 400 — invalid JSON");
     ctx.waitUntil(
       container.logger.rawRequest({
@@ -85,7 +85,6 @@ export async function webhookHandler(
 
   // Extract update info for logging.
   const updateInfo = extractUpdateInfoForLog(update);
-  console.log(`[webhook] 200 — type=${updateInfo.updateType} from=${updateInfo.fromId}`);
 
   // Step 3: log the raw request (fire-and-forget via waitUntil).
   ctx.waitUntil(
@@ -108,12 +107,10 @@ export async function webhookHandler(
   ctx.waitUntil(
     (async () => {
       try {
-        console.log("[webhook] dispatching update...");
         const admin = new AdminOrchestrator(container);
         await admin.dispatch(update);
         // Flush batched stats after every request.
         await container.kv.flushAllStats();
-        console.log("[webhook] dispatch completed");
       } catch (error) {
         console.error("[webhook] dispatch error:", error);
         // Try to send error to the user's chat.

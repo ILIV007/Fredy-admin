@@ -198,7 +198,7 @@ export class TelegramService {
   ): Promise<void> {
     try {
       await this.callApi<boolean>("sendChatAction", { chat_id: chatId, action });
-    } catch {
+    } catch { /* non-fatal */
       // Chat action failures are not user-visible; swallow.
     }
   }

@@ -244,7 +244,7 @@ export class EnrichmentEngine {
         if (domain.includes(known)) return credibility;
       }
       return "unknown";
-    } catch {
+    } catch { /* non-fatal */
       return "unknown";
     }
   }

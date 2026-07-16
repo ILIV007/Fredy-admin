@@ -63,12 +63,19 @@ export interface Container {
   readonly mediaHandler: import("../services/media-handler").MediaHandler;
   readonly mediaResolver: import("../services/media-resolver").MediaResolver;
   readonly popularityFilter: import("../services/popularity-filter").PopularityFilter;
+  readonly freshnessFilter: import("../services/freshness-filter").FreshnessFilter;
+  readonly contentEnricher: import("../services/content-enricher").ContentEnricher;
+  readonly candidateRanker: import("../services/candidate-ranker").CandidateRanker;
+  readonly pipelineLogger: import("../services/pipeline-logger").PipelineLogger;
   // Scheduler & publishing engine
   readonly timeGenerator: import("../services/time-generator").TimeGenerator;
   readonly dailyPlanner: import("../services/daily-planner").DailyPlanner;
   readonly jobQueue: import("../services/job-queue").JobQueue;
   readonly publishValidator: import("../services/publish-validator").PublishValidator;
   readonly retryManager: import("../services/retry-manager").RetryManager;
+  readonly quietHoursChecker: import("../services/quiet-hours-checker").QuietHoursChecker;
+  readonly tickLogger: import("../services/tick-logger").TickLogger;
+  readonly strategyEngine: import("../services/strategy-engine").StrategyEngine;
   readonly history: import("../services/history-service").HistoryService;
   // Final publishing engine
   readonly hookEngine: import("../services/hook-engine").HookEngine;

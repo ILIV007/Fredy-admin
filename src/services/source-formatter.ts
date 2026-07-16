@@ -50,7 +50,7 @@ export class SourceFormatter {
       // The state is managed by ConfigService.updateState.
       // For now, we just keep in-memory rotation (better than nothing).
       // TODO: wire to config.updateState for true persistence.
-    } catch {
+    } catch { /* non-fatal */
       // ignore
     }
   }

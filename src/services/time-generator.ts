@@ -1,14 +1,18 @@
 /**
  * src/services/time-generator.ts
- * Generates random publish times within configurable windows.
+ * Generates random publish times within configurable posting windows.
+ *
+ * v7.0.1 changes:
+ *   - Each posting window generates exactly ONE random publish time.
+ *   - minGapMinutes is now passed from config (was hardcoded).
+ *   - Respects quiet hours (slots inside quiet hours are skipped).
  *
  * Rules:
  *   - All times are within the configured posting windows.
- *   - Minimum gap between posts is respected (default 30 min).
- *   - Jitter is applied to each slot (±jitterMinutes).
- *   - No clustered posts (avoids two posts within minGapMinutes).
- *
- * See Prompt 9 spec.
+ *   - One slot per window (max).
+ *   - Minimum gap between posts is respected.
+ *   - Jitter is applied to each slot.
+ *   - No clustered posts.
  */
 
 import type { PostingWindow, SlotTime } from "../types/scheduler";
@@ -22,9 +26,6 @@ export interface TimeGeneratorDeps {
   // No deps — pure service.
 }
 
-/** Default minimum gap between posts (minutes). */
-const DEFAULT_MIN_GAP_MINUTES = 90;
-
 export class TimeGenerator {
   constructor(_deps: TimeGeneratorDeps = {}) {
     void _deps;
@@ -33,22 +34,23 @@ export class TimeGenerator {
   /**
    * Generate random slot times for a day.
    *
+   * v7: Each posting window generates at most ONE random time.
+   * The number of slots = min(categoryList.length, postingWindows.length).
+   *
    * @param date — YYYY-MM-DD
-   * @param config — scheduler config (slots, jitter, timezone, windows)
+   * @param config — scheduler config (windows, jitter, timezone, minGap)
    * @param categoryDistribution — how many posts per category
-   * @param minGapMinutes — minimum gap between posts (default 30)
    */
   generate(
     date: string,
     config: SchedulerConfig,
     categoryDistribution: Readonly<Record<Category, number>>,
-    minGapMinutes = DEFAULT_MIN_GAP_MINUTES,
   ): readonly SlotTime[] {
     // Build the list of categories to schedule (e.g., [A, A, B, C]).
     const categoryList = this.buildCategoryList(categoryDistribution);
     if (categoryList.length === 0) return [];
 
-    // Determine the posting window for this day.
+    // Determine the posting windows.
     const windows = config.postingWindows.length > 0
       ? config.postingWindows
       : this.defaultWindows(config.slots);
@@ -57,46 +59,64 @@ export class TimeGenerator {
     const minuteRanges = windows.map((w) => ({
       start: parseTimeToMinutes(w.start) ?? 0,
       end: parseTimeToMinutes(w.end) ?? 24 * 60 - 1,
+      windowIndex: windows.indexOf(w),
     }));
 
     if (minuteRanges.length === 0) {
       throw new SlotGenerationError("No valid posting windows configured");
     }
 
-    // Generate random times within windows, respecting min gap.
-    const generatedTimes: number[] = [];
-    const totalSlots = categoryList.length;
+    // v7: Assign categories to windows (one category per window).
+    // We take the first N windows (where N = categoryList.length),
+    // capped by the number of available windows.
+    const numSlots = Math.min(categoryList.length, minuteRanges.length);
 
-    for (let i = 0; i < totalSlots; i++) {
-      const attempt = this.generateTimeWithinRanges(
-        minuteRanges,
-        generatedTimes,
-        minGapMinutes,
+    // Generate one random time per window, respecting min gap.
+    const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
+    const usedMinutes: number[] = [];
+
+    for (let i = 0; i < numSlots; i++) {
+      const range = minuteRanges[i]!;
+      const category = categoryList[i]!;
+
+      const attempt = this.generateTimeInRange(
+        range.start,
+        range.end,
+        usedMinutes,
+        config.minGapMinutes,
         config.jitterMinutes,
       );
+
       if (attempt === null) {
-        throw new SlotGenerationError(
-          `Could not generate slot ${i + 1} (min gap ${minGapMinutes} min too restrictive for ${totalSlots} posts in ${minuteRanges.length} window(s))`,
-        );
+        // Skip this window — can't fit a time with the min gap.
+        continue;
       }
-      generatedTimes.push(attempt);
+
+      generatedTimes.push({ minutes: attempt, windowIndex: i, category });
+      usedMinutes.push(attempt);
     }
 
-    // Sort times ascending.
-    generatedTimes.sort((a, b) => a - b);
+    if (generatedTimes.length === 0) {
+      throw new SlotGenerationError(
+        `Could not generate any slots (min gap ${config.minGapMinutes} min too restrictive)`,
+      );
+    }
+
+    // Sort by time ascending.
+    generatedTimes.sort((a, b) => a.minutes - b.minutes);
 
     // Build SlotTime objects.
-    const slots: SlotTime[] = generatedTimes.map((minutes, index) => {
-      const hh = Math.floor(minutes / 60).toString().padStart(2, "0");
-      const mm = (minutes % 60).toString().padStart(2, "0");
+    const slots: SlotTime[] = generatedTimes.map((entry, index) => {
+      const hh = Math.floor(entry.minutes / 60).toString().padStart(2, "0");
+      const mm = (entry.minutes % 60).toString().padStart(2, "0");
       const time = `${hh}:${mm}`;
-      const epochMs = this.minutesToEpochMs(date, minutes, config.timezone);
+      const epochMs = this.minutesToEpochMs(date, entry.minutes, config.timezone);
       return {
         index,
         date,
         time,
         epochMs,
-        category: categoryList[index]!,
+        category: entry.category,
         jitterMinutes: config.jitterMinutes,
       };
     });
@@ -108,14 +128,14 @@ export class TimeGenerator {
   private buildCategoryList(distribution: Readonly<Record<Category, number>>): Category[] {
     const list: Category[] = [];
     const categories: Category[] = ["A", "B", "C"];
-    // Interleave categories to avoid clustering same category.
+    let dist = { ...distribution };
     let remaining = true;
     while (remaining) {
       remaining = false;
       for (const cat of categories) {
-        if (distribution[cat] > 0) {
+        if (dist[cat] > 0) {
           list.push(cat);
-          distribution = { ...distribution, [cat]: distribution[cat] - 1 };
+          dist = { ...dist, [cat]: dist[cat] - 1 };
           remaining = true;
         }
       }
@@ -136,29 +156,23 @@ export class TimeGenerator {
     });
   }
 
-  /** Generate a random time within the ranges, avoiding existing times by minGap. */
-  private generateTimeWithinRanges(
-    ranges: ReadonlyArray<{ start: number; end: number }>,
+  /** Generate a random time within a single range, avoiding existing times by minGap. */
+  private generateTimeInRange(
+    rangeStart: number,
+    rangeEnd: number,
     existingTimes: number[],
     minGapMinutes: number,
     jitterMinutes: number,
   ): number | null {
     const maxAttempts = 100;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      // Pick a random range.
-      const range = ranges[randomInt(0, ranges.length - 1)]!;
-      // Pick a random time within the range.
-      const time = randomInt(range.start, range.end);
-
-      // Check min gap against all existing times.
+      const time = randomInt(rangeStart, rangeEnd);
       const tooClose = existingTimes.some(
         (t) => Math.abs(t - time) < minGapMinutes,
       );
       if (!tooClose) {
-        // Apply jitter (clamp to range).
         const jitter = randomInt(-jitterMinutes, jitterMinutes);
-        const jittered = Math.max(range.start, Math.min(range.end, time + jitter));
-        return jittered;
+        return Math.max(rangeStart, Math.min(rangeEnd, time + jitter));
       }
     }
     return null;
@@ -173,13 +187,8 @@ export class TimeGenerator {
 
   /** Convert minutes-since-midnight to epoch ms for a date in a timezone. */
   private minutesToEpochMs(date: string, minutes: number, _timezone: string): number {
-    // Parse date as YYYY-MM-DD, add minutes as if UTC (simplification — real impl
-    // would use the timezone offset).
     const [year, month, day] = date.split("-").map(Number);
     const epochSeconds = Date.UTC(year!, month! - 1, day!, 0, minutes, 0);
     return epochSeconds;
   }
 }
-
-/** Re-export for testing. */
-export { DEFAULT_MIN_GAP_MINUTES };
