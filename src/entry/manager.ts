@@ -603,10 +603,14 @@ export async function managerHandler(
       };
 
       // Send the actual post to admin PM + notification with API details.
-      if (pubResult.ok) {
-        const adminId = Number(env.ADMIN_ID ?? "0");
-        if (adminId > 0) {
-          // Send the EXACT same formatted post to admin PM as what went to channel.
+      // On SUCCESS: send the formatted post + success notification.
+      // On FAILURE (e.g., quality reject): send the RAW post + failure notice
+      //   so the admin can see what was rejected and forward it manually
+      //   if they want it published anyway.
+      const adminId = Number(env.ADMIN_ID ?? "0");
+      if (adminId > 0) {
+        if (pubResult.ok) {
+          // ── SUCCESS: send formatted post + success summary ──
           try {
             const finalPost = await container.uxLayer.transform(result.content);
             if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
@@ -619,7 +623,6 @@ export async function managerHandler(
               }).catch(() => {});
             }
           } catch { /* skip if transform fails */ }
-          // Send notification with API details.
           await container.tg.sendMessage(adminId, [
             `📤 <b>Post published from: ${pluginId}</b>`,
             ``,
@@ -628,6 +631,49 @@ export async function managerHandler(
             `<b>Quality:</b> ${result.content.quality.overallScore}`,
             `<b>Tokens:</b> ${result.content.tokensUsed}`,
             `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        } else {
+          // ── FAILURE: send the raw post + failure notice ──
+          // The post was rejected (e.g., quality score < threshold, or
+          // publish validation failed). Send the formatted post to the
+          // admin PM anyway so they can see what was rejected and decide
+          // whether to forward it to the channel manually.
+          try {
+            const finalPost = await container.uxLayer.transform(result.content);
+            const notice = `⚠️ <b>Post REJECTED (not published to channel)</b>\n<b>Reason:</b> ${pubResult.error ?? "unknown"}\n\n<i>Formatted post below — forward to channel manually if you want it published:</i>\n\n`;
+            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+              // Send photo with the notice prepended to caption.
+              await container.tg.sendPhoto(adminId, finalPost.media.url, `${notice}${finalPost.caption ?? ""}`, {
+                parse_mode: "HTML",
+              }).catch(() => {});
+            } else {
+              await container.tg.sendMessage(adminId, `${notice}${finalPost.fullText}`, {
+                parse_mode: "HTML",
+              }).catch(() => {});
+            }
+          } catch {
+            // If even the transform fails, send a plain-text fallback.
+            await container.tg.sendMessage(adminId, [
+              `⚠️ <b>Post REJECTED (not published to channel)</b>`,
+              ``,
+              `<b>Plugin:</b> ${pluginId}`,
+              `<b>Reason:</b> ${pubResult.error ?? "unknown"}`,
+              `<b>Headline:</b> ${result.content.headline ?? "(none)"}`,
+              `<b>Source URL:</b> ${result.content.sourceUrl ?? "(none)"}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              ``,
+              `<i>Could not format the post for forwarding. Check the API response for details.</i>`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+          }
+          // Send a short failure summary.
+          await container.tg.sendMessage(adminId, [
+            `❌ <b>Publish failed</b>`,
+            ``,
+            `<b>Plugin:</b> ${pluginId}`,
+            `<b>Quality:</b> ${result.content.quality.overallScore}`,
+            `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+            `<b>Error:</b> ${pubResult.error ?? "unknown"}`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
       }

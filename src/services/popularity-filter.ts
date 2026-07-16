@@ -31,8 +31,16 @@ const PLUGIN_MIN_STARS: Readonly<Record<string, number>> = {
   github: 50,           // main GitHub plugin — be picky
   "github-trending": 100, // trending should be genuinely trending
   "github-releases": 0,   // releases are pre-curated (we picked the repos)
-  // Other plugins (nasa, joke, xkcd, wikimedia, devto, hackernews,
-  // stackexchange, news, reddit) don't have stars — they're exempt.
+  // Other plugins don't have stars — they're exempt.
+};
+
+/** Per-plugin minimum score/points/reactions thresholds for HN/SE/Dev.to.
+ *  These are HARD floors applied on top of the log-based popularity score. */
+const PLUGIN_MIN_SCORE: Readonly<Record<string, number>> = {
+  hackernews: 50,        // HN: min 50 points (was already filtered, now enforced)
+  stackexchange: 5,      // StackExchange: min 5 score (was 1, now stricter)
+  devto: 50,             // Dev.to: min 50 reactions
+  // news, nasa, joke, xkcd, wikimedia, reddit — no score metric, exempt.
 };
 
 export class PopularityFilter {
@@ -61,9 +69,8 @@ export class PopularityFilter {
 
   /**
    * Compute a 0–100 popularity score for an item.
-   * Combines stars, views, score, and points into a single normalized
-   * metric using a logarithmic scale (so 10k stars isn't 100x better
-   * than 100 stars).
+   * Combines stars, views, score, points, reactions, comments into a single
+   * normalized metric using a logarithmic scale.
    */
   score(item: SourceItem): number {
     const meta = (item.metadata ?? {}) as Record<string, unknown>;
@@ -71,8 +78,6 @@ export class PopularityFilter {
     // 1. Stars (GitHub plugins).
     const stars = typeof meta.stars === "number" ? meta.stars : 0;
     if (stars > 0) {
-      // log10(1) = 0, log10(10) = 1, log10(100) = 2, log10(1000) = 3, log10(10000) = 4
-      // Map: 1 star → 0, 10 → 25, 100 → 50, 1000 → 75, 10000 → 100
       const logStars = Math.log10(Math.max(1, stars));
       return Math.min(100, Math.round(logStars * 25));
     }
@@ -91,14 +96,28 @@ export class PopularityFilter {
       return Math.min(100, Math.round(logPoints * 25));
     }
 
-    // 4. Views (some plugins).
+    // 4. Reactions (Dev.to).
+    const reactions = typeof meta.reactions === "number" ? meta.reactions : 0;
+    if (reactions > 0) {
+      const logReactions = Math.log10(Math.max(1, reactions));
+      return Math.min(100, Math.round(logReactions * 25));
+    }
+
+    // 5. Comments (Dev.to, HN).
+    const comments = typeof meta.comments === "number" ? meta.comments : 0;
+    if (comments > 0) {
+      const logComments = Math.log10(Math.max(1, comments));
+      return Math.min(100, Math.round(logComments * 20));
+    }
+
+    // 6. Views (some plugins).
     const views = typeof meta.views === "number" ? meta.views : 0;
     if (views > 0) {
       const logViews = Math.log10(Math.max(1, views));
       return Math.min(100, Math.round(logViews * 20));
     }
 
-    // 5. No popularity metadata — return 0 (will be exempt from filtering).
+    // 7. No popularity metadata — return 0 (will be exempt from filtering).
     return 0;
   }
 
@@ -109,6 +128,29 @@ export class PopularityFilter {
    */
   private isExempt(item: SourceItem): boolean {
     return EXEMPT_PLUGINS.has(item.source);
+  }
+
+  /**
+   * Hard minimum-score/reactions gate for plugins that expose these
+   * metrics (HN, StackExchange, Dev.to). Applied on top of the log-based
+   * popularity score.
+   */
+  meetsMinScore(item: SourceItem): boolean {
+    const meta = (item.metadata ?? {}) as Record<string, unknown>;
+    const pluginId = item.source;
+    const min = PLUGIN_MIN_SCORE[pluginId] ?? 0;
+    if (min === 0) return true; // no hard floor for this plugin
+
+    // Check the appropriate metric based on plugin.
+    if (pluginId === "hackernews" || pluginId === "stackexchange") {
+      const score = typeof meta.score === "number" ? meta.score : 0;
+      return score >= min;
+    }
+    if (pluginId === "devto") {
+      const reactions = typeof meta.reactions === "number" ? meta.reactions : 0;
+      return reactions >= min;
+    }
+    return true;
   }
 
   /**

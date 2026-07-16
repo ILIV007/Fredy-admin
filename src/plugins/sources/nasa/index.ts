@@ -61,9 +61,11 @@ export class NasaPlugin implements Plugin {
     // Use personal API key if available, else DEMO_KEY
     const apiKey = this.deps.env.NASA_API_KEY || "DEMO_KEY";
 
-    // Try today + previous 2 days as fallback (in case today is a video
-    // day or the API returns an error). This ensures we always have at
-    // least one image APOD to publish.
+    // Try today + previous 2 days as fallback (in case today's APOD
+    // fails or is unavailable). We keep BOTH image AND video APODs —
+    // the user said beautiful videos are OK. The post will be sent
+    // as a link post for videos (no photo), and as a photo post for
+    // images. The AI caption is short either way.
     const items: SourceItem[] = [];
     for (let i = 0; i < 3; i++) {
       const date = new Date(Date.now() - i * 24 * 3600 * 1000).toISOString().split("T")[0]!;
@@ -77,44 +79,28 @@ export class NasaPlugin implements Plugin {
 
         if (!res.ok) {
           this.deps.logger.warn("source.fetch_error", {
-            plugin: "nasa",
-            date,
-            status: res.status,
+            plugin: "nasa", date, status: res.status,
           });
           continue;
         }
 
         const apod = await res.json() as APODResponse;
 
-        // Only image type — skip video days (the channel is for beautiful
-        // space images, not YouTube links).
-        if (apod.media_type && apod.media_type !== "image") {
-          this.deps.logger.info("source.fetch_skip", {
-            plugin: "nasa",
-            date,
-            reason: `media_type=${apod.media_type}`,
-          });
-          continue;
-        }
-
-        // Require an image URL (hdurl preferred for quality).
-        if (!apod.hdurl && !apod.url) {
+        // Require a URL (either image url/hdurl or video url).
+        if (!apod.url) {
           this.deps.logger.warn("source.fetch_error", {
-            plugin: "nasa",
-            date,
-            reason: "missing image URL",
+            plugin: "nasa", date, reason: "missing url",
           });
           continue;
         }
 
         items.push(this.normalize(apod));
 
-        // Stop early once we have 2 image APODs (enough variety).
+        // Stop early once we have 2 APODs (enough variety).
         if (items.length >= 2) break;
       } catch (error) {
         this.deps.logger.warn("source.fetch_error", {
-          plugin: "nasa",
-          date,
+          plugin: "nasa", date,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -122,8 +108,7 @@ export class NasaPlugin implements Plugin {
 
     if (items.length === 0) {
       this.deps.logger.warn("source.fetch_error", {
-        plugin: "nasa",
-        reason: "No image APODs found in the last 3 days",
+        plugin: "nasa", reason: "No APODs found in the last 3 days",
       });
       return [];
     }
@@ -135,6 +120,7 @@ export class NasaPlugin implements Plugin {
       plugin: "nasa",
       itemCount: items.length,
       titles: items.map((i) => i.title),
+      mediaTypes: items.map((i) => (i.metadata as Record<string, unknown>)?.mediaType),
     });
 
     return items;
@@ -142,7 +128,11 @@ export class NasaPlugin implements Plugin {
 
   normalize(raw: unknown): SourceItem {
     const apod = raw as APODResponse;
-    const imageUrl = apod.hdurl ?? apod.url;
+    const mediaType = apod.media_type ?? "image";
+    // For images: prefer HD URL (higher quality). For videos: use the
+    // video URL (YouTube link) — the post will be a text/link post,
+    // not a photo post.
+    const imageUrl = mediaType === "image" ? (apod.hdurl ?? apod.url) : apod.url;
     return {
       id: `nasa-${apod.date ?? ""}`,
       source: this.metadata.id,
@@ -153,7 +143,7 @@ export class NasaPlugin implements Plugin {
       imageUrl: imageUrl ?? undefined,
       language: "en",
       publishedAt: apod.date ? Date.parse(apod.date) || undefined : undefined,
-      media: imageUrl ? {
+      media: (mediaType === "image" && imageUrl) ? {
         type: "image",
         url: imageUrl,
         alt: apod.title ?? "",
@@ -164,6 +154,7 @@ export class NasaPlugin implements Plugin {
         copyright: apod.copyright,
         hdurl: apod.hdurl,
         serviceVersion: apod.service_version,
+        mediaType,
       },
       fetchedAt: Date.now(),
     };

@@ -319,18 +319,22 @@ export class ContentManager {
     // "1-star repo gets through" bug even when the log-score is ok).
     const starFiltered = filtered.filter((item) => this.deps.popularityFilter.meetsMinStars(item));
 
+    // Hard minimum-score/reactions gate for HN/StackExchange/Dev.to.
+    const scoreFiltered = starFiltered.filter((item) => this.deps.popularityFilter.meetsMinScore(item));
+
     this.deps.logger.info("pipeline.popularity_filter", {
       category,
       pluginId: fetchResult.source,
       rawCount: fetchResult.items.length,
       afterPopularity: filtered.length,
       afterStars: starFiltered.length,
+      afterScore: scoreFiltered.length,
     });
 
     // If popularity filter removed everything, fall back to original list
     // (better to publish something than nothing — the AI quality gate will
     // still catch low-quality content).
-    const candidates = starFiltered.length > 0 ? starFiltered : fetchResult.items;
+    const candidates = scoreFiltered.length > 0 ? scoreFiltered : fetchResult.items;
 
     // Try each item until one passes the pipeline.
     for (const item of candidates) {

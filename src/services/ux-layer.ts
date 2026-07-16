@@ -109,21 +109,20 @@ export class UXLayerImpl implements UXLayer {
 
   /** Convert AI markdown to Telegram HTML.
    *  **bold** → <b>bold</b>
+   *  *italic* → <i>italic</i>
    *  `inline code` → <code>inline code</code>
    *  ```code block``` → <pre><code>code block</code></pre>
    *  > quote → <blockquote>quote</blockquote>
    *  >! collapsible → <blockquote expandable="true">collapsible</blockquote>
    *
    *  Code blocks/inline code are extracted FIRST (before escaping) so
-   *  their content survives the escape step untouched. After extraction,
-   *  the remaining text is escaped, then bold/quote transformations are
-   *  applied, then code segments are restored.
+   *  their content survives the escape step untouched.
    */
   private formatBody(text: string): string {
     if (!text) return "";
 
-    // 1. Extract code blocks (```...```) and inline code (`...`) into
-    //    placeholders so their content survives the escape step untouched.
+    // 1. Extract code blocks and inline code into placeholders so their
+    //    content survives the escape step untouched.
     const codeSegments: string[] = [];
     let work = text;
 
@@ -151,7 +150,6 @@ export class UXLayerImpl implements UXLayer {
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
 
     // 5. Convert >! collapsible quotes to <blockquote expandable="true">.
-    //    Lines starting with >! are collapsible.
     const lines = html.split("\n");
     const result: string[] = [];
     let inCollapsible = false;
@@ -159,62 +157,46 @@ export class UXLayerImpl implements UXLayer {
 
     for (const line of lines) {
       if (line.startsWith("&gt;! ")) {
-        // Start or continuation of collapsible quote.
-        if (!inCollapsible) {
-          inCollapsible = true;
-          collapsibleBuffer = [];
-        }
+        if (!inCollapsible) { inCollapsible = true; collapsibleBuffer = []; }
         collapsibleBuffer.push(line.replace(/^&gt;! /, ""));
       } else if (line.startsWith("&gt;!")) {
-        if (!inCollapsible) {
-          inCollapsible = true;
-          collapsibleBuffer = [];
-        }
+        if (!inCollapsible) { inCollapsible = true; collapsibleBuffer = []; }
         collapsibleBuffer.push(line.replace(/^&gt;!/, ""));
       } else {
-        // End of collapsible quote if we were in one.
         if (inCollapsible) {
           result.push(`<blockquote expandable="true">${collapsibleBuffer.join("\n")}</blockquote>`);
-          inCollapsible = false;
-          collapsibleBuffer = [];
+          inCollapsible = false; collapsibleBuffer = [];
         }
         result.push(line);
       }
     }
-    // Don't forget trailing collapsible.
     if (inCollapsible && collapsibleBuffer.length > 0) {
       result.push(`<blockquote expandable="true">${collapsibleBuffer.join("\n")}</blockquote>`);
     }
 
     // 6. Convert > regular quotes to <blockquote>.
-    //    Group consecutive > lines into a single blockquote.
     const finalResult: string[] = [];
     let inQuote = false;
     let quoteBuffer: string[] = [];
 
     for (const line of result) {
-      // Skip lines that are already inside a <blockquote> tag.
+      // Skip lines that are already a <blockquote> tag.
       if (line.startsWith("<blockquote")) {
         if (inQuote) {
           finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
-          inQuote = false;
-          quoteBuffer = [];
+          inQuote = false; quoteBuffer = [];
         }
         finalResult.push(line);
         continue;
       }
       if (line.startsWith("&gt; ") || line.startsWith("&gt;")) {
         const content = line.replace(/^&gt;\s?/, "");
-        if (!inQuote) {
-          inQuote = true;
-          quoteBuffer = [];
-        }
+        if (!inQuote) { inQuote = true; quoteBuffer = []; }
         quoteBuffer.push(content);
       } else {
         if (inQuote) {
           finalResult.push(`<blockquote>${quoteBuffer.join("\n")}</blockquote>`);
-          inQuote = false;
-          quoteBuffer = [];
+          inQuote = false; quoteBuffer = [];
         }
         finalResult.push(line);
       }

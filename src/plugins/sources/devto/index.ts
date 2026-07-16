@@ -41,6 +41,9 @@ interface DevToArticle {
   reading_time_minutes?: number;
   tags?: string[];
   user?: { name?: string; username?: string };
+  public_reactions_count?: number;
+  comments_count?: number;
+  positive_reactions_count?: number;
 }
 
 export class DevToPlugin implements Plugin {
@@ -120,6 +123,8 @@ export class DevToPlugin implements Plugin {
         author: article.user?.name ?? article.user?.username,
         readingTime: article.reading_time_minutes,
         tags: article.tags,
+        reactions: article.public_reactions_count ?? article.positive_reactions_count ?? 0,
+        comments: article.comments_count ?? 0,
       },
       fetchedAt: Date.now(),
     };

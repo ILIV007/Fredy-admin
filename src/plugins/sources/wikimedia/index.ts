@@ -22,13 +22,46 @@ const WIKI_API_BASE = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/event
 const CACHE_KEY = "fredy:source:wikimedia:today";
 const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours
 
-// Tech-related keyword filters (matched against page title/categories)
+// Tech-related keyword filters (matched against page title/categories).
+// STRICT: only computer science / software / dev / electronics topics.
+// Removed overly broad terms like "science", "engineer", "data", "space"
+// that let through unrelated articles (volcanoes, biology, etc.).
 const TECH_KEYWORDS = [
-  "computer", "software", "programming", "internet", "web", "technology",
-  "algorithm", "data", "digital", "electronic", "engineer", "science",
-  "mathematic", "physics", "robot", "automation", "cyber", "network",
-  "microprocessor", "transistor", "linux", "unix", "microsoft", "apple",
-  "google", "ibm", "intel", "nasa", "space", "satellite", "ai ", "artificial intelligence",
+  // Programming & software
+  "computer", "software", "programming", "programmer", "code", "coding",
+  "developer", "algorithm", "compiler", "debug", "framework", "library",
+  "api", "json", "xml", "html", "css", "javascript", "typescript",
+  "python", "java", "rust", "golang", "c++", "c#", "php", "ruby", "swift",
+  "kotlin", "scala", "elixir", "haskell", "lua", "perl", "objective-c",
+  // Web & internet
+  "internet", "web browser", "website", "web page", "http", "https",
+  "url", "domain name", "dns", "tcp/ip", "protocol",
+  // Operating systems & platforms
+  "linux", "unix", "microsoft windows", "macos", "android", "ios",
+  "operating system",
+  // Companies (tech only)
+  "microsoft", "apple inc", "google", "alphabet", "ibm", "intel", "amd",
+  "nvidia", "oracle", "amazon web services", "amazon", "facebook", "meta platforms",
+  "twitter", "x corp", "linkedin", "netflix", "spotify", "uber", "airbnb",
+  // Hardware & electronics
+  "microprocessor", "microchip", "transistor", "semiconductor", "integrated circuit",
+  "cpu", "gpu", "ram", "memory chip", "motherboard", "firmware",
+  // AI & ML
+  "artificial intelligence", "machine learning", "neural network", "deep learning",
+  "large language model", "chatgpt", "openai", "anthropic",
+  // Networking & security
+  "cyber", "cybersecurity", "encryption", "cryptography", "firewall",
+  "network security", "malware", "computer virus", "computer worm",
+  // Data & databases
+  "database", "sql", "nosql", "data structure", "big data",
+  // Robotics & automation (only if computer-controlled)
+  "robotics", "robot", "automation software",
+  // NASA / space TECH (missions, satellites, software — not general astronomy)
+  "nasa", "satellite", "space probe", "spacecraft", "mars rover",
+  "apollo program", "space shuttle", "international space station",
+  // Digital & electronics
+  "digital", "electronic", "byte", "binary", "microcomputer",
+  "personal computer", "smartphone", "tablet computer",
 ];
 
 export interface WikimediaPluginDeps {

@@ -83,8 +83,19 @@ export function validateAIResponse(
       }
     }
   }
-  if (obj["notes"] !== undefined && typeof obj["notes"] !== "string") {
-    errors.push(`"notes" must be a string if present`);
+  // Coerce "notes" to string if present (some AI models return null,
+  // arrays, or objects instead of a string). Be lenient — convert
+  // anything to a string rather than rejecting the whole response.
+  if (obj["notes"] !== undefined && obj["notes"] !== null) {
+    if (typeof obj["notes"] === "string") {
+      // already a string — ok
+    } else if (Array.isArray(obj["notes"])) {
+      obj["notes"] = (obj["notes"] as unknown[]).map(String).join("; ");
+    } else if (typeof obj["notes"] === "object") {
+      obj["notes"] = JSON.stringify(obj["notes"]);
+    } else {
+      obj["notes"] = String(obj["notes"]);
+    }
   }
 
   if (errors.length > 0) return { ok: false, errors };

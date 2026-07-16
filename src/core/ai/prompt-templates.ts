@@ -100,17 +100,20 @@ Write a factual news post. What happened, why it matters. 2-3 paragraphs. No spe
 
   C: `CATEGORY C — Support Content (NASA APOD, jokes, quotes, dev facts)
 
+KEEP IT VERY SHORT — the image/visual is the star, not the text.
+
 For NASA APOD (image-first posts):
-- Caption: 1-2 SHORT lines in Persian (≤200 chars total). The image is the star — the caption just names what we're looking at.
+- Caption: 1-2 SHORT lines in Persian (≤150 chars total). Just name what we're looking at.
 - Format: "🌟 <one-line description of what the image shows>" — no deep astrophysics, no paragraphs.
-- Example good caption: "🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری — گازهای درخشان شراره‌های ستاره‌ای جوان رو نشون میده."
-- Example BAD caption (too long): multiple paragraphs explaining the physics. The channel is a programming channel — readers want the pretty picture, not an astronomy lecture.
+- Example GOOD caption: "🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری — گازهای درخشان شراره‌های ستاره‌ای جوان رو نشون میده."
+- Example BAD caption (too long): multiple paragraphs explaining the physics.
+- The channel is a programming channel — readers want the pretty picture, not an astronomy lecture.
 
-For jokes: setup + punchline. No explanation. Keep it respectful.
-For quotes: the quote + author (em-dash, not hyphen). No motivational-poster quotes.
-For dev facts: the fact + 1-2 sentences of context. Must be verifiable.
+For jokes: setup + punchline. 1-2 sentences max. No explanation.
+For quotes: the quote + author (em-dash). 1 line.
+For dev facts: the fact + 1 sentence of context. 2 lines max.
 
-If you cannot verify a fact, set aiConfidence below 50 and explain in "notes".`,
+HARD RULE: total text must be ≤150 chars. If you can't fit it in 2 lines, cut more.`,
 };
 
 /**

@@ -2,45 +2,51 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
-## [6.6.0] — 2026-07-15 — Telegram Code Blocks + NASA Image-First + Prompt Formatting
+## [6.7.0] — 2026-07-15 — Quality Reject to Admin PM + Topic Filters + Shorter NASA Captions + Code Blocks
 
 ### Critical Fixes
 
-- **Telegram formatting now supports code blocks + inline code** — The UX layer's `formatBody()` now converts AI markdown to Telegram HTML:
-  - ` ```code block``` ` → `<pre><code>code block</code></pre>` (for multi-line code)
-  - `` `inline code` `` → `<code>inline code</code>` (for identifiers, commands, paths)
-  - `**bold**` → `<b>bold</b>` (existing, kept)
-  - `*italic*` → `<i>italic</i>` (NEW — single asterisks)
-  - `> quote` → `<blockquote>quote</blockquote>` (existing, kept)
-  - `>! collapsible` → `<blockquote expandable="true">collapsible</blockquote>` (existing, kept)
-  - Code blocks/inline code are extracted FIRST (before escaping) so their content survives the escape step untouched. After extraction, the remaining text is escaped, then bold/italic/quote transformations are applied, then code segments are restored.
-  - This fixes the issue where posts like the Rust 1.97.0 release showed `Result<T, Uninhabited>` and `dead_code_pub_in_binary` as plain text instead of formatted code.
+- **Quality-rejected posts now sent to admin PM in raw form** — when a post fails the quality gate (score < threshold) or publish validation, the formatted post is now sent to the admin PM with a "⚠️ Post REJECTED" notice. The admin can see what was rejected and forward it to the channel manually if they want it published. Previously, rejected posts just returned an error JSON with no admin visibility. This applies to the manual publish path (Manager dashboard → Post to Channel).
 
-- **AI prompt updated to use code formatting** — Base system prompt now includes a "CODE FORMATTING" section instructing the AI to wrap technical identifiers in backticks:
-  * Shell commands: \`npm install foo\`
-  * Code identifiers with special chars: \`Result<T, Uninhabited>\`
-  * Config keys / env vars: \`DEBUG_MODE=true\`
-  * File paths: \`src/index.ts\`
-  * Lint rule names: \`dead_code_pub_in_binary\`
-  * Type names: \`ControlFlow\`, \`Result\`
-  * Function/method names with parens: \`fn main()\`
-  - Also added: "Do NOT use markdown headings (#, ##). Telegram doesn't render them." and "Do NOT use markdown links [text](url)."
+- **NASA videos now kept (not skipped)** — the NASA plugin previously skipped video APOD entries. Now it keeps both image AND video APODs. The user said "اگه ناسا ویدیو هم باشه که قشنگ باشه اوکیه". Video posts are sent as text/link posts (no photo); image posts are sent as photo posts.
 
-- **NASA prompt updated to image-first** — Category C prompt now explicitly says:
-  - "Caption: 1-2 SHORT lines in Persian (≤200 chars total). The image is the star."
-  - Includes a good example: "🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری — گازهای درخشان شراره‌های ستاره‌ای جوان رو نشون میده."
-  - Includes a bad example (multi-paragraph physics explanation) to guide the AI away from long captions.
+- **NASA captions now much shorter** — Category C prompt rewritten to enforce 1-2 SHORT lines (≤150 chars total). Added a HARD RULE: "total text must be ≤150 chars". Includes a good example ("🌟 سحابی شکارچی در فاصله ۱۳۰۰ سال نوری...") and a bad example (multi-paragraph physics). This addresses "هنوز مقدار تکست های پیام هاش به دو سه خط نرسیده!"
 
-- **NASA plugin now fetches multiple days as fallback** — Previously `fetch()` only got today's APOD. If today was a video day, it returned `[]` (empty). Now it tries today + previous 2 days (3 attempts), skipping video entries, and returns up to 2 image APODs. This ensures we always have at least one image APOD to publish even on video days.
+- **Wikimedia topic filter made much stricter** — the previous tech keyword list included overly broad terms like "science", "engineer", "data", "space" that let through unrelated articles (e.g., stratovolcano matched "science"). The new list is strictly computer science / software / dev / electronics: programming languages, web technologies, operating systems, tech companies, hardware, AI/ML, networking/security, databases, robotics, NASA missions. This addresses "پست های ویکی مدیا هم باید فیلتر کنی تا فقط مطالب تکنولوژی جذاب به بات برسن".
 
-### Files Changed (5)
+- **Dev.to now exposes reactions/comments in metadata** — the DevToArticle interface now includes `public_reactions_count`, `comments_count`, `positive_reactions_count`. These are stored in `item.metadata.reactions` and `item.metadata.comments` so the PopularityFilter can use them.
 
-1. `VERSION` → 6.6.0
+- **PopularityFilter now has `meetsMinScore` for HN/StackExchange/Dev.to** — hard floors applied on top of the log-based popularity score:
+  - HackerNews: min 50 points
+  - StackExchange: min 5 score (was 1, now stricter)
+  - Dev.to: min 50 reactions
+  This addresses "برای هکر نیوز، دیو ای او و... هم فیلتر هایی که میشه بزار!".
+
+- **Telegram formatting now supports code blocks + inline code** — the UX layer's `formatBody()` now converts:
+  - ` ```code block``` ` → `<pre><code>code block</code></pre>`
+  - `` `inline code` `` → `<code>inline code</code>`
+  - `*italic*` → `<i>italic</i>` (NEW)
+  - Code is extracted before escaping so `<` `>` `&` inside code display literally.
+  This fixes the Rust 1.97.0 post where `Result<T, Uninhabited>` and `dead_code_pub_in_binary` showed as plain text.
+
+- **AI prompt now includes CODE FORMATTING section** — the base system prompt instructs the AI to wrap technical identifiers (shell commands, type names, file paths, lint rule names, env vars, code with special chars) in backticks.
+
+- **AI response schema validation made lenient for `notes`** — previously, if the AI returned `notes` as null/array/object, the whole response was rejected with "Schema validation failed: notes must be a string if present". Now `notes` is coerced to a string (arrays joined with "; ", objects JSON-stringified). This was the root cause of the wikimedia quality score 1 / format-only fallback in the user's example.
+
+### Files Changed (9)
+
+1. `VERSION` → 6.7.0
 2. `CHANGELOG.md` → this entry
-3. `src/core/constants.ts` → `APP_VERSION = "6.6.0"`
-4. `src/services/ux-layer.ts` — `formatBody()` rewritten with code block/inline code/italic support + code extraction before escaping
-5. `src/core/ai/prompt-templates.ts` — CODE FORMATTING section added to base prompt, Category C rewritten for image-first NASA
-6. `src/plugins/sources/nasa/index.ts` — multi-day fallback (today + 2 previous), skip videos, require image URL
+3. `src/core/constants.ts` → `APP_VERSION = "6.7.0"`
+4. `src/entry/manager.ts` — quality-reject path now sends formatted post + failure notice to admin PM
+5. `src/plugins/sources/nasa/index.ts` — keep videos, multi-day fallback, mediaType in metadata
+6. `src/plugins/sources/wikimedia/index.ts` — stricter tech keyword filter (removed broad terms)
+7. `src/plugins/sources/devto/index.ts` — reactions/comments in metadata
+8. `src/services/popularity-filter.ts` — `meetsMinScore()` for HN/SE/Dev.to + reactions/comments scoring
+9. `src/services/content-manager.ts` — applies `meetsMinScore` in `processForCategory`
+10. `src/services/ux-layer.ts` — code blocks + inline code + italic in `formatBody()`
+11. `src/core/ai/prompt-templates.ts` — CODE FORMATTING section + Category C shorter captions
+12. `src/core/ai/response-schema.ts` — lenient `notes` coercion
 
 ### Verification
 
@@ -50,6 +56,7 @@ All notable changes to Fredy are documented in this file. Versions follow the Pr
 | Total errors | 33 (v6.5.1 had 34 — **1 fewer**) |
 | Files in project | 188 (unchanged from v6.5.1) |
 | New files | 0 |
+| Regression | None |
 
 ## [6.5.1] — 2026-07-15 — Admin PM Notification Fix + Duplicate Post Forwarding + Code Cleanup
 
