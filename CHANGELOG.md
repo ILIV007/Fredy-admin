@@ -2,6 +2,32 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.7.1] — 2026-07-16 — Fix: Empty-Body Hash Collision (HackerNews all-duplicates bug)
+
+### Critical Fix
+
+- **Empty-body items no longer falsely detected as duplicates** — root cause: `DuplicateDetector.computeHash()` hashed `item.body` with SHA-1. When body was empty (common for HackerNews link stories that only have a title), `sha1("")` returned the same hash for every empty-body item. This meant once the first HN post was published, every subsequent HN post with an empty body was falsely detected as a duplicate of the first one — blocking all HN posts from being published.
+
+  **Fix**: `computeHash()` now checks if the normalized body is shorter than 3 chars. If so, it falls back to hashing `url + title` (prefixed with `fallback:` so it never collides with a real body hash). This ensures each empty-body item gets a unique hash based on its URL and title.
+
+  This also affects other plugins that may have empty bodies (e.g., some StackExchange questions, some Dev.to articles with only a description).
+
+### Files Changed (3)
+
+1. `VERSION` → 6.7.1
+2. `CHANGELOG.md` → this entry
+3. `src/core/constants.ts` → `APP_VERSION = "6.7.1"`
+4. `src/services/duplicate-detector.ts` — `computeHash()` empty-body fallback to URL+title
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Type-check (edited files) | 0 errors |
+| Total errors | 33 (unchanged from v6.7.0) |
+| Files in project | 188 (unchanged) |
+| Regression | None |
+
 ## [6.7.0] — 2026-07-15 — Quality Reject to Admin PM + Topic Filters + Shorter NASA Captions + Code Blocks
 
 ### Critical Fixes

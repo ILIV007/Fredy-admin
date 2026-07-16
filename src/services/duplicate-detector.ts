@@ -123,10 +123,19 @@ export class DuplicateDetector {
     await this.deps.kv.setJson(`fredy:dedup:title:${titleHash}`, record, this.ttlSeconds);
   }
 
-  /** Compute the content hash (SHA-1 of normalized body). */
+  /** Compute the content hash (SHA-1 of normalized body).
+   *  IMPORTANT: if the body is empty (common for HackerNews items that
+   *  only have a title), fall back to hashing the URL + title. Otherwise
+   *  all empty-body items would hash to the same value (sha1 of empty
+   *  string) and be falsely detected as duplicates of each other. */
   private async computeHash(item: ContentItem): Promise<string> {
-    const normalized = normalizeForDedup(item.body);
-    return sha1(normalized);
+    const normalizedBody = normalizeForDedup(item.body ?? "");
+    // If body is empty/whitespace, hash URL + title instead.
+    if (!normalizedBody || normalizedBody.length < 3) {
+      const fallback = normalizeForDedup(`${item.url ?? ""}|${item.title ?? ""}`);
+      return sha1(`fallback:${fallback}`);
+    }
+    return sha1(normalizedBody);
   }
 
   /** Compute a title hash (for similar-title detection). */
