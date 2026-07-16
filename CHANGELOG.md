@@ -2,6 +2,41 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [6.8.0] — 2026-07-16 — Fix Truncation + NASA Photos + Wikimedia Filter + Plugin Toggle
+
+### Critical Fixes
+
+- **Post truncation fixed (source/footer cut off mid-word)** — root cause: `stripBareUrls()` and `formatBody()` used `\x00` (null byte) as placeholder delimiters. Telegram's API truncates messages at null bytes, causing the source link and channel footer to be cut off mid-word (e.g., "soru" instead of "Source"). Fix: replaced all `\x00` placeholders with string-based placeholders (`__FREDY_LINK_0__`, `__FREDY_CODE_0__`) that Telegram handles correctly. Also removed `.trim()` from `stripBareUrls()` which could remove trailing newlines between blockquotes.
+
+- **NASA images now sent as photos (not links)** — root cause: the NASA plugin used `hdurl` (HD resolution) for the image URL. NASA HD images can be 5-10MB, which Telegram's `sendPhoto` rejects (5MB limit for URL-based photos). When `sendPhoto` failed, the code fell through to text-only, showing the image URL as a link. Fix: use `url` (standard resolution, ~1024px) instead of `hdurl`. Standard resolution is perfect for Telegram and loads fast.
+
+- **Wikimedia filter much stricter** — root cause: the `isTechRelated()` function checked `event.text` + `pageTitles` + `pageCategories`. Wikipedia categories are extremely broad and contain tech keywords in unexpected places, causing false positives (e.g., "Battle of Spercheios" — a 10th century Byzantine battle — passed the filter because a Wikipedia category contained a tech keyword). Fix: only check `event.text` (the one-line description), use word-boundary regex matching (`\bkeyword\b`) instead of substring matching, and skip categories entirely. This ensures only events that explicitly mention tech topics in their description pass the filter.
+
+### Added
+
+- **Plugin enable/disable toggle in Manager dashboard** — the Plugins page now has a "Disable"/"Enable" button next to each plugin (in addition to the existing "Test" button). Clicking it calls `POST /Manager/api/plugin/<id>/toggle` which calls `pluginManager.enable(id)` or `pluginManager.disable(id)`. The toggle state persists in KV (via `pluginManager.updateStatus`). This allows the admin to quickly disable problematic APIs (e.g., Wikimedia) without redeploying.
+
+### Files Changed (7)
+
+1. `VERSION` → 6.8.0
+2. `CHANGELOG.md` → this entry
+3. `src/core/constants.ts` → `APP_VERSION = "6.8.0"`
+4. `src/services/final-publisher.ts` — `stripBareUrls()` uses string placeholders + no `.trim()`
+5. `src/services/ux-layer.ts` — `formatBody()` uses string placeholders instead of `\x00`
+6. `src/plugins/sources/nasa/index.ts` — use `url` (standard res) instead of `hdurl` (HD)
+7. `src/plugins/sources/wikimedia/index.ts` — `isTechRelated()` only checks event text with word-boundary matching
+8. `src/entry/manager.ts` — plugin toggle API endpoint + toggle button in UI
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Type-check (edited files) | 0 errors |
+| Total errors | 33 (unchanged from v6.7.1) |
+| Files in project | 188 (unchanged) |
+| `\x00` in code | 0 (only in comments) |
+| Regression | None |
+
 ## [6.7.1] — 2026-07-16 — Fix: Empty-Body Hash Collision (HackerNews all-duplicates bug)
 
 ### Critical Fix

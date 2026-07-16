@@ -252,6 +252,20 @@ export async function managerHandler(
     } catch (error) { return json({ ok: false, error: errMsg(error) }, 500); }
   }
 
+  // ── Toggle plugin enable/disable ──
+  const togglePluginMatch = apiPath.match(/^plugin\/([\w-]+)\/toggle$/);
+  if (togglePluginMatch && request.method === "POST") {
+    const pluginId = togglePluginMatch[1]!;
+    const isCurrentlyEnabled = container.plugins.isEnabled(pluginId);
+    if (isCurrentlyEnabled) {
+      container.plugins.disable(pluginId);
+    } else {
+      container.plugins.enable(pluginId);
+    }
+    const newState = container.plugins.isEnabled(pluginId);
+    return json({ ok: true, pluginId, enabled: newState });
+  }
+
   // ── Test AI ──
   if (apiPath === "test/ai" && request.method === "POST") {
     try {
@@ -1079,7 +1093,7 @@ async function loadPlugins(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   c.innerHTML='<div style="margin-bottom:12px;display:flex;gap:8px"><button class="btn" onclick="testAllPlugins()">🧪 Test All Plugins</button></div>'+
   '<table><thead><tr><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Rate Limit</th><th>Test</th></tr></thead><tbody>'+
-  d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\\''+p.id+'\\')">Test</button></td></tr>').join("")+'</tbody></table>'+
+  d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\\''+p.id+'\\')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin(\\''+p.id+'\\')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
   '<div id="test-all-results"></div>';
 }
 
@@ -1092,6 +1106,7 @@ async function testAllPlugins(){
 }
 
 async function testPlugin(id){toast("Testing "+id+"...");const d=await api("test/plugin/"+id,"POST");toast(d.ok?"✅ "+id+": "+d.itemCount+" items":"❌ "+id+": "+d.error);}
+async function togglePlugin(id){const d=await api("plugin/"+id+"/toggle","POST");toast(d.ok?(d.enabled?"✅ "+id+" enabled":"🔴 "+id+" disabled"):"❌ Failed");loadPlugins();}
 
 async function loadQueue(){
   const d=await api("queue");const c=document.getElementById("content");

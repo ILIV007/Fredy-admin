@@ -129,10 +129,13 @@ export class NasaPlugin implements Plugin {
   normalize(raw: unknown): SourceItem {
     const apod = raw as APODResponse;
     const mediaType = apod.media_type ?? "image";
-    // For images: prefer HD URL (higher quality). For videos: use the
-    // video URL (YouTube link) — the post will be a text/link post,
-    // not a photo post.
-    const imageUrl = mediaType === "image" ? (apod.hdurl ?? apod.url) : apod.url;
+    // For images: use the STANDARD resolution url (not hdurl).
+    // HD images from NASA can be 5-10MB which Telegram's sendPhoto
+    // rejects (5MB limit for URL-based photos). The standard url is
+    // typically ~1024px which is perfect for Telegram.
+    // For videos: use the video URL (YouTube link) — the post will be
+    // a text/link post, not a photo post.
+    const imageUrl = mediaType === "image" ? (apod.url ?? apod.hdurl) : apod.url;
     return {
       id: `nasa-${apod.date ?? ""}`,
       source: this.metadata.id,

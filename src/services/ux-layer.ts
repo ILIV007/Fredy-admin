@@ -130,14 +130,14 @@ export class UXLayerImpl implements UXLayer {
     work = work.replace(/```([\s\S]*?)```/g, (_, code: string) => {
       const escaped = this.escapeHtml(code.replace(/^\n/, "").replace(/\n$/, ""));
       codeSegments.push(`<pre><code>${escaped}</code></pre>`);
-      return `\x00CODE${codeSegments.length - 1}\x00`;
+      return `__FREDY_CODE_${codeSegments.length - 1}__`;
     });
 
     // Single-backtick inline code (single line, no newlines inside).
     work = work.replace(/`([^`\n]+)`/g, (_, code: string) => {
       const escaped = this.escapeHtml(code);
       codeSegments.push(`<code>${escaped}</code>`);
-      return `\x00CODE${codeSegments.length - 1}\x00`;
+      return `__FREDY_CODE_${codeSegments.length - 1}__`;
     });
 
     // 2. Escape HTML special chars in the remaining (non-code) text.
@@ -207,7 +207,7 @@ export class UXLayerImpl implements UXLayer {
 
     // 7. Restore code segments.
     let finalHtml = finalResult.join("\n");
-    finalHtml = finalHtml.replace(/\x00CODE(\d+)\x00/g, (_, i: string) => codeSegments[Number(i)] ?? "");
+    finalHtml = finalHtml.replace(/__FREDY_CODE_(\d+)__/g, (_, i: string) => codeSegments[Number(i)] ?? "");
 
     return finalHtml;
   }

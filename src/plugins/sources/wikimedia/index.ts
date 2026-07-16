@@ -146,11 +146,32 @@ export class WikimediaPlugin implements Plugin {
   }
 
   private isTechRelated(event: WikiEvent): boolean {
+    // ONLY check the event text (the one-line description from Wikipedia).
+    // Do NOT check page titles or categories — they are too broad and
+    // cause false positives (e.g., "Battle of Spercheios" matched because
+    // a Wikipedia category contained a tech keyword somewhere).
     const text = (event.text ?? "").toLowerCase();
-    const pageTitles = (event.pages ?? []).map((p) => (p.title ?? "").toLowerCase()).join(" ");
-    const pageCategories = (event.pages ?? []).flatMap((p) => p.categories ?? []).map((c) => (c.title ?? "").toLowerCase()).join(" ");
-    const combined = `${text} ${pageTitles} ${pageCategories}`;
-    return TECH_KEYWORDS.some((kw) => combined.includes(kw));
+    if (!text) return false;
+
+    // Count how many tech keywords match. Require at least 1 match,
+    // but use word-boundary matching to avoid substring false positives
+    // (e.g., "data" matching inside "database" is fine, but "data"
+    // matching inside "metadata" is a false positive — though we removed
+    // "data" from the list, the principle applies to other keywords).
+    let matchCount = 0;
+    for (const kw of TECH_KEYWORDS) {
+      // Use word-boundary regex for keywords that are common words.
+      // For keywords with special chars (c++, c#), use plain includes.
+      if (kw.includes("+") || kw.includes("#") || kw.includes("/")) {
+        if (text.includes(kw)) matchCount++;
+      } else {
+        const regex = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (regex.test(text)) matchCount++;
+      }
+    }
+
+    // Require at least 1 tech keyword match in the event text.
+    return matchCount >= 1;
   }
 
   normalize(raw: unknown): SourceItem {

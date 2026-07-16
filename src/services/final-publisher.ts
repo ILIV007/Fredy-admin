@@ -246,9 +246,9 @@ export class FinalPublisher {
           chatId: String(result.result.chat?.id ?? channel),
         };
       } catch (err) {
-        // sendPhoto failed (often: bad URL, 404, server-side content type
-        // mismatch, etc.). Fall through to text-only publish so the post
-        // still goes out instead of being skipped entirely.
+        // sendPhoto failed — log and fall through to text-only.
+        // Common causes: image too large, URL 404, server-side content
+        // type mismatch. The post still goes out as text so it's not lost.
         console.log("[publish] sendPhoto failed, falling back to text-only:", err instanceof Error ? err.message : err);
       }
     }
@@ -359,16 +359,19 @@ export class FinalPublisher {
   /** Strip bare URLs from text, preserving <a href="URL">text</a> links. */
   private stripBareUrls(text: string): string {
     // 1. Extract <a href="URL">text</a> tags and replace with placeholders.
+    //    Use a string placeholder instead of \x00 (null byte can cause
+    //    Telegram to truncate the message at that point).
     const links: string[] = [];
     let work = text.replace(/<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (match) => {
       links.push(match);
-      return `\x00LINK${links.length - 1}\x00`;
+      return `__FREDY_LINK_${links.length - 1}__`;
     });
     // 2. Strip ALL remaining bare URLs.
-    work = work.replace(/https?:\/\/[^\s<>"'\x00]+/gi, "");
+    work = work.replace(/https?:\/\/[^\s<>"']+/gi, "");
     // 3. Restore <a> tags.
-    work = work.replace(/\x00LINK(\d+)\x00/g, (_, i) => links[Number(i)] || "");
-    // 4. Clean up extra whitespace.
-    return work.replace(/\n{3,}/g, "\n\n").trim();
+    work = work.replace(/__FREDY_LINK_(\d+)__/g, (_, i) => links[Number(i)] || "");
+    // 4. Clean up extra whitespace (but do NOT trim — trim can remove
+    //    trailing newlines that separate the source/footer blockquotes).
+    return work.replace(/\n{3,}/g, "\n\n");
   }
 }
