@@ -47,9 +47,14 @@ export async function managerHandler(
 
   // ── Plugins ──
   if (apiPath === "plugins" && request.method === "GET") {
-    const plugins = container.plugins.list().map(p => ({ id: p.metadata.id, name: p.metadata.name, version: p.metadata.version, category: p.metadata.category, priority: p.metadata.priority, enabled: container.plugins.isEnabled(p.metadata.id), supportsImages: p.metadata.supportsImages, rateLimit: p.metadata.rateLimit, homepage: p.metadata.homepage }));
-    const statuses = container.plugins.getAllStatuses();
-    return json({ ok: true, plugins, statuses });
+    try {
+      const plugins = container.plugins.list().map(p => ({ id: p.metadata.id, name: p.metadata.name, version: p.metadata.version, category: p.metadata.category, priority: p.metadata.priority, enabled: container.plugins.isEnabled(p.metadata.id), supportsImages: p.metadata.supportsImages, rateLimit: p.metadata.rateLimit, homepage: p.metadata.homepage }));
+      let statuses: Record<string, unknown> = {};
+      try { statuses = container.plugins.getAllStatuses() as unknown as Record<string, unknown>; } catch { /* non-fatal */ }
+      return json({ ok: true, plugins, statuses });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error), plugins: [] }, 200);
+    }
   }
 
   // ── Test All Plugins ──
@@ -149,7 +154,34 @@ export async function managerHandler(
   if (apiPath === "queue" && request.method === "GET") {
     const depths = await container.queue.depth().catch(() => []);
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
-    return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null });
+    // Also fetch actual queued items for display.
+    const items: Record<string, unknown[]> = {};
+    for (const cat of ["A", "B", "C"] as const) {
+      try {
+        const queued = await container.queue.listItems(cat);
+        items[cat] = queued.map(q => ({
+          id: q.content.id,
+          headline: q.content.headline ?? "(no headline)",
+          pluginId: q.content.pluginId,
+          language: q.content.language,
+          qualityScore: q.content.quality.overallScore,
+          enqueuedAt: q.enqueuedAt,
+          aiProvider: q.content.aiProvider,
+          aiModel: q.content.aiModel,
+        }));
+      } catch { items[cat] = []; }
+    }
+    return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items });
+  }
+
+  // ── Queue: delete item ──
+  const queueDeleteMatch = apiPath.match(/^queue\/([ABC])\/delete$/);
+  if (queueDeleteMatch && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as { contentId?: string };
+    const cat = queueDeleteMatch[1] as "A" | "B" | "C";
+    if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
+    const deleted = await container.queue.deleteItem(cat, body.contentId);
+    return json({ ok: deleted, message: deleted ? "Item deleted" : "Item not found" });
   }
 
   // ── AI ──
@@ -1176,12 +1208,16 @@ async function runCheckup(){
 }
 
 async function loadPlugins(){
-  const d=await api("plugins");const c=document.getElementById("content");
-  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-  c.innerHTML='<div style="margin-bottom:12px;display:flex;gap:8px"><button class="btn" onclick="testAllPlugins()">🧪 Test All Plugins</button></div>'+
-  '<table><thead><tr><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Rate Limit</th><th>Test</th></tr></thead><tbody>'+
-  d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\\''+p.id+'\\')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin(\\''+p.id+'\\')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
-  '<div id="test-all-results"></div>';
+  const c=document.getElementById("content");
+  c.innerHTML='<div class="card">Loading plugins…</div>';
+  try{
+    const d=await api("plugins");
+    if(!d.ok||!d.plugins){c.innerHTML='<div class="card">Error: '+(d.error||"Unknown")+'</div>';return;}
+    c.innerHTML='<div style="margin-bottom:12px;display:flex;gap:8px"><button class="btn" onclick="testAllPlugins()">🧪 Test All Plugins</button></div>'+
+    '<table><thead><tr><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Rate Limit</th><th>Actions</th></tr></thead><tbody>'+
+    d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\\''+p.id+'\\')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin(\\''+p.id+'\\')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
+    '<div id="test-all-results"></div>';
+  }catch(e){c.innerHTML='<div class="card">Failed to load plugins: '+e+'</div>';}
 }
 
 async function testAllPlugins(){
@@ -1196,11 +1232,37 @@ async function testPlugin(id){toast("Testing "+id+"...");const d=await api("test
 async function togglePlugin(id){const d=await api("plugin/"+id+"/toggle","POST");toast(d.ok?(d.enabled?"✅ "+id+" enabled":"🔴 "+id+" disabled"):"❌ Failed");loadPlugins();}
 
 async function loadQueue(){
-  const d=await api("queue");const c=document.getElementById("content");
-  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-  const l=d.limits||{};
-  c.innerHTML=d.depths.map(q=>{const lim=l[q.category]||{min:0,target:0};const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
-  return '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+q.category+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px;color:var(--text2)"><span>Min: '+lim.min+'</span><span>Target: '+lim.target+'</span></div></div>';}).join("");
+  const c=document.getElementById("content");
+  c.innerHTML='<div class="card">Loading queue…</div>';
+  try{
+    const d=await api("queue");
+    if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+    const l=d.limits||{};
+    const items=d.items||{};
+    let html='';
+    for(const cat of["A","B","C"]){
+      const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
+      const lim=l[cat]||{min:0,target:0};
+      const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
+      const catItems=items[cat]||[];
+      html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
+      if(catItems.length>0){
+        html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
+        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td><button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">🗑️ Delete</button></td></tr>').join("")+
+        '</tbody></table>';
+      }else{
+        html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
+      }
+      html+='</div>';
+    }
+    c.innerHTML=html;
+  }catch(e){c.innerHTML='<div class="card">Failed to load queue: '+e+'</div>';}
+}
+async function deleteQueueItem(cat,id){
+  if(!confirm("Delete this item from queue?"))return;
+  const d=await api("queue/"+cat+"/delete","POST",{contentId:id});
+  toast(d.ok?"🗑️ Item deleted":"❌ Failed");
+  loadQueue();
 }
 
 async function loadAI(){

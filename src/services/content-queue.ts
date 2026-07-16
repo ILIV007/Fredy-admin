@@ -176,6 +176,23 @@ export class ContentQueue {
     return [...all[0], ...all[1], ...all[2]];
   }
 
+  /** Get all items in a category queue (for dashboard display). */
+  async listItems(category: Category): Promise<QueuedContent[]> {
+    const queue = await this.getQueue(category);
+    // Filter out expired items.
+    const now = Date.now();
+    return queue.filter((item) => item.expiresAt > now);
+  }
+
+  /** Delete a specific item from a category queue by content ID. */
+  async deleteItem(category: Category, contentId: string): Promise<boolean> {
+    const queue = await this.getQueue(category);
+    const filtered = queue.filter((item) => item.content.id !== contentId);
+    if (filtered.length === queue.length) return false; // Not found.
+    await this.saveQueue(category, filtered);
+    return true;
+  }
+
   /** Clear the queue for a category. */
   async clear(category: Category): Promise<void> {
     await this.deps.kv.delete(queueKey(category));
