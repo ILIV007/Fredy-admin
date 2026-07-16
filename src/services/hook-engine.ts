@@ -30,7 +30,9 @@ const recentHooks: string[] = [];
 const MAX_RECENT = 20;
 
 export class HookEngine {
-  constructor(private readonly deps: HookEngineDeps) {}
+  constructor(_deps: HookEngineDeps) {
+    void _deps;
+  }
 
   /** Generate a dynamic hook for a ReadyContent. */
   generate(content: ReadyContent): string {

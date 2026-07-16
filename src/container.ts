@@ -151,6 +151,7 @@ export function buildContainer(env: Env): Container {
     qualityEngine,
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
+    kv, // for anti-repeat recent-hashes loading
   });
 
   // Layer 6: Queue + Categories

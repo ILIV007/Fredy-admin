@@ -1,16 +1,26 @@
 /**
  * src/entry/cron.ts
- * Cron trigger handler. Single cron (every 5 minutes).
- * Runs: scheduler tick + source refresh + scheduled queue processing.
+ * Cloudflare cron trigger handler (backup).
  *
- * The cron handler also runs the silent scheduling fallback queue:
- *   List due messages from KV (fredy:sched:queue:*) and send them via
+ * Architecture:
+ *   - Primary scheduler: external service (cron-job.org) calls /internal/tick
+ *     every 2 hours. This is the main driver.
+ *   - Backup scheduler: Cloudflare internal cron fires every 24 hours
+ *     (configured in wrangler.toml as crons = ["0 slash-star 24 star-star star"]).
+ *     This is a safety net in case cron-job.org stops working.
+ *
+ * SINGLE POINT OF FAILURE: if cron-job.org goes down, posts may be
+ * delayed by up to 24 hours (until the backup cron fires). Recommended
+ * mitigation: set up an uptime monitor on /internal/tick that alerts
+ * the admin via a separate channel (not this bot) if it stops receiving
+ * successful responses.
+ *
+ * The handler also runs the silent scheduling fallback queue:
+ *   List due messages from KV (fredy:sched:queue:...) and send them via
  *   TelegramService.publishToChannel. This catches messages that Telegram
  *   silently failed to schedule (returned ok:true but sent immediately).
  *
- * Pattern inherited from AI Admin src/index.js processScheduledQueue (lines 427-469).
- *
- * See ARCHITECTURE_RULES.md §3.1, §21.8.
+ * See ARCHITECTURE_RULES.md section 3.1, 21.8.
  */
 
 import type { Container, Env } from "../types/env";

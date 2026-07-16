@@ -1,6 +1,8 @@
 # ============================================================
 # Fredy — Cloudflare Worker Configuration
-# Version: 1.4.0
+# Fredy Worker configuration. App version is in VERSION file and
+# src/core/constants.ts (APP_VERSION). This config version tracks the
+# wrangler.toml schema, not the app version.
 # Phase: Production Deployment
 # ============================================================
 

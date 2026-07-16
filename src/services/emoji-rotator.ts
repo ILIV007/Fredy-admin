@@ -25,7 +25,7 @@ export class EmojiRotator {
 
     // For each emoji in the pool, find when it was last used.
     // Pick the one with the oldest (or no) last use.
-    let bestEmoji = SOURCE_EMOJI_POOL[0]!;
+    let bestEmoji: string = SOURCE_EMOJI_POOL[0]!;
     let bestLastUse = Infinity;
 
     for (const emoji of SOURCE_EMOJI_POOL) {

@@ -32,7 +32,10 @@ const CREDIBLE_SOURCES: Readonly<Record<string, "high" | "medium" | "low">> = {
 };
 
 export class EnrichmentEngine {
-  constructor(private readonly deps: EnrichmentEngineDeps) {}
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(_deps: EnrichmentEngineDeps) {
+    void _deps;
+  }
 
   /** Enrich a StandardPost with provider-specific metadata. */
   async enrich(post: StandardPost): Promise<StandardPost> {
@@ -213,7 +216,7 @@ export class EnrichmentEngine {
   private enrichWikimedia(raw: SourceItem): Partial<ProviderEnrichment> {
     const meta = (raw.metadata ?? {}) as Record<string, unknown>;
     return {
-      publishDate: null,
+      publishDate: undefined,
       extra: { year: meta["year"] },
     };
   }

@@ -12,7 +12,7 @@
 
 import { DEBUG_RING_BUFFER_CAPACITY } from "../core/constants";
 import { debugErrorsKey, debugUpdatesKey, debugRawKey } from "../core/storage/keys";
-import type { DebugEvent, DebugEventName, DebugLogLevel } from "../types/debug";
+import type { DebugEvent, DebugEventName } from "../types/debug";
 
 export interface LoggerDeps {
   readonly kv: KVNamespace;

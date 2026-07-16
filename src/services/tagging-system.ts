@@ -80,7 +80,9 @@ const SOURCE_TAGS: Readonly<Record<string, readonly string[]>> = {
 const MAX_TAGS = 8;
 
 export class TaggingSystem {
-  constructor(private readonly deps: TaggingSystemDeps) {}
+  constructor(_deps: TaggingSystemDeps) {
+    void _deps;
+  }
 
   /** Assign tags to a StandardPost. Returns a new post with tags. */
   assignTags(post: StandardPost): StandardPost {

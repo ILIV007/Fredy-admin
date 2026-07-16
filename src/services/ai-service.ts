@@ -29,6 +29,7 @@ import type { FallbackHandler } from "./fallback-handler";
 import type { TokenTracker } from "./token-tracker";
 import type { QualityEngine } from "./quality-engine";
 import type { Logger } from "./logger";
+import type { KVStore } from "./kv-store";
 
 export interface AIServiceDeps {
   readonly providers: readonly AIProvider[];
@@ -42,6 +43,11 @@ export interface AIServiceDeps {
   readonly qualityEngine: QualityEngine;
   readonly logger: Logger;
   readonly settings: () => Promise<FredySettings>;
+  /** Optional KV store for loading recent AI content hashes (anti-repeat).
+   *  When provided, the AI service loads the last N published content hashes
+   *  and passes them to the quality engine so it can detect near-duplicate
+   *  AI output before the content reaches the publish stage. */
+  readonly kv?: KVStore;
 }
 
 export interface GenerateWithQualityResult extends GenerateResult {
@@ -167,6 +173,19 @@ export class AIService {
     );
 
     // Step 6: evaluate quality.
+    // Load recent AI content hashes from KV (anti-repeat mechanism).
+    // This prevents the AI from generating near-duplicate content on
+    // consecutive ticks. The quality engine compares the new content's
+    // hash against this list.
+    let recentHashes: string[] = [];
+    if (this.deps.kv) {
+      try {
+        recentHashes = await this.deps.kv.getJson<string[]>("fredy:ai:recent-hashes") ?? [];
+      } catch {
+        recentHashes = [];
+      }
+    }
+
     const quality = await this.deps.qualityEngine.evaluate({
       content,
       sourceItem: request.raw,
@@ -175,10 +194,22 @@ export class AIService {
         minScore: aiConfig.qualityThreshold,
         rejectDuplicates: settings.quality.duplicateDetection,
         duplicateTtlHours: settings.quality.duplicateTtlHours,
-        recentHashes: [], // TODO: load from KV in Phase 8
+        recentHashes,
         requestedLanguage: prompt.resolvedLanguage,
       },
     });
+
+    // If quality passed, record the new hash in the recent-hashes list
+    // (keep last 50).
+    if (quality.passed && this.deps.kv) {
+      try {
+        const newHash = await this.computeContentHash(content.text);
+        const updated = [...recentHashes, newHash].slice(-50);
+        await this.deps.kv.setJson("fredy:ai:recent-hashes", updated, 7 * 24 * 3600);
+      } catch {
+        // non-fatal — anti-repeat is best-effort
+      }
+    }
 
     const totalTime = Date.now() - startTime;
     const estimatedCost = this.deps.tokenTracker.estimateCost(
@@ -218,6 +249,19 @@ export class AIService {
     const preferred = configured.filter((p) => p.id === this.deps.preferred);
     const others = configured.filter((p) => p.id !== this.deps.preferred);
     return [...preferred, ...others];
+  }
+
+  /** Compute a simple hash of AI-generated text for anti-repeat detection.
+   *  Uses a fast non-crypto hash (djb2) — collisions are acceptable here
+   *  since this is a soft quality signal, not a dedup gate. */
+  private async computeContentHash(text: string): Promise<string> {
+    const normalized = text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 500);
+    let hash = 5381;
+    for (let i = 0; i < normalized.length; i++) {
+      hash = ((hash << 5) + hash) + normalized.charCodeAt(i);
+      hash = hash & hash;
+    }
+    return `ai-${Math.abs(hash).toString(36)}`;
   }
 
   // ────────────────────────────────────────────────────────────

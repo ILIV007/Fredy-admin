@@ -205,42 +205,28 @@ export class ContentManager {
 
     // ── Stage 8: Quality Score ─────────────────────────────
     // AI succeeded but quality may be below threshold.
-    // Use AI content anyway with threshold-bumped score (format-only fallback).
+    // IMPORTANT: if quality is below threshold, REJECT immediately — do NOT
+    // enqueue. Previously, the code enqueued low-quality content with a fake
+    // `passed: true`, which wasted a queue slot and AI tokens (the content
+    // would later be rejected by finalPublisher anyway). Now we reject here
+    // so the caller (processForCategory) can try the next source item.
     if (!aiResult.quality || !aiResult.quality.passed) {
       const reason = aiResult.quality?.hardReject ? "quality_hard_reject" : "quality_below_threshold";
       const detail = aiResult.quality?.hardRejectReason ?? `Score ${aiResult.quality?.overallScore ?? 0} < ${settings.ai.qualityThreshold}`;
-      this.deps.logger.warn("quality.reject_fallback", {
+      this.deps.logger.warn("quality.reject", {
         contentId: resolvedItem.id,
         reason,
         detail,
-        message: "Quality below threshold — using format-only fallback",
+        score: aiResult.quality?.overallScore ?? 0,
+        threshold: settings.ai.qualityThreshold,
+        message: "Quality below threshold — rejecting (not enqueuing)",
       });
-      // Use the AI content anyway with a score at threshold.
-      const realScore = aiResult.quality?.overallScore ?? 0;
-      const fallbackQuality = {
-        passed: true,
-        overallScore: realScore, // Keep real score
-        dimensionScores: aiResult.quality?.dimensionScores ?? [],
-        hardReject: false,
-        minScore: settings.ai.qualityThreshold,
-      };
-      post = { ...post, score: realScore };
-      try {
-        const readyContent = await this.deps.formatter.buildReadyContent(
-          resolvedItem,
-          aiResult.content!,
-          fallbackQuality as never,
-          aiResult.provider,
-          aiResult.model,
-          aiResult.tokensUsed,
-          aiResult.estimatedCost,
-        );
-        if (!skipDedup) await this.deps.duplicateDetector.record(item);
-        await this.deps.queue.enqueue(readyContent);
-        return { ok: true, content: readyContent, item, stage: "complete" };
-      } catch (error) {
-        return this.reject("format", "ai_failed", `Format fallback failed: ${this.errMsg(error)}`, item);
-      }
+      return this.reject(
+        "quality_score",
+        reason,
+        `Quality ${aiResult.quality?.overallScore ?? 0} < ${settings.ai.qualityThreshold}: ${detail}`,
+        item,
+      );
     }
 
     // Attach quality score to the StandardPost.

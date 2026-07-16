@@ -25,7 +25,9 @@ const IMAGE_URL_PATTERNS = [
 ];
 
 export class MediaHandler {
-  constructor(private readonly deps: MediaHandlerDeps) {}
+  constructor(_deps: MediaHandlerDeps) {
+    void _deps;
+  }
 
   /** Validate a media URL. */
   validate(media: ContentMedia | null): { ok: boolean; reason?: string } {

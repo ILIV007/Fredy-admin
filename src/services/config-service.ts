@@ -81,7 +81,7 @@ export class ConfigService {
         console.warn("[config] validation failed, using defaults for invalid sections:", validated.errors);
         settings = this.mergeWithDefaults(migrated);
       } else {
-        settings = validated.data as FredySettings;
+        settings = validated.data as unknown as FredySettings;
       }
     }
 
@@ -123,7 +123,7 @@ export class ConfigService {
   ): Promise<ConfigUpdateResult> {
     const key = String(adminId);
     const current = await this.getSettings(key);
-    const merged = this.deepMerge(current as Record<string, unknown>, patch as Record<string, unknown>);
+    const merged = this.deepMerge(current as unknown as Record<string, unknown>, patch as unknown as Record<string, unknown>);
     const validated = this.deps.registry.validateAll(merged);
 
     if (!validated.ok) {
@@ -135,7 +135,7 @@ export class ConfigService {
     }
 
     await this.deps.repository.save(key, validated.data);
-    const settings = validated.data as FredySettings;
+    const settings = validated.data as unknown as FredySettings;
     this.deps.cache.set(key, settings);
     return { ok: true, settings };
   }
@@ -155,7 +155,7 @@ export class ConfigService {
   async resetSettings(adminId: string | number): Promise<FredySettings> {
     const key = String(adminId);
     const defaults = this.buildDefaults();
-    await this.deps.repository.save(key, defaults);
+    await this.deps.repository.save(key, defaults as unknown as Record<string, unknown>);
     this.deps.cache.set(key, defaults);
     return defaults;
   }
@@ -256,7 +256,7 @@ export class ConfigService {
         };
       }
       await this.deps.repository.save(key, validated.data);
-      const settings = validated.data as FredySettings;
+      const settings = validated.data as unknown as FredySettings;
       this.deps.cache.set(key, settings);
       return { ok: true, settings };
     } catch (error) {
@@ -311,7 +311,7 @@ export class ConfigService {
         result[key] = value;
       }
     }
-    return result as FredySettings;
+    return result as unknown as FredySettings;
   }
 
   /** Deep-merge a patch into a target. Arrays are replaced, not concatenated. */

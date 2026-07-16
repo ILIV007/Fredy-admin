@@ -39,9 +39,10 @@ export class SourceFormatter {
   }
 
   /** Record an emoji as used (persist to state). */
-  private async recordEmoji(emoji: string): Promise<void> {
+  private async recordEmoji(_emoji: string): Promise<void> {
     try {
-      const state = await this.deps.state();
+      const _state = await this.deps.state();
+      void _state;
       // newHistory was unused — removed.
       // Update state with new history. We need config to persist.
       // Since SourceFormatter doesn't have direct config access,

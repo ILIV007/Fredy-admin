@@ -8,7 +8,7 @@
 
 import { buildSystemPrompt, buildUserPrompt } from "../core/ai/prompt-templates";
 import type { PromptProfile } from "../core/ai/prompt-templates";
-import type { Soul } from "../services/soul-loader";
+import type { Soul } from "../types/ai";
 import type { Category } from "../types/category";
 import type { SourceItem } from "../types/api";
 import type { LanguageInjector } from "./language-injector";

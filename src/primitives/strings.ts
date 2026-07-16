@@ -14,9 +14,12 @@ export function truncate(input: string, maxLen: number, suffix = "…"): string 
   return input.slice(0, Math.max(0, maxLen - suffix.length)) + suffix;
 }
 
-/** Escape HTML special characters. */
-export function escapeHtml(input: string): string {
-  return input
+/** Escape HTML special characters. Handles null/undefined (returns "").
+ *  This is the single source of truth for HTML escaping in the project.
+ *  Used by: ux-layer.ts, admin/helpers/formatting.ts, orchestrators/admin.ts. */
+export function escapeHtml(input: string | null | undefined): string {
+  if (input === null || input === undefined) return "";
+  return String(input)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -51,7 +54,9 @@ export function isMostlyUppercase(input: string, threshold = 0.7): boolean {
   return upper / letters.length >= threshold;
 }
 
-/** Insert half-space (ZWNJ) after common Persian prefixes. Stub — real impl in Phase 1.4. */
+/** Insert half-space (ZWNJ) after common Persian prefixes and before
+ *  common suffixes. Also fixes common mistakes like "می شود" → "می‌شود".
+ *  Called by ux-layer.ts when content.language === "fa". */
 export function fixPersianHalfSpaces(input: string): string {
   if (!input) return input;
   const ZWNJ = "\u200c"; // Zero-Width Non-Joiner

@@ -3,8 +3,11 @@
  * Text formatting helpers for admin panel messages.
  *
  * Centralizes status badges, toggle labels, and section dividers so
- * every screen uses the same visual grammar.
+ * that all admin screens use consistent formatting.
  */
+
+import { escapeHtml } from "../../primitives/strings";
+export { escapeHtml };
 
 /** Format a boolean as a status badge. */
 export function statusBadge(isOn: boolean): string {
@@ -59,14 +62,8 @@ export function kv(key: string, value: string | number | boolean | null | undefi
   return `<b>${escapeHtml(key)}:</b> ${displayValue}`;
 }
 
-/** Escape HTML special characters in a string. */
-export function escapeHtml(input: string | null | undefined): string {
-  if (input === null || input === undefined) return "";
-  return String(input)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+/** Escape HTML — re-exported from primitives/strings.ts (single source of truth). */
+// (escapeHtml is imported and re-exported at the top of this file)
 
 /** Truncate a string for display. */
 export function truncate(input: string | null | undefined, maxLen: number, suffix = "…"): string {

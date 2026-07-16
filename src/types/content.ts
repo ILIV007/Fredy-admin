@@ -305,6 +305,9 @@ export interface ProviderEnrichment {
   readonly publishDate?: number;
   readonly sourceCredibility?: "high" | "medium" | "low" | "unknown";
 
+  // Tags (Dev.to, StackExchange, GitHub topics — shared field)
+  readonly tags?: readonly string[];
+
   // Tech Tools-specific
   readonly officialSite?: string;
   readonly documentation?: string;

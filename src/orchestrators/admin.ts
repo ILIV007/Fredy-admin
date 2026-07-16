@@ -17,6 +17,7 @@ import type { Container } from "../types/env";
 import type { TelegramCallbackQuery, TelegramMessage, TelegramUpdate } from "../types/telegram";
 import { ScreenRegistry, CommandRegistry } from "../admin/registry";
 import type { CommandContext, ScreenAction, ScreenContext } from "../admin/registry";
+import { escapeHtml } from "../primitives/strings";
 import { registerScreens } from "../admin/screens/register";
 import { registerCommands } from "../admin/commands/register";
 import { unauthorizedMessage } from "../admin/helpers/auth";
@@ -417,11 +418,4 @@ export class AdminOrchestrator {
   }
 }
 
-/** Escape HTML special characters. */
-function escapeHtml(input: string | null | undefined): string {
-  if (input === null || input === undefined) return "";
-  return String(input)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// escapeHtml is imported from primitives/strings.ts — single source of truth.

@@ -61,11 +61,19 @@ In `wrangler.toml` `[vars]`:
 ## 6. Pre-Deploy Verification
 
 - [ ] `npm install` completes without errors
-- [ ] `npx tsc --noEmit` passes (TypeScript strict mode, zero errors)
+- [ ] `npx tsc --noEmit` passes (TypeScript strict mode, **zero errors** — not 33, ZERO)
+- [ ] `VERSION` file, `src/core/constants.ts` (`APP_VERSION`), and `package.json` (`"version"`) all have the same version number
 - [ ] `wrangler.toml` has correct KV namespace ID
 - [ ] All secrets are set (verify with `wrangler secret list`)
 - [ ] No API keys or secrets in `wrangler.toml` `[vars]` (only non-sensitive config)
 - [ ] `.gitignore` includes `node_modules/`, `.wrangler/`, `.dev.vars`
+
+## 6.5. Scheduling & Operational Risks
+
+- [ ] **External cron configured**: cron-job.org (or equivalent) calls `POST /internal/tick` every 2 hours with `Authorization: Bearer <CRON_KEY>`
+- [ ] **Backup cron active**: `wrangler.toml` has `crons = ["0 */24 * * *"]` (fires every 24h as safety net)
+- [ ] **⚠️ Single point of failure acknowledged**: if cron-job.org goes down, posts may be delayed up to 24h. Set up an **uptime monitor** on `/internal/tick` that alerts the admin via a **separate channel** (not this bot) if it stops receiving 200 responses.
+- [ ] **Dedup store cleared** (if upgrading from a version with hash collision bugs — e.g., v6.7.0 or earlier): call `POST /Manager/api/clear/dedup` once after deploy to remove stale `sha1("")` records.
 
 ## 7. Deploy
 

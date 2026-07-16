@@ -102,13 +102,13 @@ export class ConfigSectionRegistry {
       const currentVersion =
         (sectionInput as { _version?: number })?._version ?? 0;
       if (currentVersion < section.version && section.migrate) {
-        let migrated = sectionInput;
+        let migrated: unknown = sectionInput;
         for (let v = currentVersion; v < section.version; v++) {
           migrated = section.migrate(v, migrated);
         }
-        result[section.key] = migrated;
+        result[section.key] = migrated as Record<string, unknown>;
       } else {
-        result[section.key] = sectionInput;
+        result[section.key] = sectionInput as Record<string, unknown>;
       }
     }
     // Preserve top-level non-section fields (like approveMode) that are

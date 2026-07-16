@@ -19,7 +19,7 @@ import type { HookEngine } from "./hook-engine";
 import type { SourceFormatter } from "./source-formatter";
 import type { Logger } from "./logger";
 import { TELEGRAM_TEXT_LIMIT, TELEGRAM_CAPTION_LIMIT } from "../core/constants";
-import { fixPersianHalfSpaces } from "../primitives/strings";
+import { fixPersianHalfSpaces, escapeHtml } from "../primitives/strings";
 
 export interface UXLayerDeps {
   readonly logger: Logger;
@@ -87,7 +87,7 @@ export class UXLayerImpl implements UXLayer {
 
     // Hook (bold) — only if different from body.
     if (hook && body && !body.startsWith(hook)) {
-      parts.push(`<b>${this.escapeHtml(hook)}</b>`);
+      parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
 
@@ -97,7 +97,7 @@ export class UXLayerImpl implements UXLayer {
     // Source as blockquote — only for URLs with meaningful paths.
     if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
       parts.push("");
-      parts.push(`<blockquote><a href="${this.escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
     }
 
     // Channel footer as blockquote.
@@ -128,20 +128,20 @@ export class UXLayerImpl implements UXLayer {
 
     // Triple-backtick code blocks (may span multiple lines).
     work = work.replace(/```([\s\S]*?)```/g, (_, code: string) => {
-      const escaped = this.escapeHtml(code.replace(/^\n/, "").replace(/\n$/, ""));
+      const escaped = escapeHtml(code.replace(/^\n/, "").replace(/\n$/, ""));
       codeSegments.push(`<pre><code>${escaped}</code></pre>`);
       return `__FREDY_CODE_${codeSegments.length - 1}__`;
     });
 
     // Single-backtick inline code (single line, no newlines inside).
     work = work.replace(/`([^`\n]+)`/g, (_, code: string) => {
-      const escaped = this.escapeHtml(code);
+      const escaped = escapeHtml(code);
       codeSegments.push(`<code>${escaped}</code>`);
       return `__FREDY_CODE_${codeSegments.length - 1}__`;
     });
 
     // 2. Escape HTML special chars in the remaining (non-code) text.
-    let html = this.escapeHtml(work);
+    let html = escapeHtml(work);
 
     // 3. Convert **bold** to <b>bold</b>.
     html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
@@ -223,18 +223,20 @@ export class UXLayerImpl implements UXLayer {
 
     // Hook (bold).
     if (hook && body && !body.startsWith(hook)) {
-      parts.push(`<b>${this.escapeHtml(hook)}</b>`);
+      parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
 
-    // Body — for captions, limit to 800 chars.
-    const shortBody = body.length > 800 ? body.slice(0, 797) : body;
+    // Body — for captions, limit to 800 chars using HTML-aware truncation.
+    // IMPORTANT: must use safeTruncate (which closes open tags) instead of
+    // raw slice(0, 797) — raw slice can cut mid-tag and produce broken HTML.
+    const shortBody = body.length > 800 ? this.safeTruncate(body, 797) : body;
     parts.push(this.formatBody(shortBody));
 
     // Source as blockquote.
     if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
       parts.push("");
-      parts.push(`<blockquote><a href="${this.escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
     }
 
     // Channel footer as blockquote.
@@ -289,14 +291,7 @@ export class UXLayerImpl implements UXLayer {
     return truncated;
   }
 
-  /** Escape HTML special characters. */
-  private escapeHtml(input: string | null | undefined): string {
-    if (input === null || input === undefined) return "";
-    return String(input)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
+  // escapeHtml is imported from primitives/strings.ts — single source of truth.
 }
 
 // Re-export the class as UXLayer for backward compatibility.
