@@ -151,9 +151,9 @@ export class DuplicateDetector {
     return `t${Math.abs(hash).toString(36)}`;
   }
 
-  /** Hash a URL for KV key (URLs can be long).
-   *  Uses SHA-1 for collision resistance. */
+  /** Hash a URL for KV key (URLs can be long). */
   private async hashUrl(url: string): Promise<string> {
+    // Use SHA-1 for collision resistance — djb2 (32-bit) had collision risk.
     return sha1(`url:${url}`);
   }
 

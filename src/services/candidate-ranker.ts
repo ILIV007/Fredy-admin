@@ -39,16 +39,18 @@ export interface ScoreFactors {
 
 /** Known credible sources and their credibility scores (0–100). */
 const CREDIBILITY_SCORES: Readonly<Record<string, number>> = {
-  "github.com": 95,
+  "github": 95,
   "github-releases": 95,
   "github-trending": 90,
-  "dev.to": 75,
-  "stackoverflow.com": 85,
+  "devto": 75,
+  "stackexchange": 85,
   "hackernews": 70,
-  "newsapi.org": 65,
-  "nasa.gov": 90,
-  "xkcd.com": 60,
+  "news": 65,
+  "nasa": 90,
+  "xkcd": 60,
   "wikimedia": 70,
+  "reddit": 40,
+  "joke": 30,
 };
 
 /** Tech relevance keywords (bonus for matching content). */

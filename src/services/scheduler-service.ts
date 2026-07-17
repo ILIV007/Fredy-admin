@@ -573,7 +573,15 @@ export class SchedulerService {
 
     return {
       enabled: settings.scheduler.enabled,
-      today: plan,
+      today: plan ? {
+        ...plan,
+        slots: await Promise.all(
+          plan.slots.map(async (s) => ({
+            ...s,
+            fired: await this.deps.dailyPlanner.isSlotFired(s),
+          })),
+        ),
+      } : null,
       nextSlot,
       queueDepth: totalQueue,
       lastFiredAt: lastPublished,

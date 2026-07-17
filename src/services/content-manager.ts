@@ -300,10 +300,6 @@ export class ContentManager {
     }
 
     // ── Stage 8: Record in dedup store ──────────────────────
-    // IMPORTANT: Record happens here (after formatting, before enqueue) so
-    // that the same source item can't be processed again. This prevents
-    // duplicates even if the queue item is never published (e.g., quality
-    // gate rejects it at publish time).
     if (!skipDedup) await this.deps.duplicateDetector.record(item);
 
     // ── Stage 9: Enqueue ────────────────────────────────────
