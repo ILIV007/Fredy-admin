@@ -100,10 +100,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from category ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `╔══════════════════════════╗`,
+              `   📤 <b>MANUAL PUBLISH — CATEGORY ${arg}</b>`,
+              `╚══════════════════════════╝`,
+              ``,
+              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
+              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
+              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
@@ -205,10 +211,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from: ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `╔══════════════════════════╗`,
+              `   📤 <b>MANUAL PUBLISH — ${arg}</b>`,
+              `╚══════════════════════════╝`,
+              ``,
+              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
+              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
+              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }

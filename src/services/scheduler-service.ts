@@ -392,29 +392,29 @@ export class SchedulerService {
     try {
       finalPost = await this.deps.uxLayer.transform(content);
     } catch (err) {
-      // If even the transform fails, send a minimal plain-text notice.
       this.deps.logger.warn("scheduler.transform_failed", {
         contentId: content.id,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Minimal fallback notice with professional UI.
       await this.deps.tg.sendMessage(adminId, [
-        `🤖 <b>Auto-publish notice</b>`,
+        `🤖 <b>Auto-Publish Notice</b>`,
         ``,
-        `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-        `<b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}`,
-        `<b>URL:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}`,
+        `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
+        `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+        `<blockquote>📰 <b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}</blockquote>`,
+        `<blockquote>🔗 <b>Source:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}</blockquote>`,
         pubResult.ok
-          ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
-          : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
+          ? `<blockquote>✅ <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
+          : `<blockquote>❌ <b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
       return;
     }
 
-    // 2. Send the formatted post (photo or text). Fall back to text-only
-    //    if sendPhoto fails.
+    // 2. Send the formatted post (photo or text). Fall back to text-only if sendPhoto fails.
     const sentPostNotice = pubResult.ok
-      ? "🤖 <b>Auto-published (scheduler) — copy of channel post:</b>"
-      : "⚠️ <b>Auto-publish FAILED — formatted post for manual forwarding:</b>";
+      ? "🤖 <b>📤 Auto-Published Post — Copy of Channel Message:</b>"
+      : "⚠️ <b>Auto-Publish FAILED — Post for Manual Forwarding:</b>";
 
     try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
@@ -427,40 +427,45 @@ export class SchedulerService {
         });
       }
     } catch (err) {
-      // sendPhoto or sendMessage failed — retry with text-only fallback.
       this.deps.logger.warn("scheduler.send_formatted_failed", {
         contentId: content.id,
         error: err instanceof Error ? err.message : String(err),
       });
       try {
         if (finalPost.media && finalPost.media.type === "image") {
-          // Photo failed — send as text.
           await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
             parse_mode: "HTML",
           });
         }
-      } catch { /* non-fatal */
-        // Even text-only failed — give up on the formatted post; the
-        // summary below will still go out.
-      }
+      } catch { /* non-fatal */ }
     }
 
-    // 3. Send the summary notification (always — even if the formatted
-    //    post failed to send, this gives the admin the key facts).
-    await this.deps.tg.sendMessage(adminId, [
-      pubResult.ok
-        ? `✅ <b>Auto-published successfully</b>`
-        : `❌ <b>Auto-publish failed</b>`,
+    // 3. Send the summary report with professional UI.
+    //    v7.5.0: Blockquotes for each field, status banner, metadata grid.
+    const statusBanner = pubResult.ok
+      ? `╔══════════════════════════╗\n   ✅ <b>AUTO-PUBLISHED SUCCESSFULLY</b>\n╚══════════════════════════╝`
+      : `╔══════════════════════════╗\n   ❌ <b>AUTO-PUBLISH FAILED</b>\n╚══════════════════════════╝`;
+
+    const qualityEmoji = content.quality.overallScore >= 80 ? "🟢" : content.quality.overallScore >= 60 ? "🟡" : "🔴";
+
+    const summaryLines = [
+      statusBanner,
       ``,
-      `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-      `<b>AI:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}`,
-      `<b>Quality:</b> ${content.quality.overallScore}`,
-      `<b>Tokens:</b> ${content.tokensUsed}`,
-      `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+      `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
+      `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+      `<blockquote>🔌 <b>Source Plugin:</b> ${this.escapeHtml(content.pluginId)}</blockquote>`,
+      `<blockquote>🤖 <b>AI Model:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}</blockquote>`,
+      `<blockquote>${qualityEmoji} <b>Quality Score:</b> ${content.quality.overallScore}/100</blockquote>`,
+      `<blockquote>📊 <b>Tokens Used:</b> ${content.tokensUsed}</blockquote>`,
+      `<blockquote>🔖 <b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code></blockquote>`,
       pubResult.ok
-        ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
-        : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
-    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        ? `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
+        : `<blockquote>⚠️ <b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+    ];
+
+    await this.deps.tg.sendMessage(adminId, summaryLines.join("\n"), {
+      parse_mode: "HTML",
+    }).catch(() => {});
   }
 
   /** Escape HTML special characters for safe Telegram display. */

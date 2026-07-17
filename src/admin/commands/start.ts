@@ -1,12 +1,13 @@
 /**
  * src/admin/commands/start.ts
- * /start command — shows overview + help, with an inline Language button.
+ * /start command — shows a brief overview with a single "🌐 Language" button.
  *
- * v7.4.5: The Language button on /start controls the BOT UI language
- * (how admin messages are displayed), NOT the post content language.
- * The post content language is set via main menu → Post Language.
+ * v7.5.0: The Language button on /start opens a NEW message with language
+ * selection options (English / فارسی). This is cleaner than showing both
+ * language buttons inline on the welcome message.
  *
- * Default bot UI language: English.
+ * The language controlled here is the BOT UI language (how admin messages
+ * are displayed), NOT the post content language.
  */
 
 import type { Command, CommandContext } from "../registry";
@@ -32,9 +33,14 @@ export async function setBotUiLanguage(adminId: number, kv: KVStore, lang: BotUi
   await kv.set(BOT_UI_LANG_KEY(adminId), lang);
 }
 
+/** Get the display name for a language. */
+export function langDisplayName(lang: BotUiLanguage): string {
+  return lang === "fa" ? "فارسی" : "English";
+}
+
 export const startCommand: Command = {
   name: "/start",
-  description: "Welcome message with Language inline button",
+  description: "Welcome message with Language button",
 
   async handle(ctx: CommandContext): Promise<void> {
     const { container, adminId, chatId } = ctx;
@@ -42,11 +48,10 @@ export const startCommand: Command = {
 
     const lines = buildWelcomeMessage(curLang);
 
-    // Inline keyboard with Language button + Open Dashboard.
+    // Single Language button + Open Dashboard button.
     const buttons: InlineKeyboardButton[][] = [
       [
-        { text: curLang === "en" ? "🟢 English" : "English", callback_data: "botui:set:en" },
-        { text: curLang === "fa" ? "🟢 فارسی" : "فارسی", callback_data: "botui:set:fa" },
+        { text: `🌐 Language: ${langDisplayName(curLang)}`, callback_data: "botui:open" },
       ],
       [
         { text: curLang === "fa" ? "📋 باز کردن داشبورد" : "📋 Open Dashboard", callback_data: "menu:main" },
@@ -71,34 +76,69 @@ export function buildWelcomeMessage(lang: BotUiLanguage): string {
     return [
       `👋 <b>به فردی خوش آمدید!</b>`,
       ``,
-      `<blockquote>🤖 <b>فردی</b> یک موتور محتوای هوش مصنوعی برای کانال تلگرام ILIVIR3 است.</blockquote>`,
-      `<blockquote>📡 محتوا را از ۱۲ پلاگین منبع دریافت می‌کند (GitHub، Dev.to، HackerNews، NASA، NewsAPI و غیره)</blockquote>`,
-      `<blockquote>🧠 آن‌ها را از طریق هوش مصنوعی Gemini/OpenRouter بازنویسی می‌کند</blockquote>`,
-      `<blockquote>📅 با کنترل کیفیت در یک زمان‌بندی قابل تنظیم منتشر می‌کند</blockquote>`,
+      `<blockquote>🤖 <b>فردی</b> — موتور محتوای هوش مصنوعی برای کانال تلگرام ILIVIR3</blockquote>`,
+      `<blockquote>📡 ۱۲ پلاگین منبع: GitHub، Dev.to، HackerNews، NASA، NewsAPI و غیره</blockquote>`,
+      `<blockquote>🧠 بازنویسی با Gemini/OpenRouter AI</blockquote>`,
+      `<blockquote>📅 زمان‌بندی قابل تنظیم با کنترل کیفیت</blockquote>`,
       ``,
-      `<b>📋 دستورات سریع:</b>`,
-      `  • <code>/menu</code> — باز کردن داشبورد مدیریت`,
-      `  • <code>/help</code> — نمایش همه دستورات`,
-      `  • <code>/stats</code> — مشاهده آمار`,
-      `  • <code>/health</code> — بررسی سلامت سیستم`,
-      ``,
-      `<blockquote>💡 <i>برای تغییر زبان ربات، دکمه زیر را بزنید.</i></blockquote>`,
+      `<b>📋 دستورات:</b>`,
+      `  • <code>/menu</code> — داشبورد مدیریت`,
+      `  • <code>/help</code> — راهنما`,
+      `  • <code>/stats</code> — آمار`,
+      `  • <code>/health</code> — سلامت سیستم`,
     ].join("\n");
   }
   return [
     `👋 <b>Welcome to Fredy!</b>`,
     ``,
-    `<blockquote>🤖 <b>Fredy</b> is an AI-powered content engine for the ILIVIR3 Telegram channel.</blockquote>`,
-    `<blockquote>📡 It fetches content from 12 source plugins (GitHub, Dev.to, HackerNews, NASA, NewsAPI, etc.)</blockquote>`,
-    `<blockquote>🧠 Processes them through Gemini/OpenRouter AI for rewriting</blockquote>`,
-    `<blockquote>📅 Publishes on a configurable schedule with quality control</blockquote>`,
+    `<blockquote>🤖 <b>Fredy</b> — AI-powered content engine for the ILIVIR3 Telegram channel</blockquote>`,
+    `<blockquote>📡 12 source plugins: GitHub, Dev.to, HackerNews, NASA, NewsAPI, and more</blockquote>`,
+    `<blockquote>🧠 AI rewriting via Gemini/OpenRouter</blockquote>`,
+    `<blockquote>📅 Configurable schedule with quality control</blockquote>`,
     ``,
-    `<b>📋 Quick Commands:</b>`,
-    `  • <code>/menu</code> — Open admin dashboard`,
-    `  • <code>/help</code> — Show all commands`,
-    `  • <code>/stats</code> — View statistics`,
-    `  • <code>/health</code> — System health check`,
-    ``,
-    `<blockquote>💡 <i>Tap a button below to change the bot UI language.</i></blockquote>`,
+    `<b>📋 Commands:</b>`,
+    `  • <code>/menu</code> — Admin dashboard`,
+    `  • <code>/help</code> — Help`,
+    `  • <code>/stats</code> — Statistics`,
+    `  • <code>/health</code> — System health`,
   ].join("\n");
+}
+
+/** Build the language selection message (shown when "🌐 Language" is tapped). */
+export function buildLanguageSelectionMessage(lang: BotUiLanguage): string {
+  if (lang === "fa") {
+    return [
+      `🌐 <b>انتخاب زبان ربات</b>`,
+      ``,
+      `<blockquote>زبان فعلی: <b>${langDisplayName(lang)}</b></blockquote>`,
+      `<blockquote>این زبان نحوه نمایش پیام‌های ربات به ادمین را کنترل می‌کند.</blockquote>`,
+      `<blockquote>⚠️ این زبان، زبان محتوای پست‌ها نیست. زبان پست‌ها از منوی اصلی ← Post Language تنظیم می‌شود.</blockquote>`,
+      ``,
+      `<i>برای انتخاب، روی یکی از گزینه‌های زیر بزنید:</i>`,
+    ].join("\n");
+  }
+  return [
+    `🌐 <b>Bot Language Selection</b>`,
+    ``,
+    `<blockquote>Current language: <b>${langDisplayName(lang)}</b></blockquote>`,
+    `<blockquote>This controls how admin messages from the bot are displayed.</blockquote>`,
+    `<blockquote>⚠️ This is NOT the post content language. Post language is set via Main Menu ← Post Language.</blockquote>`,
+    ``,
+    `<i>Tap one of the options below to select:</i>`,
+  ].join("\n");
+}
+
+/** Build the language selection keyboard. */
+export function buildLanguageKeyboard(cur: BotUiLanguage): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        { text: cur === "en" ? "🟢 English ✓" : "English", callback_data: "botui:set:en" },
+        { text: cur === "fa" ? "🟢 فارسی ✓" : "فارسی", callback_data: "botui:set:fa" },
+      ],
+      [
+        { text: cur === "fa" ? "↩️ بازگشت" : "↩️ Back", callback_data: "botui:back" },
+      ],
+    ],
+  };
 }

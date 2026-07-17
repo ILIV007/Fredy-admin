@@ -77,10 +77,10 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble the full post text.
-   *  v7.4.5: Now accepts a maxLen parameter and pre-truncates the BODY so
-   *  that the source blockquote and @ILIVIR3 footer ALWAYS survive.
-   *  Instead of cutting mid-text with "...", we summarize by truncating
-   *  at paragraph/sentence boundaries with a clear continuation marker. */
+   *  v7.5.0: Body is preserved as-is whenever possible. Only when the
+   *  assembled text would exceed Telegram's 4096-char limit do we
+   *  truncate — and we truncate at paragraph/sentence boundaries with
+   *  a clear continuation marker, never mid-word with bare "...". */
   private assembleFullText(
     hook: string,
     body: string,
@@ -95,64 +95,71 @@ export class UXLayerImpl implements UXLayer {
     const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
       + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
 
-    const overheadLen = beforeBody.length + afterBody.length;
-    const bodyBudget = maxLen - overheadLen;
+    // First, try assembling with the FULL body — no truncation.
+    const bodyHtml = this.formatBody(body);
+    const fullResult = beforeBody + bodyHtml + afterBody;
 
-    // Truncate body to fit the budget.
-    let truncatedBody = body;
-    if (bodyBudget > 0 && body.length > bodyBudget) {
-      const safetyMargin = 200;
-      const rawBudget = Math.max(100, bodyBudget - safetyMargin);
-      truncatedBody = this.summarizeText(body, rawBudget);
+    // If it fits, we're done — no truncation needed.
+    if (fullResult.length <= maxLen) {
+      return fullResult;
     }
 
-    const bodyHtml = this.formatBody(truncatedBody);
-    const result = beforeBody + bodyHtml + afterBody;
+    // Otherwise, we need to truncate the body. Compute the budget for
+    // the raw (pre-HTML) body text. We leave a small safety margin for
+    // HTML tags that formatBody will add.
+    const overheadLen = beforeBody.length + afterBody.length;
+    const bodyBudget = maxLen - overheadLen;
+    const safetyMargin = 150; // buffer for HTML tags added by formatBody
+    const rawBudget = Math.max(200, bodyBudget - safetyMargin);
 
-    // Final safety — if still over limit, truncate body HTML but keep source+footer.
-    if (result.length > maxLen) {
+    const truncatedBody = this.summarizeText(body, rawBudget);
+    const truncatedBodyHtml = this.formatBody(truncatedBody);
+    const truncatedResult = beforeBody + truncatedBodyHtml + afterBody;
+
+    // Final safety — if still over limit, hard-truncate the HTML body
+    // but ALWAYS keep source + footer.
+    if (truncatedResult.length > maxLen) {
       const bodyMax = maxLen - beforeBody.length - afterBody.length;
-      const safeBody = this.safeTruncate(bodyHtml, bodyMax > 100 ? bodyMax : 100);
+      const safeBody = this.safeTruncate(truncatedBodyHtml, bodyMax > 100 ? bodyMax : 100);
       return beforeBody + safeBody + afterBody;
     }
 
-    return result;
+    return truncatedResult;
   }
 
   /** Summarize text by truncating at paragraph/sentence boundaries.
-   *  v7.4.5: Instead of cutting mid-text with "...", we try to:
-   *  1. Cut at the last paragraph break before maxLen
-   *  2. If no paragraph, cut at the last sentence end (. ! ? ؟)
-   *  3. If no sentence, cut at the last word boundary
-   *  Then add a clear "continued" marker. */
+   *  v7.5.0: Cleaner truncation — tries paragraph → sentence → word → hard.
+   *  Uses "…" (single ellipsis) as a subtle continuation marker instead
+   *  of a long Persian phrase. */
   private summarizeText(text: string, maxLen: number): string {
     if (text.length <= maxLen) return text;
 
-    // Try to cut at the last paragraph break (double newline) before maxLen.
-    let cut = text.lastIndexOf("\n\n", maxLen);
-    if (cut > maxLen * 0.5) {
-      return text.slice(0, cut).trimEnd() + "\n\n…(ادامه در کامنت)";
+    // 1. Try to cut at the last paragraph break (double newline) before maxLen.
+    const paraCut = text.lastIndexOf("\n\n", maxLen);
+    if (paraCut > maxLen * 0.5) {
+      return text.slice(0, paraCut).trimEnd() + "\n\n…";
     }
 
-    // Try to cut at the last sentence end (. ! ? ؟).
+    // 2. Try to cut at the last sentence end (. ! ? ؟).
     const sentenceEnd = Math.max(
       text.lastIndexOf(". ", maxLen),
       text.lastIndexOf("! ", maxLen),
       text.lastIndexOf("? ", maxLen),
       text.lastIndexOf("؟ ", maxLen),
+      text.lastIndexOf(".\n", maxLen),
     );
     if (sentenceEnd > maxLen * 0.5) {
-      return text.slice(0, sentenceEnd + 1).trimEnd() + "\n\n…(ادامه در کامنت)";
+      return text.slice(0, sentenceEnd + 1).trimEnd() + " …";
     }
 
-    // Try to cut at the last word boundary (space).
+    // 3. Try to cut at the last word boundary (space).
     const wordEnd = text.lastIndexOf(" ", maxLen);
     if (wordEnd > maxLen * 0.5) {
-      return text.slice(0, wordEnd).trimEnd() + " …(ادامه در کامنت)";
+      return text.slice(0, wordEnd).trimEnd() + " …";
     }
 
-    // Last resort: hard cut.
-    return text.slice(0, maxLen).trimEnd() + " …(ادامه در کامنت)";
+    // 4. Last resort: hard cut.
+    return text.slice(0, maxLen).trimEnd() + "…";
   }
 
   /** Convert AI markdown to Telegram HTML.
