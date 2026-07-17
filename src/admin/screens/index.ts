@@ -11,6 +11,7 @@ export { aiScreen } from "./ai";
 export { manualScreen } from "./manual";
 export { scheduleScreen } from "./schedule";
 export { strategyScreen } from "./strategy";
+export { languageScreen } from "./language";
 export { soulScreen } from "./soul";
 export { debugScreen } from "./debug";
 export { statsScreen } from "./stats";

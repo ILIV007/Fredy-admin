@@ -290,18 +290,18 @@ export class AdminOrchestrator {
     await tg.sendChatAction(chatId, "typing").catch(() => {});
 
     try {
-      // If not a command, respond with a helpful Persian message.
+      // If not a command, respond with a helpful message.
       if (!text.startsWith("/")) {
         await tg.sendMessage(chatId, [
-          `👋 <b>ربات مدیریت فردی</b>`,
-          ``,
-          `<blockquote>📩 پیام شما دریافت شد. از دستورات زیر استفاده کنید:</blockquote>`,
-          ``,
-          `• <code>/menu</code> — باز کردن داشبورد مدیریت`,
-          `• <code>/start</code> — باز کردن پنل ادمین`,
-          `• <code>/help</code> — نمایش راهنما`,
-          `• <code>/stats</code> — نمایش آمار`,
-          `• <code>/health</code> — بررسی سلامت سیستم`,
+          "👋 <b>Fredy Admin Bot</b>",
+          "",
+          "I received your message. Use these commands:",
+          "",
+          "<code>/menu</code> — Open admin dashboard",
+          "<code>/start</code> — Open admin panel",
+          "<code>/help</code> — Show help",
+          "<code>/stats</code> — Show statistics",
+          "<code>/health</code> — Health check",
         ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         return;
       }
@@ -311,12 +311,7 @@ export class AdminOrchestrator {
       if (!match) {
         await tg.sendMessage(
           chatId,
-          [
-            `❓ <b>دستور ناشناخته</b>`,
-            ``,
-            `<blockquote>📝 <code>${escapeHtml(text)}</code></blockquote>`,
-            `<blockquote>💡 برای مشاهده دستورات از <code>/help</code> استفاده کنید.</blockquote>`,
-          ].join("\n"),
+          `❓ Unknown command: <code>${escapeHtml(text)}</code>\n\nUse /help to see available commands.`,
           { parse_mode: "HTML" },
         ).catch(() => {});
         return;
@@ -338,12 +333,13 @@ export class AdminOrchestrator {
       console.error("[admin] command handler error:", error);
       const errMsg = error instanceof Error ? error.message : String(error);
 
-      // Send Persian error to user with blockquote UI.
+      // Send error to user so they can see what went wrong.
       await tg.sendMessage(chatId, [
-        `❌ <b>خطا رخ داد</b>`,
-        ``,
-        `<blockquote>🐛 <code>${escapeHtml(errMsg)}</code></blockquote>`,
-        `<blockquote>💡 برای جزئیات بیشتر به منیجر ← لاگ‌ها مراجعه کنید.</blockquote>`,
+        "❌ <b>Error occurred</b>",
+        "",
+        `<code>${escapeHtml(errMsg)}</code>`,
+        "",
+        "<i>Check Manager → Logs for details.</i>",
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     }
   }
@@ -374,6 +370,7 @@ export class AdminOrchestrator {
     if (first === "set") {
       if (second === "scheduler") return "schedule";
       if (second === "strategy") return "strategy";
+      if (second === "language") return "language";
       if (second === "providers") return "providers";
       if (second === "plugins") return "providers";
       if (second === "general" || second === "language" || second === "content" || second === "quality" || second === "debug") return "settings";

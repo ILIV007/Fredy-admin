@@ -54,6 +54,9 @@ export interface SchedulerServiceDeps {
   readonly tg?: TelegramService;
   readonly uxLayer?: UXLayer;
   readonly adminId?: () => number;
+  /** v7.4.4: Dedup detector — used at fire time to catch posts that were
+   * manually published after being enqueued. */
+  readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
 }
 
 export class SchedulerService {
@@ -177,15 +180,46 @@ export class SchedulerService {
     };
   }
 
-  /** Find a due, unfired slot. */
+  /** Find a due, unfired slot.
+   *  v7.4.4: Added grace period — if a slot is more than GRACE_PERIOD_MINUTES
+   *  past due, it's marked as "skipped" (passed) instead of fired. This
+   *  prevents catch-up bursts where multiple overdue slots fire back-to-back
+   *  when the cron eventually runs.
+   *
+   *  Example: slots at 09:41, 12:30, 17:14. Cron runs at 13:00.
+   *  - 09:41 is 179 min overdue → SKIP (mark as fired with "passed")
+   *  - 12:30 is 30 min overdue → within grace → FIRE
+   *  - 17:14 is in the future → skip
+   *
+   *  This way only ONE post fires per cron tick, and missed slots don't
+   *  cause a burst. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
+    const GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
+
     for (const slot of plan.slots) {
-      // Check if slot is due (epochMs <= now).
+      // Skip slots that haven't reached their time yet.
       if (slot.epochMs > now) continue;
 
-      // Check if already fired.
+      // Skip slots that already fired.
       const fired = await this.deps.dailyPlanner.isSlotFired(slot);
       if (fired) continue;
+
+      // v7.4.4: Grace period check — if the slot is too far past due,
+      // mark it as "passed" and skip it. This prevents catch-up bursts.
+      const overdueMs = now - slot.epochMs;
+      if (overdueMs > GRACE_PERIOD_MS) {
+        this.deps.logger.warn("scheduler.skip", {
+          slotIndex: slot.index,
+          date: slot.date,
+          time: slot.time,
+          category: slot.category,
+          overdueMinutes: Math.round(overdueMs / 60_000),
+          message: "Slot past grace period — marking as passed (no catch-up)",
+        });
+        // Mark as fired with "passed" so it's not retried on the next tick.
+        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace-period");
+        continue;
+      }
 
       return slot;
     }
@@ -218,22 +252,39 @@ export class SchedulerService {
     // We need to unwrap it to get the ReadyContent for publishing.
     // Stale-language items are skipped (dropped from queue) so the next
     // item or a fresh generation can take over.
+    // v7.4.4: Also check dedup at dequeue time — a post that was enqueued
+    // earlier may have been manually published since then. Without this
+    // check, the scheduler would re-publish the same content.
     let content: ReadyContent | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
       if (!queued) break;
       const queuedLang = queued.content.language;
-      if (queuedLang === expectedLang || queuedLang === settings.language.default) {
-        content = queued.content;
-        break;
+      if (queuedLang !== expectedLang && queuedLang !== settings.language.default) {
+        // Stale language — log and try the next item.
+        this.deps.logger.warn("scheduler.stale_language", {
+          contentId: queued.content.id,
+          queuedLanguage: queuedLang,
+          expectedLanguage: expectedLang,
+          message: "Dropping stale-language queued content",
+        });
+        continue;
       }
-      // Stale language — log and try the next item.
-      this.deps.logger.warn("scheduler.stale_language", {
-        contentId: queued.content.id,
-        queuedLanguage: queuedLang,
-        expectedLanguage: expectedLang,
-        message: "Dropping stale-language queued content",
-      });
+      // v7.4.4: Dedup check at fire time — verify this queued item hasn't
+      // been published since it was enqueued (e.g., via manual publish).
+      const isDup = await this.checkQueuedDuplicate(queued.content);
+      if (isDup) {
+        this.deps.logger.warn("scheduler.skip", {
+          slotIndex: slot.index,
+          contentId: queued.content.id,
+          reason: "duplicate_at_fire_time",
+          message: "Queued item is a duplicate of an already-published post — skipping",
+        });
+        // Try the next item in the queue.
+        continue;
+      }
+      content = queued.content;
+      break;
     }
 
     // 2. If queue is empty (or all stale), process a fresh item from a plugin.
@@ -362,6 +413,43 @@ export class SchedulerService {
    *     fallback with just the headline + URL so the admin at least
    *     sees *something*.
    */
+  /**
+   * v7.4.4: Check if a queued ReadyContent is a duplicate of an
+   * already-published post. This catches the case where a post was
+   * enqueued, then manually published (which records it in dedup),
+   * then the scheduler dequeues and would re-publish it.
+   *
+   * Reconstructs a minimal ContentItem from the ReadyContent to run
+   * through the dedup detector.
+   */
+  private async checkQueuedDuplicate(content: ReadyContent): Promise<boolean> {
+    if (!this.deps.duplicateDetector) return false;
+    try {
+      // Reconstruct a ContentItem-like object for the dedup check.
+      // Only the fields used by DuplicateDetector.check() are needed:
+      // id, pluginId, source, category, title, body, url, fetchedAt.
+      // The other fields (language, media, raw) aren't used by dedup.
+      const fakeItem = {
+        id: content.id,
+        pluginId: content.pluginId,
+        source: content.pluginId,
+        category: content.category,
+        title: content.headline ?? "",
+        body: content.text ?? "",
+        language: content.language,
+        url: content.sourceUrl ?? "",
+        media: content.media,
+        fetchedAt: content.fetchedAt ?? Date.now(),
+        raw: {} as never, // not used by dedup
+      } as import("../types/content").ContentItem;
+      const result = await this.deps.duplicateDetector.check(fakeItem);
+      return result.isDuplicate;
+    } catch {
+      // If dedup check fails, don't block the publish — just log.
+      return false;
+    }
+  }
+
   private async notifyAdminPm(
     content: ReadyContent,
     pubResult: PublishResult,
@@ -381,24 +469,23 @@ export class SchedulerService {
         error: err instanceof Error ? err.message : String(err),
       });
       await this.deps.tg.sendMessage(adminId, [
-        `🤖 <b>اعلان انتشار خودکار</b>`,
+        `🤖 <b>Auto-publish notice</b>`,
         ``,
-        `<blockquote>📅 <b>زمان:</b> ${slot.date} ${slot.time} (دسته ${slot.category})</blockquote>`,
-        `<blockquote>📰 <b>تیتر:</b> ${this.escapeHtml(content.headline ?? "(بدون تیتر)")}</blockquote>`,
-        `<blockquote>🔗 <b>منبع:</b> ${this.escapeHtml(content.sourceUrl ?? "(بدون منبع")}</blockquote>`,
+        `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+        `<b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}`,
+        `<b>URL:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}`,
         pubResult.ok
-          ? `<blockquote>✅ <b>شناسه پیام کانال:</b> ${pubResult.telegramMessageId}</blockquote>`
-          : `<blockquote>❌ <b>خطا:</b> ${this.escapeHtml(pubResult.error ?? "نامشخص")}</blockquote>`,
+          ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+          : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
       return;
     }
 
     // 2. Send the formatted post (photo or text). Fall back to text-only
     //    if sendPhoto fails.
-    //    v7.4.3: Persian labels + blockquote for the header notice.
     const sentPostNotice = pubResult.ok
-      ? "🤖 <b>پست خودکار منتشر شد — کپی پیام کانال:</b>"
-      : "⚠️ <b>انتشار خودکار ناموفق بود — پست برای ارسال دستی:</b>";
+      ? "🤖 <b>Auto-published (scheduler) — copy of channel post:</b>"
+      : "⚠️ <b>Auto-publish FAILED — formatted post for manual forwarding:</b>";
 
     try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
@@ -429,27 +516,22 @@ export class SchedulerService {
       }
     }
 
-    // 3. Send the summary notification — v7.4.3: Persian + blockquote UI.
-    //    Each fact is in its own blockquote for a clean, scannable layout.
-    const statusLine = pubResult.ok
-      ? `✅ <b>انتشار موفقیت‌آمیز بود</b>`
-      : `❌ <b>انتشار ناموفق بود</b>`;
-
-    const summaryLines = [
-      statusLine,
-      ``,
-      `<blockquote>📅 <b>زمان:</b> ${slot.date} ${slot.time} | <b>دسته:</b> ${slot.category}</blockquote>`,
-      `<blockquote>🤖 <b>هوش مصنوعی:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}</blockquote>`,
-      `<blockquote>🎯 <b>کیفیت:</b> ${content.quality.overallScore} | <b>توکن:</b> ${content.tokensUsed}</blockquote>`,
-      `<blockquote>🔖 <b>شناسه محتوا:</b> <code>${this.escapeHtml(content.id)}</code></blockquote>`,
+    // 3. Send the summary notification (always — even if the formatted
+    //    post failed to send, this gives the admin the key facts).
+    await this.deps.tg.sendMessage(adminId, [
       pubResult.ok
-        ? `<blockquote>📤 <b>شناسه پیام کانال:</b> ${pubResult.telegramMessageId}</blockquote>`
-        : `<blockquote>⚠️ <b>خطا:</b> ${this.escapeHtml(pubResult.error ?? "نامشخص")}</blockquote>`,
-    ];
-
-    await this.deps.tg.sendMessage(adminId, summaryLines.join("\n"), {
-      parse_mode: "HTML",
-    }).catch(() => {});
+        ? `✅ <b>Auto-published successfully</b>`
+        : `❌ <b>Auto-publish failed</b>`,
+      ``,
+      `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+      `<b>AI:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}`,
+      `<b>Quality:</b> ${content.quality.overallScore}`,
+      `<b>Tokens:</b> ${content.tokensUsed}`,
+      `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+      pubResult.ok
+        ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+        : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
 
   /** Escape HTML special characters for safe Telegram display. */

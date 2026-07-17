@@ -291,6 +291,9 @@ export async function buildContainer(env: Env): Promise<Container> {
     tg,
     uxLayer,
     adminId: () => Number(env.ADMIN_ID ?? "0"),
+    // v7.4.4: Dedup detector — used at fire time to catch posts that were
+    // manually published after being enqueued (prevents duplicate publishing).
+    duplicateDetector,
   });
 
   // ── v7.4.1: Sync plugin/provider enabled state from persisted settings ──

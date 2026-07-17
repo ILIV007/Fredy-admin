@@ -81,33 +81,34 @@ export const mainScreen: Screen = {
       [
         { text: botEnabled ? "🟢 Bot: ON" : "🔴 Bot: OFF", callback_data: "toggle:botEnabled" },
       ],
-      // Row 2: Strategy + Scheduler
+      // Row 2: Language + Strategy
       navRow(
+        { text: "🌐 Language", target: "menu:language" },
         { text: "🎯 Strategy", target: "menu:strategy" },
+      ),
+      // Row 3: Scheduler + Categories
+      navRow(
         { text: "📅 Scheduler", target: "menu:schedule" },
-      ),
-      // Row 3: Categories + Providers
-      navRow(
         { text: "📚 Categories", target: "menu:categories" },
+      ),
+      // Row 4: Providers + AI
+      navRow(
         { text: "🔌 Providers", target: "menu:providers" },
-      ),
-      // Row 4: AI + Manual Post
-      navRow(
         { text: "🤖 AI", target: "menu:ai" },
-        { text: "✍️ Manual Post", target: "menu:manual" },
       ),
-      // Row 5: Settings + Editor
+      // Row 5: Manual Post + Settings
       navRow(
+        { text: "✍️ Manual Post", target: "menu:manual" },
         { text: "⚙️ Settings", target: "menu:settings" },
-        { text: "🎨 Editor", target: "menu:editor" },
       ),
-      // Row 6: Approve toggle + Manager URL (or Refresh fallback)
+      // Row 6: Editor + Approve toggle
       [
+        { text: "🎨 Editor", callback_data: "menu:editor" },
         { text: approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
-        managerButton,
       ],
-      // Row 7: Debug alone
+      // Row 7: Manager URL (or Refresh fallback) + Debug
       [
+        managerButton,
         { text: "🐛 Debug", callback_data: "menu:debug" },
       ],
     ]);
