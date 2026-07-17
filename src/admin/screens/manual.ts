@@ -77,7 +77,6 @@ export const manualScreen: Screen = {
       try {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
-        // v7.4.2: skipEnqueue=true — manual posts should NOT also go to the queue.
         const result = await ctx.container.content.processForCategory(
           arg as Category,
           null,
@@ -135,7 +134,6 @@ export const manualScreen: Screen = {
         let result = null;
         let firstDuplicate: { itemId: string; existingId: string; reason: string; item: typeof items[number] } | null = null;
         for (let i = 0; i < Math.min(items.length, 5); i++) {
-          // v7.4.2: skipEnqueue=true — manual posts should NOT also go to the queue.
           const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: false, skipEnqueue: true });
           if (r.ok && r.content) { result = r; break; }
           if (!firstDuplicate && r.duplicateOf) {
@@ -216,7 +214,7 @@ export const manualScreen: Screen = {
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
-        return { alert: "❌ All items rejected" };
+        return { alert: `❌ All items rejected` };
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }

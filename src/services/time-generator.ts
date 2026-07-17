@@ -186,27 +186,17 @@ export class TimeGenerator {
   }
 
   /** Convert minutes-since-midnight to epoch ms for a date in a timezone.
-   *  v7.4.2: FIXED — was using Date.UTC() which ignored the timezone.
+   *  v7.4.5: FIXED — was using Date.UTC() which ignored the timezone.
    *  For Tehran (UTC+3:30), slot "09:00" was computed as 09:00 UTC = 12:30
-   *  Tehran time, causing posts to fire 3.5 hours late. Now we use
-   *  Intl.DateTimeFormat to compute the correct UTC ms for the local time. */
+   *  Tehran time, causing posts to fire 3.5 hours late. */
   private minutesToEpochMs(date: string, minutes: number, timezone: string): number {
     const [year, month, day] = date.split("-").map(Number);
-    // UTC midnight for that date (as a reference point).
     const utcMidnight = Date.UTC(year!, month! - 1, day!, 0, 0, 0);
-    // Get the timezone offset (in minutes) at that instant.
-    // Positive offset = ahead of UTC (e.g., Tehran = +210 min = +3:30).
     const offsetMin = getTzOffsetMinutes(utcMidnight, timezone);
-    // Local `minutes` since midnight → UTC ms.
-    // If local time is 09:00 and offset is +210, UTC = 09:00 - 3:30 = 5:30 AM.
-    // So: utcMs = utcMidnight + (minutes - offsetMin) * 60000.
     return utcMidnight + (minutes - offsetMin) * 60_000;
   }
 }
 
-/** Compute the timezone offset (in minutes) at a given UTC instant.
- *  Uses Intl.DateTimeFormat — supported in Cloudflare Workers.
- *  Returns positive for timezones ahead of UTC (e.g., +210 for Tehran). */
 function getTzOffsetMinutes(utcMs: number, timezone: string): number {
   try {
     const dtf = new Intl.DateTimeFormat("en-US", {
@@ -220,15 +210,12 @@ function getTzOffsetMinutes(utcMs: number, timezone: string): number {
     const y = Number(get("year"));
     const m = Number(get("month"));
     const d = Number(get("day"));
-    const h = Number(get("hour")) === 24 ? 0 : Number(get("hour")); // hour: "24" can appear for midnight in some browsers
+    const h = Number(get("hour")) === 24 ? 0 : Number(get("hour"));
     const mi = Number(get("minute"));
     const s = Number(get("second"));
-    // The UTC ms for the wall-clock time as if it were UTC.
     const asIfUtc = Date.UTC(y, m - 1, d, h, mi, s);
-    // offset = asIfUtc - utcMs (positive if tz is ahead of UTC).
     return Math.round((asIfUtc - utcMs) / 60_000);
   } catch {
-    // Timezone not supported — fall back to UTC (0 offset).
     return 0;
   }
 }

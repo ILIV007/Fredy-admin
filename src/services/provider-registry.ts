@@ -77,30 +77,6 @@ export class ProviderRegistry {
     return this.entries.get(id)?.enabled ?? false;
   }
 
-  /**
-   * Sync in-memory enabled state from persisted settings.
-   * v7.4.1: Persist provider enable/disable in settings.providers.{id}.enabled
-   * so changes made via the bot/Manager survive isolate boundaries and
-   * Worker restarts. Previously, disable was in-memory only — the Manager
-   * dashboard showed the provider as still enabled because it ran on a
-   * different isolate.
-   */
-  syncFromSettings(providers: Readonly<Record<string, { enabled?: boolean; priority?: number }>>): void {
-    for (const [id, cfg] of Object.entries(providers)) {
-      const entry = this.entries.get(id);
-      if (!entry) continue;
-      if (typeof cfg.enabled === "boolean") {
-        // Only enable if the provider is also configured (has API key).
-        // Disabling always works.
-        if (cfg.enabled && !entry.provider.isConfigured(this.deps.env)) continue;
-        entry.enabled = cfg.enabled;
-      }
-      if (typeof cfg.priority === "number") {
-        entry.priority = cfg.priority;
-      }
-    }
-  }
-
   // ────────────────────────────────────────────────────────────
   // Listing & Lookup
   // ────────────────────────────────────────────────────────────

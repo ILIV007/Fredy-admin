@@ -303,10 +303,7 @@ export class ContentManager {
     // ── Stage 8: Record in dedup store ──────────────────────
     if (!skipDedup) await this.deps.duplicateDetector.record(item);
 
-    // ── Stage 9: Enqueue (unless caller will publish immediately) ───
-    // skipEnqueue=true is used by manual publish paths so the post doesn't
-    // both go to the queue AND get published (which was the v7.4.0 bug
-    // where manual posts showed up in the Queue page after sending).
+    // ── Stage 9: Enqueue ────────────────────────────────────
     if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
 
     return {

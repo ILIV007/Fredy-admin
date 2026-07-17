@@ -54,9 +54,6 @@ export interface SchedulerServiceDeps {
   readonly tg?: TelegramService;
   readonly uxLayer?: UXLayer;
   readonly adminId?: () => number;
-  /** v7.4.4: Dedup detector — used at fire time to catch posts that were
-   * manually published after being enqueued. */
-  readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
 }
 
 export class SchedulerService {
@@ -181,31 +178,19 @@ export class SchedulerService {
   }
 
   /** Find a due, unfired slot.
-   *  v7.4.4: Added grace period — if a slot is more than GRACE_PERIOD_MINUTES
-   *  past due, it's marked as "skipped" (passed) instead of fired. This
-   *  prevents catch-up bursts where multiple overdue slots fire back-to-back
-   *  when the cron eventually runs.
-   *
-   *  Example: slots at 09:41, 12:30, 17:14. Cron runs at 13:00.
-   *  - 09:41 is 179 min overdue → SKIP (mark as fired with "passed")
-   *  - 12:30 is 30 min overdue → within grace → FIRE
-   *  - 17:14 is in the future → skip
-   *
-   *  This way only ONE post fires per cron tick, and missed slots don't
-   *  cause a burst. */
+   *  v7.4.5: Added grace period — if a slot is more than 30 minutes past due,
+   *  it's marked as "passed" (skipped) instead of fired. This prevents catch-up
+   *  bursts where multiple overdue slots fire back-to-back. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
     const GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
 
     for (const slot of plan.slots) {
-      // Skip slots that haven't reached their time yet.
       if (slot.epochMs > now) continue;
 
-      // Skip slots that already fired.
       const fired = await this.deps.dailyPlanner.isSlotFired(slot);
       if (fired) continue;
 
-      // v7.4.4: Grace period check — if the slot is too far past due,
-      // mark it as "passed" and skip it. This prevents catch-up bursts.
+      // Grace period check — skip slots that are too far past due.
       const overdueMs = now - slot.epochMs;
       if (overdueMs > GRACE_PERIOD_MS) {
         this.deps.logger.warn("scheduler.skip", {
@@ -216,7 +201,6 @@ export class SchedulerService {
           overdueMinutes: Math.round(overdueMs / 60_000),
           message: "Slot past grace period — marking as passed (no catch-up)",
         });
-        // Mark as fired with "passed" so it's not retried on the next tick.
         await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace-period");
         continue;
       }
@@ -252,45 +236,27 @@ export class SchedulerService {
     // We need to unwrap it to get the ReadyContent for publishing.
     // Stale-language items are skipped (dropped from queue) so the next
     // item or a fresh generation can take over.
-    // v7.4.4: Also check dedup at dequeue time — a post that was enqueued
-    // earlier may have been manually published since then. Without this
-    // check, the scheduler would re-publish the same content.
     let content: ReadyContent | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
       if (!queued) break;
       const queuedLang = queued.content.language;
-      if (queuedLang !== expectedLang && queuedLang !== settings.language.default) {
-        // Stale language — log and try the next item.
-        this.deps.logger.warn("scheduler.stale_language", {
-          contentId: queued.content.id,
-          queuedLanguage: queuedLang,
-          expectedLanguage: expectedLang,
-          message: "Dropping stale-language queued content",
-        });
-        continue;
+      if (queuedLang === expectedLang || queuedLang === settings.language.default) {
+        content = queued.content;
+        break;
       }
-      // v7.4.4: Dedup check at fire time — verify this queued item hasn't
-      // been published since it was enqueued (e.g., via manual publish).
-      const isDup = await this.checkQueuedDuplicate(queued.content);
-      if (isDup) {
-        this.deps.logger.warn("scheduler.skip", {
-          slotIndex: slot.index,
-          contentId: queued.content.id,
-          reason: "duplicate_at_fire_time",
-          message: "Queued item is a duplicate of an already-published post — skipping",
-        });
-        // Try the next item in the queue.
-        continue;
-      }
-      content = queued.content;
-      break;
+      // Stale language — log and try the next item.
+      this.deps.logger.warn("scheduler.stale_language", {
+        contentId: queued.content.id,
+        queuedLanguage: queuedLang,
+        expectedLanguage: expectedLang,
+        message: "Dropping stale-language queued content",
+      });
     }
 
     // 2. If queue is empty (or all stale), process a fresh item from a plugin.
-    //    v7.4.2: skipEnqueue=true — this content is about to be published
-    //    immediately, so it should NOT also go to the queue (otherwise the
-    //    queue fills with already-published posts).
+    //    v7.4.5: skipEnqueue=true — this content is about to be published
+    //    immediately, so it should NOT also go to the queue.
     if (!content) {
       const pipelineResult = await this.deps.contentManager.processForCategory(
         slot.category,
@@ -413,43 +379,6 @@ export class SchedulerService {
    *     fallback with just the headline + URL so the admin at least
    *     sees *something*.
    */
-  /**
-   * v7.4.4: Check if a queued ReadyContent is a duplicate of an
-   * already-published post. This catches the case where a post was
-   * enqueued, then manually published (which records it in dedup),
-   * then the scheduler dequeues and would re-publish it.
-   *
-   * Reconstructs a minimal ContentItem from the ReadyContent to run
-   * through the dedup detector.
-   */
-  private async checkQueuedDuplicate(content: ReadyContent): Promise<boolean> {
-    if (!this.deps.duplicateDetector) return false;
-    try {
-      // Reconstruct a ContentItem-like object for the dedup check.
-      // Only the fields used by DuplicateDetector.check() are needed:
-      // id, pluginId, source, category, title, body, url, fetchedAt.
-      // The other fields (language, media, raw) aren't used by dedup.
-      const fakeItem = {
-        id: content.id,
-        pluginId: content.pluginId,
-        source: content.pluginId,
-        category: content.category,
-        title: content.headline ?? "",
-        body: content.text ?? "",
-        language: content.language,
-        url: content.sourceUrl ?? "",
-        media: content.media,
-        fetchedAt: content.fetchedAt ?? Date.now(),
-        raw: {} as never, // not used by dedup
-      } as import("../types/content").ContentItem;
-      const result = await this.deps.duplicateDetector.check(fakeItem);
-      return result.isDuplicate;
-    } catch {
-      // If dedup check fails, don't block the publish — just log.
-      return false;
-    }
-  }
-
   private async notifyAdminPm(
     content: ReadyContent,
     pubResult: PublishResult,
@@ -548,10 +477,7 @@ export class SchedulerService {
    */
   async manualPublish(options: ManualPublishOptions): Promise<PublishResult> {
     const settings = await this.deps.settings();
-
-    // v7.4.2: skipEnqueue=true so manual posts don't ALSO go to the queue.
-    // Previously, manual publish would call process() which always enqueued,
-    // causing the post to appear in the Queue page after sending.
+    // v7.4.5: skipEnqueue=true so manual posts don't ALSO go to the queue.
     const pipelineOptions = { skipEnqueue: true };
 
     // 1. Determine what to publish.
@@ -673,15 +599,7 @@ export class SchedulerService {
 
     return {
       enabled: settings.scheduler.enabled,
-      today: plan ? {
-        ...plan,
-        slots: await Promise.all(
-          plan.slots.map(async (s) => ({
-            ...s,
-            fired: await this.deps.dailyPlanner.isSlotFired(s),
-          })),
-        ),
-      } : null,
+      today: plan,
       nextSlot,
       queueDepth: totalQueue,
       lastFiredAt: lastPublished,

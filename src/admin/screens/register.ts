@@ -13,7 +13,6 @@ import {
   aiScreen,
   manualScreen,
   scheduleScreen,
-  strategyScreen,
   languageScreen,
   soulScreen,
   debugScreen,
@@ -29,7 +28,6 @@ export function registerScreens(registry: ScreenRegistry): void {
   registry.register(aiScreen);
   registry.register(manualScreen);
   registry.register(scheduleScreen);
-  registry.register(strategyScreen);
   registry.register(languageScreen);
   registry.register(soulScreen);
   registry.register(debugScreen);

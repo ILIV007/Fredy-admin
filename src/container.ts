@@ -85,12 +85,8 @@ Professional without sounding corporate.
  * Build the DI container. Called once per Worker isolate.
  * Order matters — services that depend on others must be constructed after
  * their dependencies.
- *
- * v7.4.1: This function is async so it can sync plugin/provider enabled
- * state from persisted settings. Previously, plugin toggles made via the
- * bot/Manager were in-memory only — other isolates didn't see them.
  */
-export async function buildContainer(env: Env): Promise<Container> {
+export function buildContainer(env: Env): Container {
   // Layer 0: KV + Logger (no deps)
   const kv = new KVStore({ kv: env.Fredy_SETTINGS });
   const logger = new Logger({
@@ -101,9 +97,7 @@ export async function buildContainer(env: Env): Promise<Container> {
   // Layer 1: Config (registry + repository + cache + service)
   const registry = buildConfigRegistry();
   const repository = new ConfigRepository({ kv });
-  // v7.4.1: Use default TTL (5s) — explicit 30s caused cross-isolate staleness
-  // where bot changes didn't reflect in Manager dashboard and vice versa.
-  const cache = new ConfigCache();
+  const cache = new ConfigCache({ ttlMs: 30_000 });
   const config = new ConfigService({ kv, env, repository, cache, registry });
 
   // Layer 2: Telegram + Debug (depend on kv + logger)
@@ -291,28 +285,7 @@ export async function buildContainer(env: Env): Promise<Container> {
     tg,
     uxLayer,
     adminId: () => Number(env.ADMIN_ID ?? "0"),
-    // v7.4.4: Dedup detector — used at fire time to catch posts that were
-    // manually published after being enqueued (prevents duplicate publishing).
-    duplicateDetector,
   });
-
-  // ── v7.4.1: Sync plugin/provider enabled state from persisted settings ──
-  // Plugin and provider toggles made via the bot/Manager are persisted in
-  // settings.plugins.perPlugin[id].enabled and settings.providers.{id}.enabled.
-  // Without this sync, each isolate would start with the hardcoded defaults
-  // from the plugin manifests, ignoring persisted toggles.
-  try {
-    const persisted = await config.getSettings(Number(env.ADMIN_ID ?? "0"));
-    if (persisted?.plugins?.perPlugin) {
-      plugins.syncFromSettings(persisted.plugins.perPlugin);
-    }
-    if (persisted?.providers) {
-      providers.syncFromSettings(persisted.providers as unknown as Record<string, { enabled?: boolean; priority?: number }>);
-    }
-  } catch (e) {
-    // Non-fatal: settings load failure shouldn't break the whole request.
-    console.warn("[container] failed to sync plugin/provider state from settings:", e);
-  }
 
   return {
     env,

@@ -155,64 +155,23 @@ export async function managerHandler(
     const depths = await container.queue.depth().catch(() => []);
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     // Also fetch actual queued items for display.
-    // Per-category try/catch AND per-item mapping: a single bad item never
-    // blanks out an entire category (which was the v7.3.3 bug).
     const items: Record<string, unknown[]> = {};
     for (const cat of ["A", "B", "C"] as const) {
       try {
         const queued = await container.queue.listItems(cat);
-        items[cat] = queued.map(q => {
-          try {
-            return {
-              id: q.content.id,
-              headline: q.content.headline ?? "(no headline)",
-              pluginId: q.content.pluginId ?? "(unknown)",
-              language: q.content.language ?? "-",
-              qualityScore: q.content.quality?.overallScore ?? 0,
-              enqueuedAt: q.enqueuedAt,
-              expiresAt: q.expiresAt,
-              isExpired: q.expiresAt <= Date.now(),
-              aiProvider: q.content.aiProvider ?? "-",
-              aiModel: q.content.aiModel ?? "-",
-              sourceUrl: q.content.sourceUrl ?? "",
-            };
-          } catch {
-            // Single bad item: skip it, but keep the rest of the category.
-            return null;
-          }
-        }).filter(x => x !== null);
+        items[cat] = queued.map(q => ({
+          id: q.content.id,
+          headline: q.content.headline ?? "(no headline)",
+          pluginId: q.content.pluginId,
+          language: q.content.language,
+          qualityScore: q.content.quality.overallScore,
+          enqueuedAt: q.enqueuedAt,
+          aiProvider: q.content.aiProvider,
+          aiModel: q.content.aiModel,
+        }));
       } catch { items[cat] = []; }
     }
     return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items });
-  }
-
-  // ── Queue debug: shows RAW queue contents (including expired items) ──
-  // Useful for diagnosing "depth shows N but items table is empty" issues.
-  if (apiPath === "queue/debug" && request.method === "GET") {
-    const raw: Record<string, unknown> = {};
-    for (const cat of ["A", "B", "C"] as const) {
-      try {
-        // Access the internal queue directly via listItems + depthFor.
-        const valid = await container.queue.listItems(cat);
-        const validCount = await container.queue.depthFor(cat);
-        raw[cat] = {
-          validItemCount: valid.length,
-          depthFor: validCount,
-          validItems: valid.map(q => ({
-            id: q.content.id,
-            headline: (q.content.headline ?? "").slice(0, 80),
-            pluginId: q.content.pluginId,
-            enqueuedAt: q.enqueuedAt,
-            expiresAt: q.expiresAt,
-            ageMinutes: Math.round((Date.now() - q.enqueuedAt) / 60_000),
-            expiresMinutes: Math.round((q.expiresAt - Date.now()) / 60_000),
-          })),
-        };
-      } catch (e) {
-        raw[cat] = { error: errMsg(e) };
-      }
-    }
-    return json({ ok: true, time: Date.now(), raw });
   }
 
   // ── Queue: delete item ──
@@ -223,81 +182,6 @@ export async function managerHandler(
     if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
     const deleted = await container.queue.deleteItem(cat, body.contentId);
     return json({ ok: deleted, message: deleted ? "Item deleted" : "Item not found" });
-  }
-
-  // ── Queue: send now (publish a specific queue item immediately) ──
-  const queueSendMatch = apiPath.match(/^queue\/([ABC])\/send-now$/);
-  if (queueSendMatch && request.method === "POST") {
-    const body = await request.json().catch(() => ({})) as { contentId?: string };
-    const cat = queueSendMatch[1] as "A" | "B" | "C";
-    if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
-    try {
-      const items = await container.queue.listItems(cat);
-      const target = items.find(q => q.content.id === body.contentId);
-      if (!target) return json({ ok: false, error: "Item not found in queue" });
-      const pubResult = await container.finalPublisher.publish(target.content);
-      if (pubResult.ok) {
-        await container.queue.deleteItem(cat, body.contentId);
-        const adminId = Number(env.ADMIN_ID ?? "0");
-        if (adminId > 0) {
-          // ── Send the FORMATTED POST to admin PM (photo or text) ──
-          // Previous version swallowed Telegram API errors via .catch(()=>{}),
-          // which silently dropped the post when HTML was malformed or text too long.
-          // Now: log errors and fall back to plain text so admin ALWAYS sees the post.
-          let postSentToAdmin = false;
-          let postSendError: string | null = null;
-          try {
-            const finalPost = await container.uxLayer.transform(target.content);
-            // Try with media first (if any).
-            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-              const photoResult = await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" });
-              if (photoResult.ok) {
-                postSentToAdmin = true;
-              } else {
-                // Photo failed (URL 404, too large, etc.) — fall back to text-only.
-                postSendError = `sendPhoto: ${photoResult.description ?? "unknown"}`;
-                const textResult = await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" });
-                if (textResult.ok) postSentToAdmin = true;
-                else postSendError += ` | sendMessage: ${textResult.description ?? "unknown"}`;
-              }
-            } else {
-              // Text-only post.
-              const textResult = await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" });
-              if (textResult.ok) {
-                postSentToAdmin = true;
-              } else {
-                postSendError = `sendMessage: ${textResult.description ?? "unknown"}`;
-                // Try plain-text fallback (strip HTML) so admin ALWAYS sees the content.
-                const plainText = finalPost.fullText
-                  .replace(/<[^>]+>/g, "")
-                  .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#64;/g, "@");
-                const truncated = plainText.length > 4000 ? plainText.slice(0, 4000) + "..." : plainText;
-                const fallbackResult = await container.tg.sendMessage(adminId, `⚠️ Formatted post failed (${postSendError}). Plain-text fallback:\n\n${truncated}`, {});
-                if (fallbackResult.ok) postSentToAdmin = true;
-              }
-            }
-          } catch (transformErr) {
-            postSendError = `transform: ${transformErr instanceof Error ? transformErr.message : String(transformErr)}`;
-          }
-
-          // ── Send the summary report ──
-          await container.tg.sendMessage(adminId, [
-            `📤 <b>Published manually from Queue (Send Now)</b>`,
-            `<b>Category:</b> ${cat}`,
-            `<b>AI:</b> ${target.content.aiProvider}/${target.content.aiModel}`,
-            `<b>Quality:</b> ${target.content.quality.overallScore}`,
-            `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
-            postSentToAdmin
-              ? `<b>Admin PM:</b> ✅ Post sent above`
-              : `<b>Admin PM:</b> ⚠️ Post failed to send${postSendError ? ` (${postSendError})` : ""}`,
-          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-        }
-        return json({ ok: true, messageId: pubResult.telegramMessageId });
-      }
-      return json({ ok: false, error: pubResult.error ?? "Publish failed" });
-    } catch (error) {
-      return json({ ok: false, error: errMsg(error) }, 500);
-    }
   }
 
   // ── AI ──
@@ -411,24 +295,6 @@ export async function managerHandler(
       container.plugins.enable(pluginId);
     }
     const newState = container.plugins.isEnabled(pluginId);
-    // v7.4.1: Persist to settings so other isolates (bot, cron) see the change.
-    try {
-      const adminId = Number(env.ADMIN_ID ?? "0");
-      const cur = await container.config.getSettings(adminId);
-      const perPlugin = cur.plugins?.perPlugin ?? {};
-      const curOverride = (perPlugin as Record<string, Record<string, unknown>>)[pluginId] ?? {};
-      await container.config.updateSettings(adminId, {
-        plugins: {
-          ...cur.plugins,
-          perPlugin: {
-            ...perPlugin,
-            [pluginId]: { ...curOverride, enabled: newState },
-          },
-        },
-      } as never);
-    } catch (e) {
-      console.warn("[manager] failed to persist plugin toggle:", e);
-    }
     return json({ ok: true, pluginId, enabled: newState });
   }
 
@@ -635,35 +501,6 @@ export async function managerHandler(
     return json({ ok: true, enabled: newVal, message: "Scheduler resumed" });
   }
 
-  // ── Scheduler: regenerate today's plan (clears stale slots + fired markers) ──
-  if (apiPath === "scheduler/regenerate-plan" && request.method === "POST") {
-    try {
-      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
-      const timezone = settings.scheduler.timezone;
-      const { formatDateInZone } = await import("../primitives/time");
-      const today = formatDateInZone(Date.now(), timezone);
-      // Clear today's plan + all slot-fired markers for today.
-      const { slotsKey } = await import("../core/storage/keys");
-      await container.kv.delete(slotsKey(today));
-      // List and delete all fired markers for today.
-      const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
-      for (const k of firedKeys) {
-        await container.kv.delete(k);
-      }
-      // Generate a fresh plan.
-      const plan = await container.dailyPlanner.generate();
-      return json({
-        ok: true,
-        message: `Plan regenerated for ${today}`,
-        date: today,
-        slotCount: plan.slots.length,
-        slots: plan.slots.map(s => ({ time: s.time, category: s.category, epochMs: s.epochMs })),
-      });
-    } catch (error) {
-      return json({ ok: false, error: errMsg(error) }, 500);
-    }
-  }
-
   // ── Settings: update runtime config ──
   if (apiPath === "settings" && request.method === "POST") {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -789,7 +626,7 @@ export async function managerHandler(
         // items. If all items are duplicates, the caller routes the
         // first one to admin PM with a "duplicate" label instead of
         // publishing to the channel.
-        const r = await container.content.process(item, lang, { skipDedup: false, skipEnqueue: true });
+        const r = await container.content.process(item, lang, { skipDedup: false });
         attempts.push({
           itemIndex: idx,
           itemId: item.id,
@@ -845,7 +682,7 @@ export async function managerHandler(
             // Process with skipDedup=true so it goes all the way through
             // the AI pipeline (we already know it's a duplicate — we want
             // the formatted output now).
-            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true, skipEnqueue: true });
+            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true });
             if (dupProcessed.ok && dupProcessed.content) {
               const finalPost = await container.uxLayer.transform(dupProcessed.content);
               // Send the formatted post (photo or text) — prefixed with a
@@ -1396,61 +1233,37 @@ async function togglePlugin(id){const d=await api("plugin/"+id+"/toggle","POST")
 
 async function loadQueue(){
   const c=document.getElementById("content");
-  c.innerHTML='<div class="card">Loading queue...</div>';
+  c.innerHTML='<div class="card">Loading queue…</div>';
   try{
     const d=await api("queue");
-    if(!d.ok){c.innerHTML='<div class="card">Error: '+(d.error||"unknown")+'</div>';return;}
+    if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
     const l=d.limits||{};
     const items=d.items||{};
-    // Escape any user-provided text before injecting into HTML.
-    const esc=function(s){if(s===null||s===undefined)return "";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");};
-    let html='<div class="card" style="display:flex;gap:8px"><button class="btn" id="q-sort-btn">Sort by Provider</button><button class="btn" id="q-default-btn">Default View</button><button class="btn btn-ghost" id="q-refresh-btn">🔄 Refresh</button></div>';
+    let html='';
     for(const cat of["A","B","C"]){
       const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
       const lim=l[cat]||{min:0,target:0};
       const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
-      let catItems=items[cat]||[];
-      if(window._qsp){catItems=catItems.slice().sort((a,b)=>(a.pluginId||"").localeCompare(b.pluginId||""));}
+      const catItems=items[cat]||[];
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
-        // Use data-* attributes + event delegation — no onclick string escaping.
-        // Each row's buttons carry their action, cat, id as data attributes.
-        html+='<table class="q-table" data-cat="'+cat+'" style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>';
-        for(const it of catItems){
-          // Per-item try/catch: a single bad row never breaks the whole table.
-          let row="";
-          try{
-            row='<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+esc(it.headline||"-")+'</td><td>'+esc(it.pluginId||"-")+'</td><td>'+esc(it.language||"-")+'</td><td>'+esc(it.qualityScore??"-")+'</td><td>'+esc(it.aiProvider||"-")+"/"+esc(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" data-action="send" data-cat="'+esc(cat)+'" data-id="'+esc(it.id)+'">Send Now</button> <button class="btn btn-sm btn-danger" data-action="delete" data-cat="'+esc(cat)+'" data-id="'+esc(it.id)+'">Delete</button></td></tr>';
-          }catch(e){row='<tr><td colspan="6" style="color:var(--red)">⚠️ Bad row data: '+esc(String(e))+'</td></tr>';}
-          html+=row;
-        }
-        html+='</tbody></table>';
-      }else{html+='<p style="color:var(--text2);margin-top:8px">No items.</p>';}
+        html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
+        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td><button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">🗑️ Delete</button></td></tr>').join("")+
+        '</tbody></table>';
+      }else{
+        html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
+      }
       html+='</div>';
     }
     c.innerHTML=html;
-    // ── Event delegation: one click handler for all queue action buttons ──
-    // Replaces fragile onclick="sendQueueNow(\'A\',\'id\')" string-concat pattern
-    // that broke when TS template literal escaping was wrong.
-    c.querySelectorAll("button[data-action]").forEach(function(btn){
-      btn.addEventListener("click",function(){
-        const action=btn.getAttribute("data-action");
-        const cat=btn.getAttribute("data-cat");
-        const id=btn.getAttribute("data-id");
-        if(action==="send"){sendQueueNow(cat,id);}
-        else if(action==="delete"){deleteQueueItem(cat,id);}
-      });
-    });
-    const sortBtn=document.getElementById("q-sort-btn");
-    if(sortBtn)sortBtn.addEventListener("click",function(){window._qsp=true;loadQueue();});
-    const defBtn=document.getElementById("q-default-btn");
-    if(defBtn)defBtn.addEventListener("click",function(){window._qsp=false;loadQueue();});
-    const refBtn=document.getElementById("q-refresh-btn");
-    if(refBtn)refBtn.addEventListener("click",loadQueue);
-  }catch(e){c.innerHTML='<div class="card">Error: '+esc(String(e))+'</div>';}
+  }catch(e){c.innerHTML='<div class="card">Failed to load queue: '+e+'</div>';}
 }
-async function deleteQueueItem(cat,id){if(!confirm("Delete this item?"))return;const d=await api("queue/"+cat+"/delete","POST",{contentId:id});toast(d.ok?"✅ Deleted":"❌ Failed: "+(d.error||""));loadQueue();}
-async function sendQueueNow(cat,id){if(!confirm("Publish this item NOW to channel + admin PM?"))return;toast("Publishing...");const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});toast(d.ok?"✅ Published! Msg: "+d.messageId:"❌ Failed: "+(d.error||""));loadQueue();}
+async function deleteQueueItem(cat,id){
+  if(!confirm("Delete this item from queue?"))return;
+  const d=await api("queue/"+cat+"/delete","POST",{contentId:id});
+  toast(d.ok?"🗑️ Item deleted":"❌ Failed");
+  loadQueue();
+}
 
 async function loadAI(){
   const d=await api("ai");const c=document.getElementById("content");
@@ -1461,7 +1274,7 @@ async function loadAI(){
     for(const[pid,models]of Object.entries(d.modelsByProvider)){
       const provInfo=(d.providers||[]).find(p=>p.id===pid)||{};
       modelsHtml+='<div style="margin-bottom:12px"><h4 style="margin-bottom:6px">'+(provInfo.name||pid)+' '+(provInfo.configured?'✅':'❌')+' '+(provInfo.enabled?'🟢':'🔴')+'</h4><table style="font-size:12px"><thead><tr><th>#</th><th>Model</th><th>Status</th><th>Test</th></tr></thead><tbody>'+
-      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/['\"]/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
+      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/'/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
       '</tbody></table></div>';
     }
   }
@@ -1491,41 +1304,17 @@ async function testAI(){
 }
 
 async function loadScheduler(){
-  const c=document.getElementById("content");
-  c.innerHTML='<div class="card">Loading...';
-  try{
-    const d=await api("scheduler");
-    const h=await api("history");
-    if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-    const s=d.settings||{};const st=d.status||{};
-    let historyHtml='';
-    if(h.ok&&h.recent){
-      const recent=h.recent.slice(0,30);
-      if(recent.length>0){
-        historyHtml='<div class="card"><h3 style="margin-bottom:8px">Post History (3 days)</h3><table style="font-size:12px"><thead><tr><th>Date</th><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+
-        recent.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleDateString()+'</td><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"X")+'</td></tr>').join("")+
-        '</tbody></table></div>';
-      }else{historyHtml='<div class="card"><p style="color:var(--text2)">No posts in recent history.</p></div>';}
-    }
-    let scheduleHtml='';
-    if(st.today&&st.today.slots){
-      scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
-      st.today.slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'Published':'Pending')+'</td></tr>').join("")+
-      '</tbody></table></div>';
-    }else{
-      scheduleHtml='<div class="card"><p style="color:var(--red)">Could not generate today plan.</p></div>';
-    }
-    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"Pause Scheduler":"Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">Force Publish</button><button class="btn btn-warning" onclick="regeneratePlan()">🔄 Regenerate Plan</button></div></div>'+
-    '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"-")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"-")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
-    scheduleHtml+
-    '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'-'+w.end+'</span>').join("")+'</div></div>'+
-    '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' - '+(s.quietHours?.end??"07:30")+'</span></div>'+
-    historyHtml;
-  }catch(e){c.innerHTML='<div class="card">Error: '+e+'</div>';}
+  const d=await api("scheduler");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  const s=d.settings||{};const st=d.status||{};
+  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">⏯️ Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"⏸️ Pause Scheduler":"▶️ Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">⚡ Force Publish</button></div></div>'+
+  '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Slots</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.slots||[]).map(t=>'<span class="badge badge-blue">'+t+"</span>").join("")+'</div></div>';
 }
-async function toggleScheduler(){const cur=await api("scheduler");const enabled=cur.status?.enabled;const d=await api(enabled?"scheduler/pause":"scheduler/resume","POST");toast(d.ok?(d.enabled?"Scheduler resumed":"Scheduler paused"):"Failed");loadScheduler();}
-async function forcePublish(){if(!confirm("Force publish now?"))return;toast("Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?"Done: "+d.message:"Failed: "+(d.error||""));loadScheduler();}
-async function regeneratePlan(){if(!confirm("Regenerate today's plan? This clears all fired markers and creates a fresh schedule."))return;toast("Regenerating plan...");const d=await api("scheduler/regenerate-plan","POST");toast(d.ok?"✅ "+d.message+" ("+d.slotCount+" slots)":"❌ Failed: "+(d.error||""));loadScheduler();}
+async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
+async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
 
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");

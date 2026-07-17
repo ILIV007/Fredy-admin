@@ -1,10 +1,13 @@
 /**
  * src/admin/screens/language.ts
- * Language screen — switch the bot's default language.
+ * Post Language screen — controls the language of PUBLISHED POSTS.
  *
- * v7.4.4: New screen accessible directly from the main menu via a 🌐 Language button.
- * Lets the admin switch between English, Persian, and Auto-detect without
- * navigating to the Settings screen.
+ * v7.4.5: This is the "Post Language" button in the main menu.
+ * It controls the language that AI-generated content is rewritten into.
+ * This is DIFFERENT from the bot UI language (which is set on /start).
+ *
+ * The setting is synced with settings.language.default — the same value
+ * that the Settings screen's Language choice controls.
  */
 
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
@@ -19,21 +22,21 @@ export const languageScreen: Screen = {
   async text(ctx) {
     const lang = ctx.settings.language;
     return [
-      header("Language", "🌐"),
+      header("Post Language", "🌐"),
       "",
       kv("Default", lang.default),
       kv("Supported", lang.supported.join(", ")),
       kv("Auto-detect", statusBadge(lang.autoDetect)),
       "",
       divider(),
-      "<i>Tap a language below to set it as the default.</i>",
+      "<i>Tap a language below to set it as the default for published posts.</i>",
     ].join("\n");
   },
 
   keyboard(s: FredySettings): InlineKeyboard {
     const cur = s.language.default;
     return buildKeyboardWithBack([
-      [labelButton("─── Default Language ───")],
+      [labelButton("─── Default Post Language ───")],
       [
         { text: cur === "en" ? "✅ English" : "English", callback_data: "set:language:default:en" },
         { text: cur === "fa" ? "✅ فارسی" : "فارسی", callback_data: "set:language:default:fa" },
@@ -72,6 +75,6 @@ export const languageScreen: Screen = {
     if (!result.ok) {
       return { alert: `❌ Validation failed: ${result.error}` };
     }
-    return { toast: `✅ Language updated` };
+    return { toast: `✅ Post language updated` };
   },
 };

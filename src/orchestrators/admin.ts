@@ -21,6 +21,7 @@ import { escapeHtml } from "../primitives/strings";
 import { registerScreens } from "../admin/screens/register";
 import { registerCommands } from "../admin/commands/register";
 import { unauthorizedMessage } from "../admin/helpers/auth";
+import { setBotUiLanguage, getBotUiLanguage, buildWelcomeMessage } from "../admin/commands/start";
 
 export class AdminOrchestrator {
   readonly screens = new ScreenRegistry();
@@ -67,6 +68,44 @@ export class AdminOrchestrator {
     // No-op button.
     if (data === "ignore") {
       await tg.answerCallbackQuery(query.id).catch(() => {});
+      return;
+    }
+
+    // ── Bot UI language toggle (botui:set:<lang>) — handled inline ──
+    // v7.4.5: This is the Language button on /start. Changes the bot's
+    // display language (how admin messages are shown), NOT the post content language.
+    if (data.startsWith("botui:set:")) {
+      const lang = data.slice("botui:set:".length) as "en" | "fa";
+      if (lang !== "en" && lang !== "fa") {
+        await tg.answerCallbackQuery(query.id, "❌ Invalid language").catch(() => {});
+        return;
+      }
+      try {
+        await setBotUiLanguage(fromId, container.kv, lang);
+        const cur = await getBotUiLanguage(fromId, container.kv);
+        const welcomeText = buildWelcomeMessage(cur);
+        const buttons = [
+          [
+            { text: cur === "en" ? "🟢 English" : "English", callback_data: "botui:set:en" },
+            { text: cur === "fa" ? "🟢 فارسی" : "فارسی", callback_data: "botui:set:fa" },
+          ],
+          [{ text: cur === "fa" ? "📋 باز کردن داشبورد" : "📋 Open Dashboard", callback_data: "menu:main" }],
+        ];
+        await tg.answerCallbackQuery(query.id, cur === "fa" ? "🟢 فارسی انتخاب شد" : "🟢 English selected").catch(() => {});
+        await tg.editMessageText(chatId, messageId, welcomeText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: buttons },
+          disable_web_page_preview: true,
+        }).catch(async () => {
+          await tg.sendMessage(chatId, welcomeText, {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: buttons },
+            disable_web_page_preview: true,
+          }).catch(() => {});
+        });
+      } catch (e) {
+        await tg.answerCallbackQuery(query.id, `❌ ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
+      }
       return;
     }
 
@@ -332,7 +371,7 @@ export class AdminOrchestrator {
     } catch (error) {
       console.error("[admin] command handler error:", error);
       const errMsg = error instanceof Error ? error.message : String(error);
-
+      
       // Send error to user so they can see what went wrong.
       await tg.sendMessage(chatId, [
         "❌ <b>Error occurred</b>",
@@ -369,11 +408,10 @@ export class AdminOrchestrator {
     // "set:<scope>:..." → scope maps to screen ID
     if (first === "set") {
       if (second === "scheduler") return "schedule";
-      if (second === "strategy") return "strategy";
       if (second === "language") return "language";
       if (second === "providers") return "providers";
       if (second === "plugins") return "providers";
-      if (second === "general" || second === "language" || second === "content" || second === "quality" || second === "debug") return "settings";
+      if (second === "general" || second === "content" || second === "quality" || second === "debug") return "settings";
       if (second === "ai") return "ai";
       if (second === "categories") return "categories";
       if (second === "editor") return "editor";

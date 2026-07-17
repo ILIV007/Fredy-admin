@@ -36,16 +36,14 @@ export class UXLayerImpl implements UXLayer {
     const hook = (content.headline ?? content.text?.split("\n")[0] ?? "").trim();
 
     // 2. Body = AI text (full, no truncation, no URL stripping).
-    //    If AI didn't run (format-only), body = content.text as-is.
     const body = (content.text ?? "").trim();
-    // Apply Persian half-space fixing if language is fa.
     const fixedBody = content.language === "fa" ? fixPersianHalfSpaces(body) : body;
 
     // 3. Source line with random emoji.
     const { emoji } = await this.deps.sourceFormatter.buildFooter();
 
     // 4. Assemble the full text — with body pre-truncated so source/footer always survive.
-    //    v7.4.3: Previously, safeTruncate(fullText, 4096) was applied AFTER assembly,
+    //    v7.4.5: Previously, safeTruncate(fullText, 4096) was applied AFTER assembly,
     //    which meant long bodies could cut off the source blockquote and @ILIVIR3 footer.
     //    Now we compute the overhead (hook + source + footer) and truncate the BODY
     //    to fit within the limit, THEN assemble. Source and footer are ALWAYS present.
@@ -79,10 +77,10 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble the full post text.
-   *  v7.4.3: Now accepts a maxLen parameter and pre-truncates the BODY so
+   *  v7.4.5: Now accepts a maxLen parameter and pre-truncates the BODY so
    *  that the source blockquote and @ILIVIR3 footer ALWAYS survive.
-   *  Previously, the entire assembled text was truncated, which could cut
-   *  off the source and footer when the body was long. */
+   *  Instead of cutting mid-text with "...", we summarize by truncating
+   *  at paragraph/sentence boundaries with a clear continuation marker. */
   private assembleFullText(
     hook: string,
     body: string,
@@ -90,30 +88,9 @@ export class UXLayerImpl implements UXLayer {
     emoji: string,
     maxLen: number,
   ): string {
-    // ── Step 1: Build the "overhead" (everything except the body) ──
-    const overheadParts: string[] = [];
-
-    // Hook (bold) — only if different from body.
     const hasHook = hook && body && !body.startsWith(hook);
-    if (hasHook) {
-      overheadParts.push(`<b>${escapeHtml(hook)}</b>`);
-      overheadParts.push(""); // blank line after hook
-    }
-
-    // Source as blockquote — only for URLs with meaningful paths.
     const hasSource = sourceUrl && this.isLinkableUrl(sourceUrl);
-    if (hasSource) {
-      overheadParts.push("");
-      overheadParts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
-    }
 
-    // Channel footer as blockquote.
-    overheadParts.push("");
-    overheadParts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
-
-    // The overhead includes: hook + blank lines + source + footer.
-    // The body sits between hook and source, preceded by nothing extra.
-    // Total structure: [hook\n\n] [body] [\n\n source\n\n footer]
     const beforeBody = hasHook ? `<b>${escapeHtml(hook)}</b>\n\n` : "";
     const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
       + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
@@ -121,44 +98,61 @@ export class UXLayerImpl implements UXLayer {
     const overheadLen = beforeBody.length + afterBody.length;
     const bodyBudget = maxLen - overheadLen;
 
-    // ── Step 2: Truncate body to fit the budget ──
+    // Truncate body to fit the budget.
     let truncatedBody = body;
     if (bodyBudget > 0 && body.length > bodyBudget) {
-      // Truncate the raw body (before HTML conversion) to leave room.
-      // Reserve some extra chars for HTML tags that formatBody will add
-      // (e.g., <b></b> = 7 chars per occurrence, <blockquote></blockquote> = 26 chars).
-      const safetyMargin = 200; // generous buffer for HTML overhead
+      const safetyMargin = 200;
       const rawBudget = Math.max(100, bodyBudget - safetyMargin);
-      truncatedBody = this.truncateRawText(body, rawBudget);
+      truncatedBody = this.summarizeText(body, rawBudget);
     }
 
-    // ── Step 3: Convert (truncated) body to HTML ──
     const bodyHtml = this.formatBody(truncatedBody);
-
-    // ── Step 4: Assemble final text ──
     const result = beforeBody + bodyHtml + afterBody;
 
-    // ── Step 5: Final safety — if somehow still over limit, truncate the body HTML ──
+    // Final safety — if still over limit, truncate body HTML but keep source+footer.
     if (result.length > maxLen) {
-      // Last resort: truncate everything but always keep source + footer.
-      const footer = afterBody;
-      const keepFooter = footer.length < maxLen;
-      const bodyMax = maxLen - beforeBody.length - (keepFooter ? footer.length : 0);
+      const bodyMax = maxLen - beforeBody.length - afterBody.length;
       const safeBody = this.safeTruncate(bodyHtml, bodyMax > 100 ? bodyMax : 100);
-      const finalText = beforeBody + safeBody + (keepFooter ? footer : "");
-      return finalText;
+      return beforeBody + safeBody + afterBody;
     }
 
     return result;
   }
 
-  /** Truncate raw (pre-HTML) text at a word/sentence boundary. */
-  private truncateRawText(text: string, maxLen: number): string {
+  /** Summarize text by truncating at paragraph/sentence boundaries.
+   *  v7.4.5: Instead of cutting mid-text with "...", we try to:
+   *  1. Cut at the last paragraph break before maxLen
+   *  2. If no paragraph, cut at the last sentence end (. ! ? ؟)
+   *  3. If no sentence, cut at the last word boundary
+   *  Then add a clear "continued" marker. */
+  private summarizeText(text: string, maxLen: number): string {
     if (text.length <= maxLen) return text;
-    // Try to cut at the last newline before maxLen (preserves paragraph structure).
-    let cut = text.lastIndexOf("\n", maxLen);
-    if (cut < maxLen * 0.5) cut = maxLen; // fallback to hard cut
-    return text.slice(0, cut).trimEnd() + "\n\n…";
+
+    // Try to cut at the last paragraph break (double newline) before maxLen.
+    let cut = text.lastIndexOf("\n\n", maxLen);
+    if (cut > maxLen * 0.5) {
+      return text.slice(0, cut).trimEnd() + "\n\n…(ادامه در کامنت)";
+    }
+
+    // Try to cut at the last sentence end (. ! ? ؟).
+    const sentenceEnd = Math.max(
+      text.lastIndexOf(". ", maxLen),
+      text.lastIndexOf("! ", maxLen),
+      text.lastIndexOf("? ", maxLen),
+      text.lastIndexOf("؟ ", maxLen),
+    );
+    if (sentenceEnd > maxLen * 0.5) {
+      return text.slice(0, sentenceEnd + 1).trimEnd() + "\n\n…(ادامه در کامنت)";
+    }
+
+    // Try to cut at the last word boundary (space).
+    const wordEnd = text.lastIndexOf(" ", maxLen);
+    if (wordEnd > maxLen * 0.5) {
+      return text.slice(0, wordEnd).trimEnd() + " …(ادامه در کامنت)";
+    }
+
+    // Last resort: hard cut.
+    return text.slice(0, maxLen).trimEnd() + " …(ادامه در کامنت)";
   }
 
   /** Convert AI markdown to Telegram HTML.
@@ -267,8 +261,7 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble a shorter caption for image posts.
-   *  v7.4.3: Now uses the same pre-truncation pattern as assembleFullText
-   *  so source + footer always survive, even for long bodies. */
+   *  v7.4.5: Uses the same pre-truncation pattern as assembleFullText. */
   private assembleCaption(
     hook: string,
     body: string,
@@ -286,14 +279,13 @@ export class UXLayerImpl implements UXLayer {
     const overheadLen = beforeBody.length + afterBody.length;
     const bodyBudget = maxLen - overheadLen;
 
-    // For captions, always limit body to 800 chars (was the old behavior).
-    // But now we ensure source + footer always fit.
+    // For captions, always limit body to 800 chars, but ensure source + footer fit.
     const captionBodyLimit = Math.min(bodyBudget > 0 ? bodyBudget : 800, 800);
     let shortBody = body;
     if (body.length > captionBodyLimit) {
       const safetyMargin = 200;
       const rawBudget = Math.max(100, captionBodyLimit - safetyMargin);
-      shortBody = this.truncateRawText(body, rawBudget);
+      shortBody = this.summarizeText(body, rawBudget);
     }
 
     const bodyHtml = this.formatBody(shortBody);

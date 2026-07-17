@@ -28,7 +28,6 @@ export type DebugEventName =
   | "scheduler.slot_fired"
   | "scheduler.skip"
   | "scheduler.stale_language"
-  | "scheduler.stale_plan"
   | "scheduler.alert"
   | "scheduler.transform_failed"
   | "scheduler.send_formatted_failed"

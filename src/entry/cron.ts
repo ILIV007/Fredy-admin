@@ -43,14 +43,13 @@ export async function cronHandler(
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
-        const { acquireTickLock } = await import("../services/tick-lock");
-        const lock = await acquireTickLock(container.kv, 90);
-        if (!lock.acquired) return;
-        try {
-          const scheduler = new SchedulerOrchestrator(container);
-          await scheduler.tick();
-          await scheduler.refreshSources();
-        } finally { await lock.release(); }
+        const scheduler = new SchedulerOrchestrator(container);
+        const result = await scheduler.tick();
+        if (result.fired) {
+        } else if (result.skipped) {
+        }
+        // Also refresh sources.
+        await scheduler.refreshSources();
       })(),
     );
     return;

@@ -33,7 +33,7 @@ export default {
 
     // POST or GET /internal/tick — external cron endpoint.
     if (url.pathname === "/internal/tick") {
-      const container = await buildContainer(env);
+      const container = buildContainer(env);
       return tickHandler(request, url, { env, container, ctx });
     }
 
@@ -49,19 +49,19 @@ export default {
 
     // /Manager or /manager — full debug dashboard.
     if (url.pathname === "/Manager" || url.pathname === "/manager" || url.pathname.startsWith("/Manager/") || url.pathname.startsWith("/manager/")) {
-      const container = await buildContainer(env);
+      const container = buildContainer(env);
       return managerHandler(request, url, { env, container });
     }
 
     // /debug/* — legacy debug dashboard.
     if (url.pathname === "/debug" || url.pathname.startsWith("/debug/")) {
-      const container = await buildContainer(env);
+      const container = buildContainer(env);
       return debugHandler(request, url, { env, container });
     }
 
     // GET /webhook/info — bot info.
     if (request.method === "GET" && url.pathname === "/webhook/info") {
-      const container = await buildContainer(env);
+      const container = buildContainer(env);
       const me = await container.tg.getMe();
       return new Response(JSON.stringify(me, null, 2), {
         headers: { "Content-Type": "application/json" },
@@ -70,7 +70,7 @@ export default {
 
     // POST /webhook — Telegram update.
     if (request.method === "POST" && url.pathname === "/webhook") {
-      const container = await buildContainer(env);
+      const container = buildContainer(env);
       return webhookHandler(request, { env, container, ctx });
     }
 
@@ -78,7 +78,7 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    const container = await buildContainer(env);
+    const container = buildContainer(env);
     await cronHandler(event, { env, container, ctx });
   },
 };
