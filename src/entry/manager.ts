@@ -184,6 +184,49 @@ export async function managerHandler(
     return json({ ok: deleted, message: deleted ? "Item deleted" : "Item not found" });
   }
 
+  // ── Queue: send now (publish a specific queue item immediately) ──
+  const queueSendMatch = apiPath.match(/^queue\/([ABC])\/send-now$/);
+  if (queueSendMatch && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as { contentId?: string };
+    const cat = queueSendMatch[1] as "A" | "B" | "C";
+    if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
+    try {
+      // Find the item in the queue
+      const items = await container.queue.listItems(cat);
+      const target = items.find(q => q.content.id === body.contentId);
+      if (!target) return json({ ok: false, error: "Item not found in queue" });
+      // Publish it
+      const pubResult = await container.finalPublisher.publish(target.content);
+      if (pubResult.ok) {
+        // Remove from queue after successful publish
+        await container.queue.deleteItem(cat, body.contentId);
+        // Send to admin PM
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        if (adminId > 0) {
+          try {
+            const finalPost = await container.uxLayer.transform(target.content);
+            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+              await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
+            } else {
+              await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+            }
+          } catch { /* skip */ }
+          await container.tg.sendMessage(adminId, [
+            `📤 <b>Published manually from Queue (Send Now)</b>`,
+            `<b>Category:</b> ${cat}`,
+            `<b>AI:</b> ${target.content.aiProvider}/${target.content.aiModel}`,
+            `<b>Quality:</b> ${target.content.quality.overallScore}`,
+            `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+        return json({ ok: true, messageId: pubResult.telegramMessageId });
+      }
+      return json({ ok: false, error: pubResult.error ?? "Publish failed" });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
   // ── AI ──
   if (apiPath === "ai" && request.method === "GET") {
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
@@ -1239,16 +1282,18 @@ async function loadQueue(){
     if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
     const l=d.limits||{};
     const items=d.items||{};
-    let html='';
+    let html='<div class="card" style="display:flex;gap:8px;align-items:center"><button class="btn" onclick="sortByProvider()">🔤 Sort by Provider</button><button class="btn" onclick="loadQueue()">📋 Default View</button></div>';
     for(const cat of["A","B","C"]){
       const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
       const lim=l[cat]||{min:0,target:0};
       const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
-      const catItems=items[cat]||[];
+      let catItems=items[cat]||[];
+      // Sort by provider if sortProvider is active
+      if(window._queueSortProvider){catItems=catItems.slice().sort((a,b)=>(a.pluginId||"").localeCompare(b.pluginId||""));}
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
         html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td><button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">🗑️ Delete</button></td></tr>').join("")+
+        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\\''+cat+'\\',\\''+it.id+'\\')">📤 Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">🗑️</button></td></tr>').join("")+
         '</tbody></table>';
       }else{
         html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
@@ -1258,10 +1303,18 @@ async function loadQueue(){
     c.innerHTML=html;
   }catch(e){c.innerHTML='<div class="card">Failed to load queue: '+e+'</div>';}
 }
+function sortByProvider(){window._queueSortProvider=true;loadQueue();}
 async function deleteQueueItem(cat,id){
   if(!confirm("Delete this item from queue?"))return;
   const d=await api("queue/"+cat+"/delete","POST",{contentId:id});
   toast(d.ok?"🗑️ Item deleted":"❌ Failed");
+  loadQueue();
+}
+async function sendQueueNow(cat,id){
+  if(!confirm("Publish this post NOW to the channel?"))return;
+  toast("📤 Publishing...");
+  const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});
+  toast(d.ok?"✅ Published! Msg ID: "+d.messageId:"❌ "+(d.error||"Failed"));
   loadQueue();
 }
 
@@ -1304,16 +1357,48 @@ async function testAI(){
 }
 
 async function loadScheduler(){
-  const d=await api("scheduler");const c=document.getElementById("content");
-  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-  const s=d.settings||{};const st=d.status||{};
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">⏯️ Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"⏸️ Pause Scheduler":"▶️ Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">⚡ Force Publish</button></div></div>'+
-  '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Slots</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.slots||[]).map(t=>'<span class="badge badge-blue">'+t+"</span>").join("")+'</div></div>';
+  const c=document.getElementById("content");
+  c.innerHTML='<div class="card">Loading scheduler…</div>';
+  try{
+    const d=await api("scheduler");
+    const h=await api("history");
+    if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+    const s=d.settings||{};const st=d.status||{};
+    // Build 3-day post history table
+    let historyHtml='';
+    if(h.ok&&h.recent){
+      const recent=h.recent.slice(0,30); // last 30 posts (~3 days)
+      if(recent.length>0){
+        historyHtml='<div class="card"><h3 style="margin-bottom:8px">📋 Post History (3 days)</h3><table style="font-size:12px"><thead><tr><th>Date</th><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+
+        recent.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleDateString()+'</td><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"❌")+'</td></tr>').join("")+
+        '</tbody></table></div>';
+      }else{
+        historyHtml='<div class="card"><p style="color:var(--text2)">No posts in recent history.</p></div>';
+      }
+    }
+    // Build today's schedule table
+    let scheduleHtml='';
+    if(st.today&&st.today.slots){
+      const slots=st.today.slots;
+      scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
+      slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'✅ Published':'⏳ Pending')+'</td></tr>').join("")+
+      '</tbody></table></div>';
+    }
+    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">⏯️ Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"⏸️ Pause Scheduler":"▶️ Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">⚡ Force Publish</button></div></div>'+
+    '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
+    scheduleHtml+
+    '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div></div>'+
+    '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span></div>'+
+    historyHtml;
+  }catch(e){c.innerHTML='<div class="card">Error: '+e+'</div>';}
 }
-async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
+async function toggleScheduler(){
+  const cur=await api("scheduler");
+  const enabled=cur.status?.enabled;
+  const d=await api(enabled?"scheduler/pause":"scheduler/resume","POST");
+  toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");
+  loadScheduler();
+}
 async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
 
 async function loadLogs(){

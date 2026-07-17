@@ -116,7 +116,7 @@ export class DuplicateDetector {
 
     // Also store by URL for fast lookup.
     if (item.url) {
-      await this.deps.kv.setJson(`fredy:dedup:url:${this.hashUrl(item.url)}`, record, this.ttlSeconds);
+      await this.deps.kv.setJson(`fredy:dedup:url:${await this.hashUrl(item.url)}`, record, this.ttlSeconds);
     }
 
     // Also store by title hash.
@@ -151,15 +151,10 @@ export class DuplicateDetector {
     return `t${Math.abs(hash).toString(36)}`;
   }
 
-  /** Hash a URL for KV key (URLs can be long). */
-  private hashUrl(url: string): string {
-    let hash = 0;
-    for (let i = 0; i < url.length; i++) {
-      const char = url.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(36);
+  /** Hash a URL for KV key (URLs can be long).
+   *  Uses SHA-1 for collision resistance. */
+  private async hashUrl(url: string): Promise<string> {
+    return sha1(`url:${url}`);
   }
 
   /** Check if URL is a generic API endpoint (no meaningful path).
@@ -182,7 +177,7 @@ export class DuplicateDetector {
 
   /** Find a dedup record by URL. */
   private async findByUrl(url: string): Promise<DedupRecord | null> {
-    return this.deps.kv.getJson<DedupRecord>(`fredy:dedup:url:${this.hashUrl(url)}`);
+    return this.deps.kv.getJson<DedupRecord>(`fredy:dedup:url:${await this.hashUrl(url)}`);
   }
 
   /** Find a dedup record by content hash. */
