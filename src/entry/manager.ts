@@ -1283,7 +1283,7 @@ async function loadAI(){
     for(const[pid,models]of Object.entries(d.modelsByProvider)){
       const provInfo=(d.providers||[]).find(p=>p.id===pid)||{};
       modelsHtml+='<div style="margin-bottom:12px"><h4 style="margin-bottom:6px">'+(provInfo.name||pid)+' '+(provInfo.configured?'✅':'❌')+' '+(provInfo.enabled?'🟢':'🔴')+'</h4><table style="font-size:12px"><thead><tr><th>#</th><th>Model</th><th>Status</th><th>Test</th></tr></thead><tbody>'+
-      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\''+pid+'\',\''+m.model.replace(/'/g,"")+'\')">🧪 Test</button></td></tr>').join('')+
+      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\''+pid+'\',\''+m.model.replace(/['"]/g,"")+'\')">🧪 Test</button></td></tr>').join('')+
       '</tbody></table></div>';
     }
   }
