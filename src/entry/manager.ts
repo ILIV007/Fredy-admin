@@ -1048,7 +1048,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 const TOKEN="${token}";const API="/Manager/api/";
 const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"strategy",icon:"🎯",label:"Strategy"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"debug",icon:"🐞",label:"Debug"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"settings",icon:"🔧",label:"Settings"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
 let currentPage="dashboard";
-function buildNav(){document.getElementById("nav").innerHTML=navItems.map(i=>'<div class="nav-item" onclick="navigate(\''+i.id+'\')" id="nav-'+i.id+'"><span class="nav-icon">'+i.icon+'</span>'+i.label+'</div>').join("");}
+function buildNav(){document.getElementById("nav").innerHTML=navItems.map(i=>'<div class="nav-item" onclick="navigate(\\''+i.id+'\\')" id="nav-'+i.id+'"><span class="nav-icon">'+i.icon+'</span>'+i.label+'</div>').join("");}
 function navigate(id){currentPage=id;document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));const el=document.getElementById("nav-"+id);if(el)el.classList.add("active");const item=navItems.find(i=>i.id===id);document.getElementById("page-title").textContent=item?item.label:"";loadPage(id);}
 function toggleSidebar(){document.getElementById("sidebar").classList.toggle("open");}
 async function api(path,method="GET",body=null){const opts={method,headers:{}};if(TOKEN)opts.headers["Authorization"]="Bearer "+TOKEN;if(body){opts.headers["Content-Type"]="application/json";opts.body=JSON.stringify(body);}const r=await fetch(API+path,opts);return r.json();}
@@ -1059,7 +1059,7 @@ function fmtAgo(ts){if(!ts)return"—";const s=Math.floor((Date.now()-(typeof ts
 function card(l,v){return '<div class="card"><div class="card-label">'+l+'</div><div class="card-value">'+v+"</div></div>"}
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast("📋 Copied!")).catch(()=>toast("❌ Copy failed"));}
 function copyElement(id){const el=document.getElementById(id);if(el)copyText(el.textContent);}
-function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\''+id+'\')" style="margin-top:4px">📋 Copy</button>';}
+function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\''+id+'\\')" style="margin-top:4px">📋 Copy</button>';}
 function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
 
 async function loadDashboard(){
@@ -1105,7 +1105,7 @@ async function testEverything(){
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ All Tests Passed':'❌ Some Tests Failed')+'</h3><span class="badge '+(ok?"badge-green":"badge-red")+'">'+summary+'</span></div>'+
     '<table style="font-size:13px"><thead><tr><th>Section</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead><tbody>'+secRows+'</tbody></table>'+
     pluginDetail+
-    '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report (copyable)</h4><pre id="everything-pre" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\'everything-pre\')">📋 Copy Full Report</button></div></div>';
+    '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report (copyable)</h4><pre id="everything-pre" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\\'everything-pre\\')">📋 Copy Full Report</button></div></div>';
     toast(ok?"✅ All tests passed!":"❌ Some tests failed");
   }catch(e){
     w.innerHTML='<div class="card">❌ Test failed: '+escapeHtml(String(e))+'</div>';
@@ -1122,7 +1122,7 @@ async function loadPost(){
   const enabledPlugins=d.plugins.filter(p=>p.enabled);
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">📤 Post to Channel</h3><p style="color:var(--text2);margin-bottom:12px">Select a source API below to fetch content, process it through the AI pipeline, and publish immediately to the channel. The system tries up to 5 items per API until one passes quality. A detailed JSON report will appear at the bottom.</p></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">🔌 Available APIs ('+enabledPlugins.length+' enabled)</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
-  enabledPlugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel(\''+p.id+'\')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+'</div></button>').join("")+
+  enabledPlugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel(\\''+p.id+'\\')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+'</div></button>').join("")+
   '</div></div><div id="post-result"></div>';
 }
 
@@ -1154,7 +1154,7 @@ async function postToChannel(pluginId){
     }
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ Posted Successfully':'❌ Post Failed')+'</h3><span class="badge '+(ok?'badge-green':'badge-red')+'">'+pluginId+'</span></div>'+
       stageHtml+contentHtml+
-      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\'post-json\')">📋 Copy Report</button></div></div>';
+      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement(\\'post-json\\')">📋 Copy Report</button></div></div>';
     toast(ok?"✅ Posted to channel!":"❌ Post failed");
   }catch(e){
     w.innerHTML='<div class="card">❌ Error: '+escapeHtml(String(e))+'</div>';
@@ -1172,7 +1172,7 @@ async function runBacktest(){
   const r=document.getElementById("backtest-results");r.innerHTML='<div class="card">Running tests…</div>';
   const d=await api("backtest","POST");
   r.innerHTML='<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center"><h3>'+(d.ok?'✅ All Tests Passed':'❌ Some Tests Failed')+'</h3><span class="badge '+(d.ok?"badge-green":"badge-red")+'">'+d.summary+'</span></div></div>'+
-  d.results.map(t=>'<div class="test-result '+(t.ok?"test-pass":"test-fail")+'"><span>'+(t.ok?"✅":"❌")+'</span><span style="font-weight:600">'+t.test+'</span><span style="color:var(--text2);flex:1">'+t.detail+'</span><span style="color:var(--text2);font-size:11px">'+t.durationMs+'ms</span><button class="btn btn-sm btn-ghost" onclick="copyText(\''+t.test+": "+t.detail+'\')">📋</button></div>').join("");
+  d.results.map(t=>'<div class="test-result '+(t.ok?"test-pass":"test-fail")+'"><span>'+(t.ok?"✅":"❌")+'</span><span style="font-weight:600">'+t.test+'</span><span style="color:var(--text2);flex:1">'+t.detail+'</span><span style="color:var(--text2);font-size:11px">'+t.durationMs+'ms</span><button class="btn btn-sm btn-ghost" onclick="copyText(\\''+t.test+": "+t.detail+'\\')">📋</button></div>').join("");
   toast(d.ok?"✅ All tests passed!":"❌ Some tests failed");
 }
 async function runCheckup(){
@@ -1199,7 +1199,7 @@ async function runCheckup(){
     '</tbody></table>'+
     '<h4 style="margin-bottom:6px">📋 Complete JSON Report (copy and send for debugging)</h4>'+
     '<pre id="checkup-json" style="max-height:600px">'+escapeHtml(jsonStr)+'</pre>'+
-    '<button class="btn" onclick="copyElement(\'checkup-json\')">📋 Copy Full JSON Report</button></div>';
+    '<button class="btn" onclick="copyElement(\\'checkup-json\\')">📋 Copy Full JSON Report</button></div>';
     toast(pct>=80?"✅ System healthy!":(pct>=50?"⚠️ Some issues":"❌ Critical issues"));
   }catch(e){
     r.innerHTML='<div class="card">❌ Checkup failed: '+escapeHtml(String(e))+'</div>';
@@ -1215,7 +1215,7 @@ async function loadPlugins(){
     if(!d.ok||!d.plugins){c.innerHTML='<div class="card">Error: '+(d.error||"Unknown")+'</div>';return;}
     c.innerHTML='<div style="margin-bottom:12px;display:flex;gap:8px"><button class="btn" onclick="testAllPlugins()">🧪 Test All Plugins</button></div>'+
     '<table><thead><tr><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Rate Limit</th><th>Actions</th></tr></thead><tbody>'+
-    d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\''+p.id+'\')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin(\''+p.id+'\')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
+    d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin(\\''+p.id+'\\')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin(\\''+p.id+'\\')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
     '<div id="test-all-results"></div>';
   }catch(e){c.innerHTML='<div class="card">Failed to load plugins: '+e+'</div>';}
 }
@@ -1224,7 +1224,7 @@ async function testAllPlugins(){
   const r=document.getElementById("test-all-results");r.innerHTML='<div class="card">Testing all plugins…</div>';
   const d=await api("test/all-plugins","POST");
   r.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Test All Results</h3>'+
-  d.results.map(t=>'<div class="test-result '+(t.ok?"test-pass":"test-fail")+'"><span>'+(t.ok?"✅":"❌")+'</span><span style="font-weight:600">'+t.id+'</span><span style="color:var(--text2);flex:1">'+(t.ok?t.itemCount+" items":t.error)+'</span><button class="btn btn-sm btn-ghost" onclick="copyText(\''+t.id+": "+(t.ok?t.itemCount+" items":t.error)+'\')">📋</button></div>').join("")+'</div>';
+  d.results.map(t=>'<div class="test-result '+(t.ok?"test-pass":"test-fail")+'"><span>'+(t.ok?"✅":"❌")+'</span><span style="font-weight:600">'+t.id+'</span><span style="color:var(--text2);flex:1">'+(t.ok?t.itemCount+" items":t.error)+'</span><button class="btn btn-sm btn-ghost" onclick="copyText(\\''+t.id+": "+(t.ok?t.itemCount+" items":t.error)+'\\')">📋</button></div>').join("")+'</div>';
   toast("Test all complete");
 }
 
@@ -1233,46 +1233,33 @@ async function togglePlugin(id){const d=await api("plugin/"+id+"/toggle","POST")
 
 async function loadQueue(){
   const c=document.getElementById("content");
-  c.innerHTML='<div class="card">Loading queue…</div>';
+  c.innerHTML='<div class="card">Loading queue...</div>';
   try{
     const d=await api("queue");
     if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
     const l=d.limits||{};
     const items=d.items||{};
-    let html='<div class="card" style="display:flex;gap:8px;align-items:center"><button class="btn" onclick="sortByProvider()">🔤 Sort by Provider</button><button class="btn" onclick="window._queueSortProvider=false;loadQueue()">📋 Default View</button></div>';
+    let html='<div class="card" style="display:flex;gap:8px"><button class="btn" onclick="sortByProvider()">Sort by Provider</button><button class="btn" onclick="window._qsp=false;loadQueue()">Default View</button></div>';
     for(const cat of["A","B","C"]){
       const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
       const lim=l[cat]||{min:0,target:0};
       const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
       let catItems=items[cat]||[];
-      if(window._queueSortProvider){catItems=catItems.slice().sort((a,b)=>(a.pluginId||"").localeCompare(b.pluginId||""));}
+      if(window._qsp){catItems=catItems.slice().sort((a,b)=>(a.pluginId||"").localeCompare(b.pluginId||""));}
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
         html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\''+cat+'\',\''+it.id+'\')">📤 Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\''+cat+'\',\''+it.id+'\')">🗑️</button></td></tr>').join("")+
+        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"-")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"-")+"/"+(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\\"'+cat+'\\",\\"'+it.id+'\\")">Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\"'+cat+'\\",\\"'+it.id+'\\")">Delete</button></td></tr>').join("")+
         '</tbody></table>';
-      }else{
-        html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
-      }
+      }else{html+='<p style="color:var(--text2);margin-top:8px">No items.</p>';}
       html+='</div>';
     }
     c.innerHTML=html;
-  }catch(e){c.innerHTML='<div class="card">Failed to load queue: '+e+'</div>';}
+  }catch(e){c.innerHTML='<div class="card">Error: '+e+'</div>';}
 }
-function sortByProvider(){window._queueSortProvider=true;loadQueue();}
-async function deleteQueueItem(cat,id){
-  if(!confirm("Delete this item from queue?"))return;
-  const d=await api("queue/"+cat+"/delete","POST",{contentId:id});
-  toast(d.ok?"🗑️ Item deleted":"❌ Failed");
-  loadQueue();
-}
-async function sendQueueNow(cat,id){
-  if(!confirm("Publish this post NOW to the channel?"))return;
-  toast("📤 Publishing...");
-  const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});
-  toast(d.ok?"✅ Published! Msg ID: "+d.messageId:"❌ "+(d.error||"Failed"));
-  loadQueue();
-}
+function sortByProvider(){window._qsp=true;loadQueue();}
+async function deleteQueueItem(cat,id){if(!confirm("Delete?"))return;const d=await api("queue/"+cat+"/delete","POST",{contentId:id});toast(d.ok?"Deleted":"Failed");loadQueue();}
+async function sendQueueNow(cat,id){if(!confirm("Publish NOW?"))return;toast("Publishing...");const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});toast(d.ok?"Published! Msg: "+d.messageId:"Failed");loadQueue();}
 
 async function loadAI(){
   const d=await api("ai");const c=document.getElementById("content");
@@ -1283,7 +1270,7 @@ async function loadAI(){
     for(const[pid,models]of Object.entries(d.modelsByProvider)){
       const provInfo=(d.providers||[]).find(p=>p.id===pid)||{};
       modelsHtml+='<div style="margin-bottom:12px"><h4 style="margin-bottom:6px">'+(provInfo.name||pid)+' '+(provInfo.configured?'✅':'❌')+' '+(provInfo.enabled?'🟢':'🔴')+'</h4><table style="font-size:12px"><thead><tr><th>#</th><th>Model</th><th>Status</th><th>Test</th></tr></thead><tbody>'+
-      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\''+pid+'\',\''+m.model.replace(/['"]/g,"")+'\')">🧪 Test</button></td></tr>').join('')+
+      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/'/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
       '</tbody></table></div>';
     }
   }
@@ -1299,7 +1286,7 @@ async function testAIModel(pid,model){
   if(w)w.innerHTML='<div class="card">Testing '+pid+'/'+model+'...</div>';
   const d=await api("test/ai/"+pid+"/"+model,"POST");
   const jsonStr=JSON.stringify(d,null,2);
-  if(w)w.innerHTML='<h4 style="margin:8px 0">Result: '+pid+'/'+model+'</h4><pre id="ai-model-pre">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\'ai-model-pre\')">📋 Copy</button>';
+  if(w)w.innerHTML='<h4 style="margin:8px 0">Result: '+pid+'/'+model+'</h4><pre id="ai-model-pre">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'ai-model-pre\\')">📋 Copy</button>';
   toast(d.ok?"✅ "+model+" OK":"❌ "+model+" failed");
 }
 
@@ -1308,58 +1295,55 @@ async function testAI(){
   const w=document.getElementById("ai-result-wrap");w.innerHTML='<div class="card">Testing...</div>';
   const d=await api("test/ai","POST",{text});
   const jsonStr=JSON.stringify(d,null,2);
-  w.innerHTML='<pre id="ai-pre">'+jsonStr+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\'ai-pre\')">📋 Copy Result</button>';
+  w.innerHTML='<pre id="ai-pre">'+jsonStr+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'ai-pre\\')">📋 Copy Result</button>';
   toast(d.ok?"✅ AI OK":"❌ AI failed");
 }
 
 async function loadScheduler(){
   const c=document.getElementById("content");
-  c.innerHTML='<div class="card">Loading scheduler…</div>';
+  c.innerHTML='<div class="card">Loading...';
   try{
     const d=await api("scheduler");
     const h=await api("history");
     if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
     const s=d.settings||{};const st=d.status||{};
-    // Build 3-day post history table
     let historyHtml='';
     if(h.ok&&h.recent){
       const recent=h.recent.slice(0,30);
       if(recent.length>0){
-        historyHtml='<div class="card"><h3 style="margin-bottom:8px">📋 Post History (3 days)</h3><table style="font-size:12px"><thead><tr><th>Date</th><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+
-        recent.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleDateString()+'</td><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"❌")+'</td></tr>').join("")+
+        historyHtml='<div class="card"><h3 style="margin-bottom:8px">Post History (3 days)</h3><table style="font-size:12px"><thead><tr><th>Date</th><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+
+        recent.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleDateString()+'</td><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"X")+'</td></tr>').join("")+
         '</tbody></table></div>';
-      }else{
-        historyHtml='<div class="card"><p style="color:var(--text2)">No posts in recent history.</p></div>';
-      }
+      }else{historyHtml='<div class="card"><p style="color:var(--text2)">No posts in recent history.</p></div>';}
     }
-    // Build today's schedule table with fired status
     let scheduleHtml='';
     if(st.today&&st.today.slots){
-      const slots=st.today.slots;
-      scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
-      slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'✅ Published':'⏳ Pending')+'</td></tr>').join("")+
+      scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
+      st.today.slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'Published':'Pending')+'</td></tr>').join("")+
       '</tbody></table></div>';
     }else{
-      scheduleHtml='<div class="card"><p style="color:var(--red)">⚠️ Could not generate today\'s plan — check logs.</p></div>';
+      scheduleHtml='<div class="card"><p style="color:var(--red)">Could not generate today plan.</p></div>';
     }
-    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">⏯️ Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"⏸️ Pause Scheduler":"▶️ Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">⚡ Force Publish</button></div></div>'+
-    '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"—")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"—")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
+    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"Pause Scheduler":"Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">Force Publish</button></div></div>'+
+    '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"-")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"-")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
     scheduleHtml+
-    '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div></div>'+
-    '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span></div>'+
+    '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'-'+w.end+'</span>').join("")+'</div></div>'+
+    '<div class="card"><h3 style="margin-bottom:8px">Quiet Hours</h3><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' - '+(s.quietHours?.end??"07:30")+'</span></div>'+
     historyHtml;
   }catch(e){c.innerHTML='<div class="card">Error: '+e+'</div>';}
 }
-async function toggleScheduler(){const cur=await api("scheduler");const enabled=cur.status?.enabled;const d=await api(enabled?"scheduler/pause":"scheduler/resume","POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
-async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?"✅ "+d.message:"❌ "+(d.error||"Failed"));loadScheduler();}
+async function toggleScheduler(){const cur=await api("scheduler");const enabled=cur.status?.enabled;const d=await api(enabled?"scheduler/pause":"scheduler/resume","POST");toast(d.ok?(d.enabled?"Scheduler resumed":"Scheduler paused"):"Failed");loadScheduler();}
+async function forcePublish(){if(!confirm("Force publish now?"))return;toast("Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?"Done: "+d.message:"Failed: "+(d.error||""));loadScheduler();}
+async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
+async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
 
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const errJson=JSON.stringify(d.errors.slice(0,20),null,2);
   const updJson=JSON.stringify(d.updates.slice(0,20),null,2);
-  c.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\'err-pre\')">📋 Copy Errors</button></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Updates ('+d.updates.length+')</h3><pre id="upd-pre">'+updJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\'upd-pre\')">📋 Copy Updates</button></div>';
+  c.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'err-pre\\')">📋 Copy Errors</button></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Updates ('+d.updates.length+')</h3><pre id="upd-pre">'+updJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'upd-pre\\')">📋 Copy Updates</button></div>';
 }
 
 async function loadConfig(){
@@ -1367,7 +1351,7 @@ async function loadConfig(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const cfgJson=JSON.stringify(d.settings,null,2);
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Config Sections</h3><table><thead><tr><th>Section</th><th>Version</th><th>Description</th></tr></thead><tbody>'+(d.sections||[]).map(s=>'<tr><td><code>'+s.key+'</code></td><td>v'+s.version+'</td><td>'+s.description+'</td></tr>').join("")+'</tbody></table></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Full Config</h3><pre id="cfg-pre">'+cfgJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\'cfg-pre\')">📋 Copy Config</button></div>';
+  '<div class="card"><h3 style="margin-bottom:8px">Full Config</h3><pre id="cfg-pre">'+cfgJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement(\\'cfg-pre\\')">📋 Copy Config</button></div>';
 }
 
 async function loadSystem(){
@@ -1391,7 +1375,7 @@ async function loadStrategy(){
   const s=d.strategy||{};const plan=d.plan||{};
   const modes=[{id:"minimal",name:"Minimal",desc:"4 posts/day"},{id:"balanced",name:"Balanced",desc:"9 posts/day (default)"},{id:"active",name:"Active",desc:"13 posts/day"},{id:"ai_priority",name:"AI Priority",desc:"8 posts/day, threshold 80"},{id:"news_priority",name:"News Priority",desc:"10 posts/day, B-heavy"},{id:"custom",name:"Custom",desc:"Admin-defined"}];
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+card("Mode",s.mode??"balanced")+card("Language",s.language??"auto")+card("Weekly Themes",s.weeklyThemesEnabled?"✅":"❌")+card("Quality Threshold",s.qualityThreshold??"80")+'</div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy(\''+m.id+'\')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy(\\''+m.id+'\\')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
   (s.mode==="custom"?'<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>':'')+
   '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>'<tr><td>'+p.index+'</td><td>'+p.time+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td>'+p.priority+'</td><td>'+p.status+'</td></tr>').join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
 }

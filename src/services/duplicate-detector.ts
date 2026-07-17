@@ -153,7 +153,6 @@ export class DuplicateDetector {
 
   /** Hash a URL for KV key (URLs can be long). */
   private async hashUrl(url: string): Promise<string> {
-    // Use SHA-1 for collision resistance — djb2 (32-bit) had collision risk.
     return sha1(`url:${url}`);
   }
 

@@ -39,25 +39,18 @@ export async function cronHandler(
   const { env, container, ctx } = deps;
 
   // 24-hour backup cron — runs the full tick as a safety net.
-  // IMPORTANT: acquires the SAME lock as /internal/tick to prevent
-  // concurrent execution with an external cron-job.org call.
   if (event.cron === "0 */24 * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
         const { acquireTickLock } = await import("../services/tick-lock");
         const lock = await acquireTickLock(container.kv, 90);
-        if (!lock.acquired) {
-          return; // Another tick is running — skip.
-        }
+        if (!lock.acquired) return;
         try {
           const scheduler = new SchedulerOrchestrator(container);
           await scheduler.tick();
-          // Also refresh sources.
           await scheduler.refreshSources();
-        } finally {
-          await lock.release();
-        }
+        } finally { await lock.release(); }
       })(),
     );
     return;
