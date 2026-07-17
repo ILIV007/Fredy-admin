@@ -73,11 +73,12 @@ export class ContentManager {
   async process(
     sourceItem: SourceItem,
     language?: string,
-    options?: { skipDedup?: boolean },
+    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
   ): Promise<PipelineResult> {
     const settings = await this.deps.settings();
     const lang = language ?? settings.language.default;
     const skipDedup = options?.skipDedup ?? false;
+    const skipEnqueue = options?.skipEnqueue ?? false;
 
     // ── Stage 1: Normalize (SourceItem → StandardPost) ─────
     let post: StandardPost;
@@ -242,7 +243,7 @@ export class ContentManager {
           0,
         );
         if (!skipDedup) await this.deps.duplicateDetector.record(item);
-        await this.deps.queue.enqueue(readyContent);
+        if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
         return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
           error: aiResult.error ?? "AI failed",
           attempts: aiResult.attempts,
@@ -302,8 +303,11 @@ export class ContentManager {
     // ── Stage 8: Record in dedup store ──────────────────────
     if (!skipDedup) await this.deps.duplicateDetector.record(item);
 
-    // ── Stage 9: Enqueue ────────────────────────────────────
-    await this.deps.queue.enqueue(readyContent);
+    // ── Stage 9: Enqueue (unless caller will publish immediately) ───
+    // skipEnqueue=true is used by manual publish paths so the post doesn't
+    // both go to the queue AND get published (which was the v7.4.0 bug
+    // where manual posts showed up in the Queue page after sending).
+    if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
 
     return {
       ok: true,
@@ -320,12 +324,13 @@ export class ContentManager {
   async processFromPlugin(
     pluginId: string,
     language?: string,
+    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
   ): Promise<PipelineResult> {
     const item = await this.deps.pluginManager.fetchOne(pluginId);
     if (!item) {
       return this.reject("normalize", "empty_content", `Plugin "${pluginId}" returned no items`, null);
     }
-    return this.process(item, language);
+    return this.process(item, language, options);
   }
 
   /**
@@ -341,6 +346,7 @@ export class ContentManager {
     category: Category,
     lastSource: string | null = null,
     language?: string,
+    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
   ): Promise<PipelineResult> {
     const fetchResult = await this.deps.pluginManager.fetchForCategory(category, lastSource);
     if (!fetchResult) {
@@ -375,7 +381,7 @@ export class ContentManager {
 
     // Try each item until one passes the pipeline.
     for (const item of candidates) {
-      const result = await this.process(item, language);
+      const result = await this.process(item, language, options);
       if (result.ok) return result;
       // Otherwise, try the next item.
       this.deps.logger.info("pipeline.error", {

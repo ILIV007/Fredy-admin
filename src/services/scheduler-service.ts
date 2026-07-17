@@ -237,11 +237,15 @@ export class SchedulerService {
     }
 
     // 2. If queue is empty (or all stale), process a fresh item from a plugin.
+    //    v7.4.2: skipEnqueue=true — this content is about to be published
+    //    immediately, so it should NOT also go to the queue (otherwise the
+    //    queue fills with already-published posts).
     if (!content) {
       const pipelineResult = await this.deps.contentManager.processForCategory(
         slot.category,
         null, // anti-repeat handled by ContentManager via PluginManager
         settings.language.default,
+        { skipEnqueue: true },
       );
 
       if (!pipelineResult.ok || !pipelineResult.content) {
@@ -457,6 +461,11 @@ export class SchedulerService {
   async manualPublish(options: ManualPublishOptions): Promise<PublishResult> {
     const settings = await this.deps.settings();
 
+    // v7.4.2: skipEnqueue=true so manual posts don't ALSO go to the queue.
+    // Previously, manual publish would call process() which always enqueued,
+    // causing the post to appear in the Queue page after sending.
+    const pipelineOptions = { skipEnqueue: true };
+
     // 1. Determine what to publish.
     let pipelineResult;
     if (options.source) {
@@ -464,6 +473,7 @@ export class SchedulerService {
       pipelineResult = await this.deps.contentManager.processFromPlugin(
         options.source,
         options.language ?? settings.language.default,
+        pipelineOptions,
       );
     } else if (options.category) {
       // Publish a specific category.
@@ -471,6 +481,7 @@ export class SchedulerService {
         options.category,
         null,
         options.language ?? settings.language.default,
+        pipelineOptions,
       );
     } else {
       // Publish random — pick a random enabled category.
@@ -493,6 +504,7 @@ export class SchedulerService {
         randomCat,
         null,
         options.language ?? settings.language.default,
+        pipelineOptions,
       );
     }
 

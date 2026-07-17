@@ -77,10 +77,12 @@ export const manualScreen: Screen = {
       try {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
+        // v7.4.2: skipEnqueue=true — manual posts should NOT also go to the queue.
         const result = await ctx.container.content.processForCategory(
           arg as Category,
           null,
           lang,
+          { skipEnqueue: true },
         );
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
@@ -133,7 +135,8 @@ export const manualScreen: Screen = {
         let result = null;
         let firstDuplicate: { itemId: string; existingId: string; reason: string; item: typeof items[number] } | null = null;
         for (let i = 0; i < Math.min(items.length, 5); i++) {
-          const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: false });
+          // v7.4.2: skipEnqueue=true — manual posts should NOT also go to the queue.
+          const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: false, skipEnqueue: true });
           if (r.ok && r.content) { result = r; break; }
           if (!firstDuplicate && r.duplicateOf) {
             firstDuplicate = {
@@ -155,7 +158,7 @@ export const manualScreen: Screen = {
           // 1. Re-process with skipDedup=true so the AI pipeline runs and
           //    we get a full ReadyContent we can format.
           try {
-            const dupProcessed = await ctx.container.content.process(dupItem, lang, { skipDedup: true });
+            const dupProcessed = await ctx.container.content.process(dupItem, lang, { skipDedup: true, skipEnqueue: true });
             if (dupProcessed.ok && dupProcessed.content) {
               const finalPost = await ctx.container.uxLayer.transform(dupProcessed.content);
               // Send the formatted post (photo or text).

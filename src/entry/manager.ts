@@ -635,6 +635,35 @@ export async function managerHandler(
     return json({ ok: true, enabled: newVal, message: "Scheduler resumed" });
   }
 
+  // ── Scheduler: regenerate today's plan (clears stale slots + fired markers) ──
+  if (apiPath === "scheduler/regenerate-plan" && request.method === "POST") {
+    try {
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      const timezone = settings.scheduler.timezone;
+      const { formatDateInZone } = await import("../primitives/time");
+      const today = formatDateInZone(Date.now(), timezone);
+      // Clear today's plan + all slot-fired markers for today.
+      const { slotsKey } = await import("../core/storage/keys");
+      await container.kv.delete(slotsKey(today));
+      // List and delete all fired markers for today.
+      const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
+      for (const k of firedKeys) {
+        await container.kv.delete(k);
+      }
+      // Generate a fresh plan.
+      const plan = await container.dailyPlanner.generate();
+      return json({
+        ok: true,
+        message: `Plan regenerated for ${today}`,
+        date: today,
+        slotCount: plan.slots.length,
+        slots: plan.slots.map(s => ({ time: s.time, category: s.category, epochMs: s.epochMs })),
+      });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
   // ── Settings: update runtime config ──
   if (apiPath === "settings" && request.method === "POST") {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -760,7 +789,7 @@ export async function managerHandler(
         // items. If all items are duplicates, the caller routes the
         // first one to admin PM with a "duplicate" label instead of
         // publishing to the channel.
-        const r = await container.content.process(item, lang, { skipDedup: false });
+        const r = await container.content.process(item, lang, { skipDedup: false, skipEnqueue: true });
         attempts.push({
           itemIndex: idx,
           itemId: item.id,
@@ -816,7 +845,7 @@ export async function managerHandler(
             // Process with skipDedup=true so it goes all the way through
             // the AI pipeline (we already know it's a duplicate — we want
             // the formatted output now).
-            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true });
+            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true, skipEnqueue: true });
             if (dupProcessed.ok && dupProcessed.content) {
               const finalPost = await container.uxLayer.transform(dupProcessed.content);
               // Send the formatted post (photo or text) — prefixed with a
@@ -1486,7 +1515,7 @@ async function loadScheduler(){
     }else{
       scheduleHtml='<div class="card"><p style="color:var(--red)">Could not generate today plan.</p></div>';
     }
-    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"Pause Scheduler":"Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">Force Publish</button></div></div>'+
+    c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Scheduler Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn '+(st.enabled?"btn-danger":"")+'" onclick="toggleScheduler()">'+(st.enabled?"Pause Scheduler":"Resume Scheduler")+'</button><button class="btn" onclick="forcePublish()">Force Publish</button><button class="btn btn-warning" onclick="regeneratePlan()">🔄 Regenerate Plan</button></div></div>'+
     '<div class="card-grid">'+card("Enabled",st.enabled?badge(1):badge(0))+card("Next Slot",st.nextSlot?.time??"-")+card("Posts Today",st.postsPublishedToday??0)+card("Queue",st.queueDepth??0)+card("Timezone",s.timezone??"-")+card("Min Gap",(s.minGapMinutes??"90")+"min")+card("Lock Timeout",(s.lockTimeoutSec??"90")+"s")+card("Refresh",(s.refreshIntervalMinutes??"120")+"min")+'</div>'+
     scheduleHtml+
     '<div class="card"><h3 style="margin-bottom:8px">Posting Windows</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'-'+w.end+'</span>').join("")+'</div></div>'+
@@ -1496,8 +1525,7 @@ async function loadScheduler(){
 }
 async function toggleScheduler(){const cur=await api("scheduler");const enabled=cur.status?.enabled;const d=await api(enabled?"scheduler/pause":"scheduler/resume","POST");toast(d.ok?(d.enabled?"Scheduler resumed":"Scheduler paused"):"Failed");loadScheduler();}
 async function forcePublish(){if(!confirm("Force publish now?"))return;toast("Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?"Done: "+d.message:"Failed: "+(d.error||""));loadScheduler();}
-async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
-async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
+async function regeneratePlan(){if(!confirm("Regenerate today's plan? This clears all fired markers and creates a fresh schedule."))return;toast("Regenerating plan...");const d=await api("scheduler/regenerate-plan","POST");toast(d.ok?"✅ "+d.message+" ("+d.slotCount+" slots)":"❌ Failed: "+(d.error||""));loadScheduler();}
 
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");

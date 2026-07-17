@@ -90,6 +90,7 @@ export const scheduleScreen: Screen = {
       [labelButton("─── Actions ───")],
       [{ text: "🔄 Refresh status", callback_data: "action:scheduler:refresh" }],
       [{ text: "▶️ Force tick", callback_data: "action:scheduler:forceTick" }],
+      [{ text: "♻️ Regenerate Plan", callback_data: "action:scheduler:regenerate" }],
     ]);
   },
 
@@ -130,6 +131,25 @@ export const scheduleScreen: Screen = {
         return result.fired
           ? { toast: `✅ Slot fired: ${result.slot?.category}` }
           : { toast: `⏭️ Skipped: ${result.skipReason}` };
+      }
+      if (op === "regenerate") {
+        try {
+          // v7.4.2: Regenerate today's plan with corrected timezone math.
+          // Clears stale slots + fired markers, then generates a fresh plan.
+          const { formatDateInZone } = await import("../../primitives/time");
+          const { slotsKey } = await import("../../core/storage/keys");
+          const settings = await ctx.container.config.getSettings(ctx.adminId);
+          const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+          await ctx.container.kv.delete(slotsKey(today));
+          const firedKeys = await ctx.container.kv.list(`fredy:sched:sent:${today}:`);
+          for (const k of firedKeys) {
+            await ctx.container.kv.delete(k);
+          }
+          const plan = await ctx.container.dailyPlanner.generate();
+          return { toast: `♻️ Plan regenerated (${plan.slots.length} slots)` };
+        } catch (e) {
+          return { alert: `❌ Regenerate failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
       }
     }
 
