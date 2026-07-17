@@ -69,27 +69,80 @@ export class ContentQueue {
     return queued;
   }
 
-  /** Dequeue the oldest item for a category. */
+  /** Dequeue the oldest item for a category.
+   *  v8.0.0: Now wrapped in a per-category KV lock to prevent the race
+   *  condition where two concurrent callers (e.g. Force Publish + auto tick)
+   *  both read the same queue, both take the same item, and both publish it.
+   *  The lock is short-lived (5s) since this operation is fast. */
   async dequeue(category: Category): Promise<QueuedContent | null> {
+    const lockKey = `fredy:queue:lock:${category}`;
+    const lock = await this.acquireQueueLock(lockKey, 5);
+    if (!lock.acquired) {
+      this.deps.logger.warn("quality.reject", {
+        category,
+        reason: "queue_lock_held",
+        message: "Queue lock held — another dequeue in progress",
+      });
+      return null;
+    }
+    try {
+      const queue = await this.getQueue(category);
+      if (queue.length === 0) return null;
+
+      const item = queue.shift();
+      if (!item) return null;
+
+      // Check if expired.
+      if (Date.now() > item.expiresAt) {
+        this.deps.logger.warn("quality.reject", {
+          contentId: item.id,
+          category: item.category,
+          reason: "expired",
+        });
+        await this.saveQueue(category, queue);
+        // Try the next one (still holding the lock).
+        return this.dequeueLocked(category);
+      }
+
+      await this.saveQueue(category, queue);
+      return item;
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /** Internal dequeue without lock — called while holding the lock. */
+  private async dequeueLocked(category: Category): Promise<QueuedContent | null> {
     const queue = await this.getQueue(category);
     if (queue.length === 0) return null;
-
     const item = queue.shift();
     if (!item) return null;
-
-    // Check if expired.
     if (Date.now() > item.expiresAt) {
-      this.deps.logger.warn("quality.reject", {
-        contentId: item.id,
-        category: item.category,
-        reason: "expired",
-      });
       await this.saveQueue(category, queue);
-      return this.dequeue(category); // Try the next one.
+      return this.dequeueLocked(category);
     }
-
     await this.saveQueue(category, queue);
     return item;
+  }
+
+  /** Acquire a short-lived KV lock for a queue category. */
+  private async acquireQueueLock(lockKey: string, timeoutSec: number): Promise<{ acquired: boolean; release: () => Promise<void> }> {
+    try {
+      const existing = await this.deps.kv.get(lockKey);
+      if (existing) {
+        return { acquired: false, release: async () => {} };
+      }
+      await this.deps.kv.set(lockKey, String(Date.now()), timeoutSec);
+      return {
+        acquired: true,
+        release: async () => {
+          try { await this.deps.kv.delete(lockKey); } catch { /* non-fatal */ }
+        },
+      };
+    } catch {
+      // On KV error, allow execution (don't permanently block the queue).
+      return { acquired: true, release: async () => {} };
+    }
   }
 
   /** Peek at the oldest item without removing it. */

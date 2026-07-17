@@ -602,9 +602,24 @@ export class SchedulerService {
     }
     const lastPublished = published[0]?.publishedAt ?? null;
 
+    // v8.0.0: Annotate each slot with its real fired state so the dashboard
+    // can show "✅ Published" vs "⏳ Pending" correctly. Previously, the raw
+    // DailyPlan was returned and SlotTime had no `fired` field — every slot
+    // always showed "Pending" regardless of actual state.
+    let todayAnnotated: (DailyPlan & { slots: SlotTime[] }) | null = null;
+    if (plan) {
+      const annotatedSlots = await Promise.all(
+        plan.slots.map(async (s) => ({
+          ...s,
+          fired: await this.deps.dailyPlanner.isSlotFired(s),
+        })),
+      );
+      todayAnnotated = { ...plan, slots: annotatedSlots };
+    }
+
     return {
       enabled: settings.scheduler.enabled,
-      today: plan,
+      today: todayAnnotated,
       nextSlot,
       queueDepth: totalQueue,
       lastFiredAt: lastPublished,

@@ -25,6 +25,7 @@
 
 import type { Container, Env } from "../types/env";
 import { SchedulerOrchestrator } from "../orchestrators/scheduler";
+import { acquireTickLock } from "../services/tick-lock";
 
 export interface CronHandlerDeps {
   readonly env: Env;
@@ -39,31 +40,56 @@ export async function cronHandler(
   const { env, container, ctx } = deps;
 
   // 24-hour backup cron — runs the full tick as a safety net.
+  // v8.0.0: Now acquires the SAME tick lock as /internal/tick, so if the
+  // external cron and this backup fire at the same time, only one runs.
   if (event.cron === "0 */24 * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
-        const result = await scheduler.tick();
-        if (result.fired) {
-        } else if (result.skipped) {
+        const lock = await acquireTickLock(container.kv, 90);
+        if (!lock.acquired) {
+          console.log("[cron] tick lock held — skipping backup tick");
+          return;
         }
-        // Also refresh sources.
-        await scheduler.refreshSources();
+        try {
+          const scheduler = new SchedulerOrchestrator(container);
+          const result = await scheduler.tick();
+          if (result.fired) {
+            console.log(`[cron] slot fired: cat=${result.slot?.category ?? "?"}`);
+          } else if (result.skipped) {
+            console.log(`[cron] skipped: ${result.skipReason ?? "unknown"}`);
+          }
+          // Also refresh sources.
+          await scheduler.refreshSources();
+        } finally {
+          await lock.release();
+        }
       })(),
     );
     return;
   }
 
   // Every-minute tick (if enabled).
+  // v8.0.0: Also acquires the shared lock.
   if (event.cron === "* * * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
-        const scheduler = new SchedulerOrchestrator(container);
-        const result = await scheduler.tick();
-        if (result.fired) {
-        } else if (result.skipped) {
+        const lock = await acquireTickLock(container.kv, 90);
+        if (!lock.acquired) {
+          console.log("[cron] tick lock held — skipping minute tick");
+          return;
+        }
+        try {
+          const scheduler = new SchedulerOrchestrator(container);
+          const result = await scheduler.tick();
+          if (result.fired) {
+            console.log(`[cron] slot fired: cat=${result.slot?.category ?? "?"}`);
+          } else if (result.skipped) {
+            console.log(`[cron] skipped: ${result.skipReason ?? "unknown"}`);
+          }
+        } finally {
+          await lock.release();
         }
       })(),
     );

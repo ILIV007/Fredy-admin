@@ -66,6 +66,18 @@ export const manualScreen: Screen = {
     const type = parts[2] ?? "";
     const arg = parts[3] ?? "";
 
+    // v8.0.0: Send "typing" indicator immediately so the admin sees the bot
+    // is working. The manual publish pipeline (fetch + AI + publish) can take
+    // 5-15 seconds — without this, the admin might think the bot is broken.
+    // Also set up a recurring typing indicator every 4s during the operation.
+    const typingInterval = setInterval(() => {
+      ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
+    }, 4000);
+    // Send the first one immediately.
+    await ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
+    try {
+      // The actual publish logic continues below.
+
     if (type === "simulate") {
       return { toast: "🧪 Simulation not implemented yet" };
     }
@@ -230,6 +242,10 @@ export const manualScreen: Screen = {
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
+    }
+    } finally {
+      // Clear the typing interval when the operation completes.
+      clearInterval(typingInterval);
     }
   },
 };

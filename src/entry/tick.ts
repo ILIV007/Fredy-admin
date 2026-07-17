@@ -20,6 +20,7 @@
 import type { Env, Container } from "../types/env";
 import { processScheduledQueue } from "./cron";
 import { SchedulerOrchestrator } from "../orchestrators/scheduler";
+import { acquireTickLock } from "../services/tick-lock";
 import type { Category } from "../types/category";
 import type { FredySettings } from "../types/config";
 
@@ -29,7 +30,6 @@ export interface TickHandlerDeps {
   readonly ctx?: ExecutionContext;
 }
 
-const LOCK_KEY = "fredy:tick:lock";
 const REFRESH_KEY = "fredy:tick:lastRefresh";
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
@@ -55,10 +55,12 @@ export async function tickHandler(
   }
 
   // ── 2. Acquire KV lock (timeout from runtime config) ───
+  // v8.0.0: Uses shared acquireTickLock from tick-lock.ts so cron.ts
+  // can reuse the same lock and prevent concurrent execution.
   const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
   const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
-  const lockAcquired = await acquireLock(container, lockTimeoutSec);
-  if (!lockAcquired) {
+  const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
+  if (!tickLock.acquired) {
     return json({
       ok: true, skipped: true, reason: "lock_held",
       time: new Date().toISOString(), durationMs: Date.now() - startTime,
@@ -72,7 +74,7 @@ export async function tickHandler(
 
   // If ctx is available, run in background. Otherwise run synchronously (legacy mode).
   if (ctx) {
-    ctx.waitUntil(runTickWork(container, env));
+    ctx.waitUntil(runTickWork(container, env, tickLock));
     return json({
       ok: true,
       time: startedAt,
@@ -82,7 +84,7 @@ export async function tickHandler(
   }
 
   // Fallback: synchronous execution (older Cloudflare environments without ctx)
-  const log = await runTickWork(container, env);
+  const log = await runTickWork(container, env, tickLock);
   return json({
     ok: true,
     time: new Date().toISOString(),
@@ -95,7 +97,7 @@ export async function tickHandler(
 // Background work
 // ────────────────────────────────────────────────────────────
 
-async function runTickWork(container: Container, env: Env): Promise<string[]> {
+async function runTickWork(container: Container, env: Env, tickLock: { release: () => Promise<void> }): Promise<string[]> {
   const log: string[] = [];
 
   try {
@@ -142,7 +144,7 @@ async function runTickWork(container: Container, env: Env): Promise<string[]> {
 
   } finally {
     // ── Release lock ───────────────────────────────────
-    await releaseLock(container);
+    await tickLock.release();
     // Persist log for debugging
     await container.kv.setJson(LAST_LOG_KEY, { time: Date.now(), log }, 3600).catch(() => {});
   }
@@ -151,27 +153,9 @@ async function runTickWork(container: Container, env: Env): Promise<string[]> {
 }
 
 // ────────────────────────────────────────────────────────────
-// KV Lock
+// KV Lock — moved to src/services/tick-lock.ts in v8.0.0
+// (cron.ts now shares the same lock to prevent concurrent execution)
 // ────────────────────────────────────────────────────────────
-
-async function acquireLock(container: Container, lockTimeoutSec: number): Promise<boolean> {
-  try {
-    const existing = await container.kv.get(LOCK_KEY);
-    if (existing) return false; // Lock held.
-    await container.kv.set(LOCK_KEY, String(Date.now()), lockTimeoutSec);
-    return true;
-  } catch { /* non-fatal */
-    return true; // On KV error, allow execution.
-  }
-}
-
-async function releaseLock(container: Container): Promise<void> {
-  try {
-    await container.kv.delete(LOCK_KEY);
-  } catch { /* non-fatal */
-    // ignore
-  }
-}
 
 // ────────────────────────────────────────────────────────────
 // Queue Maintenance (smart refill)
