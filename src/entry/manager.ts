@@ -1105,7 +1105,7 @@ async function testEverything(){
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ All Tests Passed':'❌ Some Tests Failed')+'</h3><span class="badge '+(ok?"badge-green":"badge-red")+'">'+summary+'</span></div>'+
     '<table style="font-size:13px"><thead><tr><th>Section</th><th>Status</th><th>Detail</th><th>Time</th></tr></thead><tbody>'+secRows+'</tbody></table>'+
     pluginDetail+
-    '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report (copyable)</h4><pre id="everything-pre" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement('everything-pre')">📋 Copy Full Report</button></div></div>';
+    '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report (copyable)</h4><pre id="everything-pre" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement('+ "'" +'everything-pre'+ "'" +')">📋 Copy Full Report</button></div></div>';
     toast(ok?"✅ All tests passed!":"❌ Some tests failed");
   }catch(e){
     w.innerHTML='<div class="card">❌ Test failed: '+escapeHtml(String(e))+'</div>';
@@ -1154,7 +1154,7 @@ async function postToChannel(pluginId){
     }
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ Posted Successfully':'❌ Post Failed')+'</h3><span class="badge '+(ok?'badge-green':'badge-red')+'">'+pluginId+'</span></div>'+
       stageHtml+contentHtml+
-      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement('post-json')">📋 Copy Report</button></div></div>';
+      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement('+ "'" +'post-json'+ "'" +')">📋 Copy Report</button></div></div>';
     toast(ok?"✅ Posted to channel!":"❌ Post failed");
   }catch(e){
     w.innerHTML='<div class="card">❌ Error: '+escapeHtml(String(e))+'</div>';
@@ -1199,7 +1199,7 @@ async function runCheckup(){
     '</tbody></table>'+
     '<h4 style="margin-bottom:6px">📋 Complete JSON Report (copy and send for debugging)</h4>'+
     '<pre id="checkup-json" style="max-height:600px">'+escapeHtml(jsonStr)+'</pre>'+
-    '<button class="btn" onclick="copyElement('checkup-json')">📋 Copy Full JSON Report</button></div>';
+    '<button class="btn" onclick="copyElement('+ "'" +'checkup-json'+ "'" +')">📋 Copy Full JSON Report</button></div>';
     toast(pct>=80?"✅ System healthy!":(pct>=50?"⚠️ Some issues":"❌ Critical issues"));
   }catch(e){
     r.innerHTML='<div class="card">❌ Checkup failed: '+escapeHtml(String(e))+'</div>';
@@ -1290,7 +1290,7 @@ async function testAIModel(pid,model){
   if(w)w.innerHTML='<div class="card">Testing '+pid+'/'+model+'...</div>';
   const d=await api("test/ai/"+pid+"/"+model,"POST");
   const jsonStr=JSON.stringify(d,null,2);
-  if(w)w.innerHTML='<h4 style="margin:8px 0">Result: '+pid+'/'+model+'</h4><pre id="ai-model-pre">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('ai-model-pre')">📋 Copy</button>';
+  if(w)w.innerHTML='<h4 style="margin:8px 0">Result: '+pid+'/'+model+'</h4><pre id="ai-model-pre">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'ai-model-pre'+ "'" +')">📋 Copy</button>';
   toast(d.ok?"✅ "+model+" OK":"❌ "+model+" failed");
 }
 
@@ -1299,7 +1299,7 @@ async function testAI(){
   const w=document.getElementById("ai-result-wrap");w.innerHTML='<div class="card">Testing...</div>';
   const d=await api("test/ai","POST",{text});
   const jsonStr=JSON.stringify(d,null,2);
-  w.innerHTML='<pre id="ai-pre">'+jsonStr+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('ai-pre')">📋 Copy Result</button>';
+  w.innerHTML='<pre id="ai-pre">'+jsonStr+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'ai-pre'+ "'" +')">📋 Copy Result</button>';
   toast(d.ok?"✅ AI OK":"❌ AI failed");
 }
 
@@ -1321,8 +1321,8 @@ async function loadLogs(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const errJson=JSON.stringify(d.errors.slice(0,20),null,2);
   const updJson=JSON.stringify(d.updates.slice(0,20),null,2);
-  c.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('err-pre')">📋 Copy Errors</button></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Updates ('+d.updates.length+')</h3><pre id="upd-pre">'+updJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('upd-pre')">📋 Copy Updates</button></div>';
+  c.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'err-pre'+ "'" +')">📋 Copy Errors</button></div>'+
+  '<div class="card"><h3 style="margin-bottom:8px">Updates ('+d.updates.length+')</h3><pre id="upd-pre">'+updJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'upd-pre'+ "'" +')">📋 Copy Updates</button></div>';
 }
 
 async function loadConfig(){
@@ -1330,7 +1330,7 @@ async function loadConfig(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const cfgJson=JSON.stringify(d.settings,null,2);
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Config Sections</h3><table><thead><tr><th>Section</th><th>Version</th><th>Description</th></tr></thead><tbody>'+(d.sections||[]).map(s=>'<tr><td><code>'+s.key+'</code></td><td>v'+s.version+'</td><td>'+s.description+'</td></tr>').join("")+'</tbody></table></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Full Config</h3><pre id="cfg-pre">'+cfgJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('cfg-pre')">📋 Copy Config</button></div>';
+  '<div class="card"><h3 style="margin-bottom:8px">Full Config</h3><pre id="cfg-pre">'+cfgJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'cfg-pre'+ "'" +')">📋 Copy Config</button></div>';
 }
 
 async function loadSystem(){
