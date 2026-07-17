@@ -1,6 +1,7 @@
 /**
  * src/admin/commands/start.ts
  * /start command — opens the main admin panel (dashboard).
+ * v7.4.3: Persian welcome message with blockquote UI.
  */
 
 import type { Command, CommandContext } from "../registry";
@@ -21,19 +22,19 @@ export const startCommand: Command = {
       settings,
       query: {} as never,
     };
-    // Send welcome message first
+    // Send welcome message first — Persian with blockquote UI.
     await container.tg.sendMessage(chatId, [
-      "👋 <b>Welcome to Fredy!</b>",
-      "",
-      "Fredy is an AI-powered content engine for the ILIVIR3 Telegram channel.",
-      "",
-      "<b>Quick commands:</b>",
-      "• <code>/menu</code> — Open admin dashboard",
-      "• <code>/help</code> — Show all commands",
-      "• <code>/stats</code> — View statistics",
-      "• <code>/health</code> — System health check",
-      "",
-      "<i>Opening dashboard...</i>",
+      `👋 <b>به فردی خوش آمدید!</b>`,
+      ``,
+      `<blockquote>🤖 فردی یک موتور محتوای هوش مصنوعی برای کانال تلگرام ILIVIR3 است.</blockquote>`,
+      ``,
+      `<blockquote><b>📋 دستورات سریع:</b></blockquote>`,
+      `• <code>/menu</code> — باز کردن داشبورد مدیریت`,
+      `• <code>/help</code> — نمایش همه دستورات`,
+      `• <code>/stats</code> — مشاهده آمار`,
+      `• <code>/health</code> — بررسی سلامت سیستم`,
+      ``,
+      `<blockquote>⏳ <i>در حال باز کردن داشبورد...</i></blockquote>`,
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     // Then send the dashboard
     const text = await mainScreen.text(screenCtx);

@@ -1,9 +1,6 @@
 /**
  * src/admin/commands/help.ts
- * /help command — lists all available commands.
- *
- * v7.4.0: Updated to mention the new Strategy screen, Scheduler screen with
- * post history, and the Manager URL button.
+ * /help command — lists all available commands in Persian.
  */
 
 import type { Command, CommandContext } from "../registry";
@@ -14,34 +11,33 @@ export const helpCommand: Command = {
 
   async handle(ctx: CommandContext): Promise<void> {
     const lines = [
-      "<b>🤖 Fredy — Commands</b>",
-      "",
-      "<b>Admin Panel (main menu):</b>",
-      "  /start — Open dashboard",
-      "  /menu — Open dashboard (alias)",
-      "  /help — This message",
-      "",
-      "<b>Dashboard Buttons:</b>",
-      "  🎯 <b>Strategy</b> — Switch publishing mode (Minimal/Balanced/Active/AI Priority/News Priority/Custom)",
-      "  📅 <b>Scheduler</b> — View today's slots + last 5 published posts, force tick",
-      "  📚 <b>Categories</b> — Enable/disable A/B/C content categories",
-      "  🔌 <b>Providers</b> — Toggle plugins + AI providers, run manual tests",
-      "  🤖 <b>AI</b> — AI settings (provider, models, temperature, threshold)",
-      "  ✍️ <b>Manual Post</b> — Trigger immediate post by category or source",
-      "  ⚙️ <b>Settings</b> — General, language, content, quality settings",
-      "  🎨 <b>Editor</b> — Soul.md editor",
-      "  🖥️ <b>Manager</b> — Open the Manager dashboard (web) at",
-      "       https://fredy-admin.iliv007-34b.workers.dev/Manager",
-      "  🐛 <b>Debug</b> — Debug info and tools",
-      "",
-      "<b>Other Commands:</b>",
-      "  /stats — Show statistics",
-      "  /soul — View soul.md status",
-      "  /checkperms — Check bot permissions in channel",
-      "  /health — System health check",
-      "",
-      "<b>Tip:</b> Most actions are available from the dashboard buttons.",
-      "<b>Tip:</b> The 🖥️ Manager button opens the full web dashboard where you can see the Queue, logs, and detailed config.",
+      `<b>🤖 فردی — راهنمای دستورات</b>`,
+      ``,
+      `<blockquote><b>📋 پنل مدیریت (منوی اصلی):</b></blockquote>`,
+      `  <code>/start</code> — باز کردن داشبورد`,
+      `  <code>/menu</code> — باز کردن داشبورد (مستقیم)`,
+      `  <code>/help</code> — نمایش این پیام`,
+      ``,
+      `<blockquote><b>🎛️ دکمه‌های داشبورد:</b></blockquote>`,
+      `  🎯 <b>استراتژی</b> — تغییر حالت انتشار (حداقل/متعادل/فعال/اولویت AI/اولویت خبر/سفارشی)`,
+      `  📅 <b>زمان‌بند</b> — مشاهده زمان‌بندی امروز + ۵ پست اخیر + انتشار فوری`,
+      `  📚 <b>دسته‌بندی‌ها</b> — فعال/غیرفعال کردن دسته‌های A/B/C`,
+      `  🔌 <b>پروایدرها</b> — فعال/غیرفعال کردن پلاگین‌ها + AI، تست دستی`,
+      `  🤖 <b>هوش مصنوعی</b> — تنظیمات AI (پروایدر، مدل‌ها، دما، آستانه)`,
+      `  ✍️ <b>ارسال دستی</b> — انتشار فوری پست بر اساس دسته یا منبع`,
+      `  ⚙️ <b>تنظیمات</b> — عمومی، زبان، محتوا، کیفیت`,
+      `  🎨 <b>ویرایشگر</b> — ویرایشگر Soul.md`,
+      `  🖥️ <b>منیجر</b> — باز کردن داشبورد وب منیجر`,
+      `  🐛 <b>دیباگ</b> — اطلاعات و ابزارهای دیباگ`,
+      ``,
+      `<blockquote><b>📝 دستورات دیگر:</b></blockquote>`,
+      `  <code>/stats</code> — نمایش آمار`,
+      `  <code>/soul</code> — مشاهده وضعیت Soul.md`,
+      `  <code>/checkperms</code> — بررسی دسترسی‌های ربات در کانال`,
+      `  <code>/health</code> — بررسی سلامت سیستم`,
+      ``,
+      `<blockquote>💡 <i>بیشتر عملیات از دکمه‌های داشبورد در دسترس است.</i></blockquote>`,
+      `<blockquote>💡 <i>دکمه 🖥️ منیجر داشبورد کامل وب را باز می‌کند که صف، لاگ‌ها و تنظیمات دقیق را می‌بینید.</i></blockquote>`,
     ];
     await ctx.reply(lines.join("\n"));
   },

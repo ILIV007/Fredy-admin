@@ -381,23 +381,24 @@ export class SchedulerService {
         error: err instanceof Error ? err.message : String(err),
       });
       await this.deps.tg.sendMessage(adminId, [
-        `🤖 <b>Auto-publish notice</b>`,
+        `🤖 <b>اعلان انتشار خودکار</b>`,
         ``,
-        `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-        `<b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}`,
-        `<b>URL:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}`,
+        `<blockquote>📅 <b>زمان:</b> ${slot.date} ${slot.time} (دسته ${slot.category})</blockquote>`,
+        `<blockquote>📰 <b>تیتر:</b> ${this.escapeHtml(content.headline ?? "(بدون تیتر)")}</blockquote>`,
+        `<blockquote>🔗 <b>منبع:</b> ${this.escapeHtml(content.sourceUrl ?? "(بدون منبع")}</blockquote>`,
         pubResult.ok
-          ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
-          : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
+          ? `<blockquote>✅ <b>شناسه پیام کانال:</b> ${pubResult.telegramMessageId}</blockquote>`
+          : `<blockquote>❌ <b>خطا:</b> ${this.escapeHtml(pubResult.error ?? "نامشخص")}</blockquote>`,
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
       return;
     }
 
     // 2. Send the formatted post (photo or text). Fall back to text-only
     //    if sendPhoto fails.
+    //    v7.4.3: Persian labels + blockquote for the header notice.
     const sentPostNotice = pubResult.ok
-      ? "🤖 <b>Auto-published (scheduler) — copy of channel post:</b>"
-      : "⚠️ <b>Auto-publish FAILED — formatted post for manual forwarding:</b>";
+      ? "🤖 <b>پست خودکار منتشر شد — کپی پیام کانال:</b>"
+      : "⚠️ <b>انتشار خودکار ناموفق بود — پست برای ارسال دستی:</b>";
 
     try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
@@ -428,22 +429,27 @@ export class SchedulerService {
       }
     }
 
-    // 3. Send the summary notification (always — even if the formatted
-    //    post failed to send, this gives the admin the key facts).
-    await this.deps.tg.sendMessage(adminId, [
-      pubResult.ok
-        ? `✅ <b>Auto-published successfully</b>`
-        : `❌ <b>Auto-publish failed</b>`,
+    // 3. Send the summary notification — v7.4.3: Persian + blockquote UI.
+    //    Each fact is in its own blockquote for a clean, scannable layout.
+    const statusLine = pubResult.ok
+      ? `✅ <b>انتشار موفقیت‌آمیز بود</b>`
+      : `❌ <b>انتشار ناموفق بود</b>`;
+
+    const summaryLines = [
+      statusLine,
       ``,
-      `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-      `<b>AI:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}`,
-      `<b>Quality:</b> ${content.quality.overallScore}`,
-      `<b>Tokens:</b> ${content.tokensUsed}`,
-      `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+      `<blockquote>📅 <b>زمان:</b> ${slot.date} ${slot.time} | <b>دسته:</b> ${slot.category}</blockquote>`,
+      `<blockquote>🤖 <b>هوش مصنوعی:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}</blockquote>`,
+      `<blockquote>🎯 <b>کیفیت:</b> ${content.quality.overallScore} | <b>توکن:</b> ${content.tokensUsed}</blockquote>`,
+      `<blockquote>🔖 <b>شناسه محتوا:</b> <code>${this.escapeHtml(content.id)}</code></blockquote>`,
       pubResult.ok
-        ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
-        : `<b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}`,
-    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        ? `<blockquote>📤 <b>شناسه پیام کانال:</b> ${pubResult.telegramMessageId}</blockquote>`
+        : `<blockquote>⚠️ <b>خطا:</b> ${this.escapeHtml(pubResult.error ?? "نامشخص")}</blockquote>`,
+    ];
+
+    await this.deps.tg.sendMessage(adminId, summaryLines.join("\n"), {
+      parse_mode: "HTML",
+    }).catch(() => {});
   }
 
   /** Escape HTML special characters for safe Telegram display. */

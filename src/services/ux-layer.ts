@@ -44,11 +44,13 @@ export class UXLayerImpl implements UXLayer {
     // 3. Source line with random emoji.
     const { emoji } = await this.deps.sourceFormatter.buildFooter();
 
-    // 4. Assemble the full text.
-    const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, emoji);
-
-    // 5. Caption for image posts (shorter).
-    const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, emoji);
+    // 4. Assemble the full text — with body pre-truncated so source/footer always survive.
+    //    v7.4.3: Previously, safeTruncate(fullText, 4096) was applied AFTER assembly,
+    //    which meant long bodies could cut off the source blockquote and @ILIVIR3 footer.
+    //    Now we compute the overhead (hook + source + footer) and truncate the BODY
+    //    to fit within the limit, THEN assemble. Source and footer are ALWAYS present.
+    const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_TEXT_LIMIT);
+    const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_CAPTION_LIMIT);
 
     return {
       hook,
@@ -58,8 +60,8 @@ export class UXLayerImpl implements UXLayer {
       sourceEmoji: emoji,
       sourceUrl: content.sourceUrl,
       media: content.media,
-      fullText: this.safeTruncate(fullText, TELEGRAM_TEXT_LIMIT),
-      caption: this.safeTruncate(caption, TELEGRAM_CAPTION_LIMIT),
+      fullText,
+      caption,
       language: content.language,
       category: content.category,
       score: content.quality.overallScore,
@@ -76,35 +78,87 @@ export class UXLayerImpl implements UXLayer {
     };
   }
 
-  /** Assemble the full post text. */
+  /** Assemble the full post text.
+   *  v7.4.3: Now accepts a maxLen parameter and pre-truncates the BODY so
+   *  that the source blockquote and @ILIVIR3 footer ALWAYS survive.
+   *  Previously, the entire assembled text was truncated, which could cut
+   *  off the source and footer when the body was long. */
   private assembleFullText(
     hook: string,
     body: string,
     sourceUrl: string,
     emoji: string,
+    maxLen: number,
   ): string {
-    const parts: string[] = [];
+    // ── Step 1: Build the "overhead" (everything except the body) ──
+    const overheadParts: string[] = [];
 
     // Hook (bold) — only if different from body.
-    if (hook && body && !body.startsWith(hook)) {
-      parts.push(`<b>${escapeHtml(hook)}</b>`);
-      parts.push("");
+    const hasHook = hook && body && !body.startsWith(hook);
+    if (hasHook) {
+      overheadParts.push(`<b>${escapeHtml(hook)}</b>`);
+      overheadParts.push(""); // blank line after hook
     }
 
-    // Body — convert AI markdown to HTML.
-    parts.push(this.formatBody(body));
-
     // Source as blockquote — only for URLs with meaningful paths.
-    if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
-      parts.push("");
-      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+    const hasSource = sourceUrl && this.isLinkableUrl(sourceUrl);
+    if (hasSource) {
+      overheadParts.push("");
+      overheadParts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
     }
 
     // Channel footer as blockquote.
-    parts.push("");
-    parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
+    overheadParts.push("");
+    overheadParts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
 
-    return parts.join("\n");
+    // The overhead includes: hook + blank lines + source + footer.
+    // The body sits between hook and source, preceded by nothing extra.
+    // Total structure: [hook\n\n] [body] [\n\n source\n\n footer]
+    const beforeBody = hasHook ? `<b>${escapeHtml(hook)}</b>\n\n` : "";
+    const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
+      + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
+
+    const overheadLen = beforeBody.length + afterBody.length;
+    const bodyBudget = maxLen - overheadLen;
+
+    // ── Step 2: Truncate body to fit the budget ──
+    let truncatedBody = body;
+    if (bodyBudget > 0 && body.length > bodyBudget) {
+      // Truncate the raw body (before HTML conversion) to leave room.
+      // Reserve some extra chars for HTML tags that formatBody will add
+      // (e.g., <b></b> = 7 chars per occurrence, <blockquote></blockquote> = 26 chars).
+      const safetyMargin = 200; // generous buffer for HTML overhead
+      const rawBudget = Math.max(100, bodyBudget - safetyMargin);
+      truncatedBody = this.truncateRawText(body, rawBudget);
+    }
+
+    // ── Step 3: Convert (truncated) body to HTML ──
+    const bodyHtml = this.formatBody(truncatedBody);
+
+    // ── Step 4: Assemble final text ──
+    const result = beforeBody + bodyHtml + afterBody;
+
+    // ── Step 5: Final safety — if somehow still over limit, truncate the body HTML ──
+    if (result.length > maxLen) {
+      // Last resort: truncate everything but always keep source + footer.
+      const footer = afterBody;
+      const keepFooter = footer.length < maxLen;
+      const bodyMax = maxLen - beforeBody.length - (keepFooter ? footer.length : 0);
+      const safeBody = this.safeTruncate(bodyHtml, bodyMax > 100 ? bodyMax : 100);
+      const finalText = beforeBody + safeBody + (keepFooter ? footer : "");
+      return finalText;
+    }
+
+    return result;
+  }
+
+  /** Truncate raw (pre-HTML) text at a word/sentence boundary. */
+  private truncateRawText(text: string, maxLen: number): string {
+    if (text.length <= maxLen) return text;
+    // Try to cut at the last newline before maxLen (preserves paragraph structure).
+    let cut = text.lastIndexOf("\n", maxLen);
+    if (cut < maxLen * 0.5) cut = maxLen; // fallback to hard cut
+    return text.slice(0, cut).trimEnd() + "\n\n…";
   }
 
   /** Convert AI markdown to Telegram HTML.
@@ -212,38 +266,46 @@ export class UXLayerImpl implements UXLayer {
     return finalHtml;
   }
 
-  /** Assemble a shorter caption for image posts. */
+  /** Assemble a shorter caption for image posts.
+   *  v7.4.3: Now uses the same pre-truncation pattern as assembleFullText
+   *  so source + footer always survive, even for long bodies. */
   private assembleCaption(
     hook: string,
     body: string,
     sourceUrl: string,
     emoji: string,
+    maxLen: number,
   ): string {
-    const parts: string[] = [];
+    const hasHook = hook && body && !body.startsWith(hook);
+    const hasSource = sourceUrl && this.isLinkableUrl(sourceUrl);
 
-    // Hook (bold).
-    if (hook && body && !body.startsWith(hook)) {
-      parts.push(`<b>${escapeHtml(hook)}</b>`);
-      parts.push("");
+    const beforeBody = hasHook ? `<b>${escapeHtml(hook)}</b>\n\n` : "";
+    const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
+      + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
+
+    const overheadLen = beforeBody.length + afterBody.length;
+    const bodyBudget = maxLen - overheadLen;
+
+    // For captions, always limit body to 800 chars (was the old behavior).
+    // But now we ensure source + footer always fit.
+    const captionBodyLimit = Math.min(bodyBudget > 0 ? bodyBudget : 800, 800);
+    let shortBody = body;
+    if (body.length > captionBodyLimit) {
+      const safetyMargin = 200;
+      const rawBudget = Math.max(100, captionBodyLimit - safetyMargin);
+      shortBody = this.truncateRawText(body, rawBudget);
     }
 
-    // Body — for captions, limit to 800 chars using HTML-aware truncation.
-    // IMPORTANT: must use safeTruncate (which closes open tags) instead of
-    // raw slice(0, 797) — raw slice can cut mid-tag and produce broken HTML.
-    const shortBody = body.length > 800 ? this.safeTruncate(body, 797) : body;
-    parts.push(this.formatBody(shortBody));
+    const bodyHtml = this.formatBody(shortBody);
+    const result = beforeBody + bodyHtml + afterBody;
 
-    // Source as blockquote.
-    if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
-      parts.push("");
-      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+    if (result.length > maxLen) {
+      const bodyMax = maxLen - beforeBody.length - afterBody.length;
+      const safeBody = this.safeTruncate(bodyHtml, bodyMax > 100 ? bodyMax : 100);
+      return beforeBody + safeBody + afterBody;
     }
 
-    // Channel footer as blockquote.
-    parts.push("");
-    parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
-
-    return parts.join("\n");
+    return result;
   }
 
   /** Check if a URL has a meaningful path (not just "/"). */

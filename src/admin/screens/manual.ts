@@ -101,16 +101,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from category ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `📤 <b>پست از دسته ${arg} منتشر شد</b>`,
+              `<blockquote>🤖 <b>هوش مصنوعی:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>🎯 <b>کیفیت:</b> ${result.content.quality.overallScore}</blockquote>`,
+              `<blockquote>📤 <b>شناسه پیام:</b> ${pubResult.telegramMessageId}</blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
+            return { toast: `✅ دسته ${arg} منتشر شد!`, redirectTo: "menu:main" };
           }
-          return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
+          return { alert: `❌ انتشار ناموفق: ${pubResult.error ?? "نامشخص"}` };
         }
-        return { alert: `❌ No content for ${arg}` };
+        return { alert: `❌ محتوایی برای دسته ${arg} یافت نشد` };
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
@@ -118,12 +118,12 @@ export const manualScreen: Screen = {
 
     if (type === "source") {
       if (!arg) {
-        return { alert: "❌ Missing source ID" };
+        return { alert: "❌ شناسه منبع مشخص نشده" };
       }
       try {
         const items = await ctx.container.plugins.fetchFrom(arg);
         if (items.length === 0) {
-          return { alert: `❌ No items from ${arg}` };
+          return { alert: `❌ آیتمی از ${arg} یافت نشد` };
         }
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
@@ -207,16 +207,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from: ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `📤 <b>پست از منبع ${arg} منتشر شد</b>`,
+              `<blockquote>🤖 <b>هوش مصنوعی:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>🎯 <b>کیفیت:</b> ${result.content.quality.overallScore}</blockquote>`,
+              `<blockquote>📤 <b>شناسه پیام:</b> ${pubResult.telegramMessageId}</blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-            return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
+            return { toast: `✅ ${arg} منتشر شد!`, redirectTo: "menu:main" };
           }
-          return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
+          return { alert: `❌ انتشار ناموفق: ${pubResult.error ?? "نامشخص"}` };
         }
-        return { alert: `❌ All items rejected` };
+        return { alert: "❌ همه آیتم‌ها رد شدند" };
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
