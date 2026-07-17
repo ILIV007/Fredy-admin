@@ -2,6 +2,55 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [8.0.1] — 2026-07-17 — Consistency Fixes + Cross-Request Caching + Dead Code Cleanup
+
+### Part 1 — 5 Previously Reported Bugs: Confirmed Already Fixed in v8.0.0
+
+All 5 critical bugs from the prior audit were verified as already fixed in v8.0.0:
+1. ✅ `CREDIBILITY_SCORES` keys match real plugin IDs (github, devto, etc.)
+2. ✅ Shared `tick-lock.ts` module; cron.ts and tick.ts both use same lock
+3. ✅ `content-queue.dequeue()` wrapped in per-category KV lock
+4. ✅ `scheduler-service.status()` annotates slots with real `fired` state
+5. ✅ All 9 `copyElement` escaping bugs fixed (0 `\\'` patterns remain)
+
+### Part 2 — Consistency Fixes
+
+#### 2a. escapeHtml duplication removed ✅
+- Deleted private `escapeHtml()` from `scheduler-service.ts` (was incomplete — didn't escape `"` or `'`)
+- Now imports canonical `escapeHtml` from `primitives/strings.ts` (single source of truth)
+- All `this.escapeHtml(...)` calls replaced with `escapeHtml(...)`
+
+#### 2b. Config cache: cross-request caching made real ✅
+- **Root cause confirmed:** `buildContainer()` was called fresh per request, creating a new `ConfigCache` each time — the 30s TTL cache only helped within a single request
+- **Fix (option b):** Moved `ConfigCache` to module-level scope in `container.ts` (`sharedConfigCache`)
+- Now the cache genuinely persists across requests within the same Worker isolate
+- Comment in `config-cache.ts` was accurate (claims cross-request caching) — now the code matches the comment
+- **KV read savings estimate:** ~6 config reads per tick × 12 ticks/day = 72 reads/day saved during warm-isolate periods
+
+#### 2c. Half-applied pattern grep ✅
+- Searched for other private methods duplicating exported primitives
+- Found: `safeTruncate` in `ux-layer.ts` — NOT a duplicate (it's HTML-aware, closes open tags — genuinely different from plain `truncate`)
+- Found: `hashUrl` in `duplicate-detector.ts` — NOT a duplicate (service-specific helper)
+- No other half-migrations found
+
+### Part 3 — Token Optimization: Documented (Not Implemented)
+
+**Finding:** Each AI call sends ~1774 words (~2400 tokens) of static prefix (prompt-templates.ts: 1161 words + soul.md: 613 words). With 9 posts/day × up to 3 retries = 27 calls/day, that's ~65K tokens/day of repeated static content.
+
+**Recommendation:** Implement Gemini's `cachedContent` API for the fixed prefix (base prompt + soul.md), refreshing only when soul.md changes. Estimated savings: ~60-70% of input token cost on the Gemini path.
+
+**Status:** Documented as a follow-up. Implementation requires changes to `src/plugins/ai/gemini.ts` (new API endpoint, cache lifecycle, TTL handling) and `src/services/soul-loader.ts` (cache invalidation hooks).
+
+### Part 4 — KV Usage: Confirmed Healthy ✅
+
+- **Batched stats:** Confirmed in place (`STATS_BATCH_FLUSH_THRESHOLD` in `kv-store.ts`, `flushAllStats()` called per tick)
+- **Source plugin caching:** KV-backed with sane TTLs (e.g., GitHub trending 4h)
+- **History service:** Minor read-modify-write, but array stays small (<20 entries/day) — not worth optimizing
+
+### Dead Code Cleanup
+- Reviewed TODO markers — all are legitimate phase placeholders, not dead code
+- `SchedulerOrchestrator.refreshSources()` is a no-op stub but called by cron/tick — left as documented placeholder
+
 ## [8.0.0] — 2026-07-17 — Critical Bug Fixes + Architecture Hardening
 
 ### Critical Bug Fixes (verified against v7.5.0 tree)

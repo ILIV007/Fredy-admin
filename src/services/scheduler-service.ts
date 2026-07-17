@@ -35,6 +35,7 @@ import type { TelegramService } from "./telegram";
 import type { UXLayer } from "./ux-layer";
 import type { QuietHoursChecker } from "./quiet-hours-checker";
 import { SchedulerDisabledError } from "../core/scheduler/errors";
+import { escapeHtml } from "../primitives/strings";
 
 /** Publisher interface — both PublishingService and FinalPublisher implement this. */
 export interface Publisher {
@@ -339,9 +340,9 @@ export class SchedulerService {
           await this.deps.tg.sendMessage(adminId, [
             `⚠️ <b>Scheduler: 3 consecutive failures</b>`,
             ``,
-            `<b>Last error:</b> ${this.escapeHtml(message)}`,
+            `<b>Last error:</b> ${escapeHtml(message)}`,
             `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-            `<b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code>`,
+            `<b>Content ID:</b> <code>${escapeHtml(content.id)}</code>`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
         // Reset to avoid spamming.
@@ -402,11 +403,11 @@ export class SchedulerService {
         ``,
         `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
         `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-        `<blockquote>📰 <b>Headline:</b> ${this.escapeHtml(content.headline ?? "(none)")}</blockquote>`,
-        `<blockquote>🔗 <b>Source:</b> ${this.escapeHtml(content.sourceUrl ?? "(none)")}</blockquote>`,
+        `<blockquote>📰 <b>Headline:</b> ${escapeHtml(content.headline ?? "(none)")}</blockquote>`,
+        `<blockquote>🔗 <b>Source:</b> ${escapeHtml(content.sourceUrl ?? "(none)")}</blockquote>`,
         pubResult.ok
           ? `<blockquote>✅ <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-          : `<blockquote>❌ <b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+          : `<blockquote>❌ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
       return;
     }
@@ -453,14 +454,14 @@ export class SchedulerService {
       ``,
       `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
       `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-      `<blockquote>🔌 <b>Source Plugin:</b> ${this.escapeHtml(content.pluginId)}</blockquote>`,
-      `<blockquote>🤖 <b>AI Model:</b> ${this.escapeHtml(content.aiProvider)}/${this.escapeHtml(content.aiModel)}</blockquote>`,
+      `<blockquote>🔌 <b>Source Plugin:</b> ${escapeHtml(content.pluginId)}</blockquote>`,
+      `<blockquote>🤖 <b>AI Model:</b> ${escapeHtml(content.aiProvider)}/${escapeHtml(content.aiModel)}</blockquote>`,
       `<blockquote>${qualityEmoji} <b>Quality Score:</b> ${content.quality.overallScore}/100</blockquote>`,
       `<blockquote>📊 <b>Tokens Used:</b> ${content.tokensUsed}</blockquote>`,
-      `<blockquote>🔖 <b>Content ID:</b> <code>${this.escapeHtml(content.id)}</code></blockquote>`,
+      `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(content.id)}</code></blockquote>`,
       pubResult.ok
         ? `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-        : `<blockquote>⚠️ <b>Error:</b> ${this.escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+        : `<blockquote>⚠️ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
     ];
 
     await this.deps.tg.sendMessage(adminId, summaryLines.join("\n"), {
@@ -468,14 +469,9 @@ export class SchedulerService {
     }).catch(() => {});
   }
 
-  /** Escape HTML special characters for safe Telegram display. */
-  private escapeHtml(input: string | null | undefined): string {
-    if (input === null || input === undefined) return "";
-    return String(input)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
+  // v8.0.1: private escapeHtml() removed — now imports canonical escapeHtml
+  // from primitives/strings.ts. The private version was incomplete (didn't
+  // escape " or '), and duplicating the utility violated single-source-of-truth.
 
   /**
    * Manual publish — publish a specific category, plugin, or random.
