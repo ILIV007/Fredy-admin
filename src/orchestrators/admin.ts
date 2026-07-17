@@ -131,7 +131,7 @@ export class AdminOrchestrator {
           const targetScreen = this.screens.get(targetId);
           if (targetScreen) {
             const newText = action.newText ?? await targetScreen.text(ctx);
-            const newKeyboard = action.newKeyboard ?? targetScreen.keyboard(settings);
+            const newKeyboard = action.newKeyboard ?? targetScreen.keyboard(settings, ctx);
             await this.render(chatId, messageId, newText, newKeyboard);
           }
           return;
@@ -141,14 +141,14 @@ export class AdminOrchestrator {
         // otherwise re-render the current screen (to reflect any setting changes).
         const updatedSettings = await container.config.getSettings(fromId);
         const newText = action.newText ?? await screen.text({ ...ctx, settings: updatedSettings });
-        const newKeyboard = action.newKeyboard ?? screen.keyboard(updatedSettings);
+        const newKeyboard = action.newKeyboard ?? screen.keyboard(updatedSettings, ctx);
         await this.render(chatId, messageId, newText, newKeyboard);
       } else {
         // No action returned — close the callback query and re-render the screen.
         await tg.answerCallbackQuery(query.id, "🔄 Refreshed").catch(() => {});
         const updatedSettings = await container.config.getSettings(fromId);
         const newText = await screen.text({ ...ctx, settings: updatedSettings });
-        const newKeyboard = screen.keyboard(updatedSettings);
+        const newKeyboard = screen.keyboard(updatedSettings, ctx);
         await this.render(chatId, messageId, newText, newKeyboard);
       }
     } catch (error) {
@@ -185,7 +185,7 @@ export class AdminOrchestrator {
 
     try {
       const text = await screen.text(ctx);
-      const keyboard = screen.keyboard(settings);
+      const keyboard = screen.keyboard(settings, ctx);
       await container.tg.answerCallbackQuery(query.id).catch(() => {});
       await this.render(chatId, messageId, text, keyboard);
     } catch (error) {
@@ -235,7 +235,7 @@ export class AdminOrchestrator {
     if (ms) {
       const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
       const newText = await ms.text(sctx);
-      const newKb = ms.keyboard(updated);
+      const newKb = ms.keyboard(updated, sctx);
       await this.render(chatId, messageId, newText, newKb);
     }
   }
@@ -258,7 +258,7 @@ export class AdminOrchestrator {
     if (ms) {
       const sctx: ScreenContext = { container, adminId: fromId, chatId, messageId, settings: updated, query };
       const newText = await ms.text(sctx);
-      const newKb = ms.keyboard(updated);
+      const newKb = ms.keyboard(updated, sctx);
       await this.render(chatId, messageId, newText, newKb);
     }
   }
@@ -369,6 +369,7 @@ export class AdminOrchestrator {
     // "set:<scope>:..." → scope maps to screen ID
     if (first === "set") {
       if (second === "scheduler") return "schedule";
+      if (second === "strategy") return "strategy";
       if (second === "providers") return "providers";
       if (second === "plugins") return "providers";
       if (second === "general" || second === "language" || second === "content" || second === "quality" || second === "debug") return "settings";

@@ -37,7 +37,7 @@ export interface ScreenAction {
 export interface Screen {
   readonly id: string;
   text(ctx: ScreenContext): Promise<string> | string;
-  keyboard(settings: FredySettings): InlineKeyboard;
+  keyboard(settings: FredySettings, ctx?: ScreenContext): InlineKeyboard;
   /**
    * Handle a callback for this screen. The callback data is the full string.
    * Returns a ScreenAction describing what to update.

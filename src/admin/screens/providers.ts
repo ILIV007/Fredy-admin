@@ -1,11 +1,15 @@
 /**
  * src/admin/screens/providers.ts
- * Providers screen — list all plugins, enable/disable, priority, manual test.
+ * Providers screen — list all plugins + AI providers, enable/disable, manual test.
+ *
+ * v7.4.0: The keyboard() function now accepts ctx so we can read the ACTUAL
+ * plugin enabled-state from the PluginManager (the previous version always
+ * showed "true" because it had no access to the runtime state).
  */
 
 import type { Screen, ScreenAction, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
-import type { InlineKeyboard } from "../../types/telegram";
+import type { InlineKeyboard, InlineKeyboardButton } from "../../types/telegram";
 import { buildKeyboardWithBack, toggleButton, labelButton, navButton } from "../keyboards";
 import { header, kv, divider, yesNo } from "../helpers/formatting";
 
@@ -64,30 +68,43 @@ export const providersScreen: Screen = {
     return lines.join("\n");
   },
 
-  keyboard(s: FredySettings): InlineKeyboard {
-    void s;
-    // We need access to container to check plugin states, but keyboard() only gets settings.
-    // So we use settings.providers for AI providers and hardcode plugin states (they're always ON by default).
-    // The toggle will still work — it just shows the static label.
-    return buildKeyboardWithBack([
-      [labelButton("─── AI Providers ───")],
-      [toggleButton("Gemini", s.providers?.gemini?.enabled ?? true, "set:providers:gemini:toggle")],
-      [toggleButton("OpenRouter", s.providers?.openrouter?.enabled ?? true, "set:providers:openrouter:toggle")],
-      [labelButton("─── Source Plugins ───")],
-      [toggleButton("GitHub", true, "set:plugins:github:toggle")],
-      [toggleButton("Dev.to", true, "set:plugins:devto:toggle")],
-      [toggleButton("News", true, "set:plugins:news:toggle")],
-      [toggleButton("NASA", true, "set:plugins:nasa:toggle")],
-      [toggleButton("Joke", true, "set:plugins:joke:toggle")],
-      [toggleButton("XKCD", true, "set:plugins:xkcd:toggle")],
-      [toggleButton("HackerNews", true, "set:plugins:hackernews:toggle")],
-      [toggleButton("Wikimedia", true, "set:plugins:wikimedia:toggle")],
-      [labelButton("─── Manual Tests ───")],
-      [navButton("🧪 Test Gemini", "action:providers:test:gemini")],
-      [navButton("🧪 Test OpenRouter", "action:providers:test:openrouter")],
-      [navButton("🧪 Test All Sources", "action:providers:test:all-sources")],
-      [navButton("🩺 Health Check All", "action:providers:healthCheckAll")],
-    ]);
+  keyboard(s: FredySettings, ctx?: ScreenContext): InlineKeyboard {
+    const rows: InlineKeyboardButton[][] = [];
+    rows.push([labelButton("─── AI Providers ───")]);
+    rows.push([toggleButton("Gemini", s.providers?.gemini?.enabled ?? true, "set:providers:gemini:toggle")]);
+    rows.push([toggleButton("OpenRouter", s.providers?.openrouter?.enabled ?? true, "set:providers:openrouter:toggle")]);
+
+    rows.push([labelButton("─── Source Plugins ───")]);
+    // v7.4.0: Read actual plugin states from PluginManager when ctx is available.
+    // Fallback to enabled=true (legacy behavior) when ctx is missing.
+    if (ctx?.container?.plugins) {
+      const plugins = ctx.container.plugins.list();
+      for (const p of plugins) {
+        const isEnabled = ctx.container.plugins.isEnabled(p.metadata.id);
+        rows.push([toggleButton(p.metadata.name, isEnabled, `set:plugins:${p.metadata.id}:toggle`)]);
+      }
+    } else {
+      // Legacy static fallback — used by /menu command before ctx is wired up.
+      rows.push([toggleButton("GitHub", true, "set:plugins:github:toggle")]);
+      rows.push([toggleButton("GitHub Trending", true, "set:plugins:github-trending:toggle")]);
+      rows.push([toggleButton("GitHub Releases", true, "set:plugins:github-releases:toggle")]);
+      rows.push([toggleButton("Dev.to", true, "set:plugins:devto:toggle")]);
+      rows.push([toggleButton("Stack Exchange", true, "set:plugins:stackexchange:toggle")]);
+      rows.push([toggleButton("News", true, "set:plugins:news:toggle")]);
+      rows.push([toggleButton("HackerNews", true, "set:plugins:hackernews:toggle")]);
+      rows.push([toggleButton("NASA", true, "set:plugins:nasa:toggle")]);
+      rows.push([toggleButton("Joke", true, "set:plugins:joke:toggle")]);
+      rows.push([toggleButton("XKCD", true, "set:plugins:xkcd:toggle")]);
+      rows.push([toggleButton("Wikimedia", true, "set:plugins:wikimedia:toggle")]);
+      rows.push([toggleButton("Reddit", true, "set:plugins:reddit:toggle")]);
+    }
+
+    rows.push([labelButton("─── Manual Tests ───")]);
+    rows.push([navButton("🧪 Test Gemini", "action:providers:test:gemini")]);
+    rows.push([navButton("🧪 Test OpenRouter", "action:providers:test:openrouter")]);
+    rows.push([navButton("🧪 Test All Sources", "action:providers:test:all-sources")]);
+    rows.push([navButton("🩺 Health Check All", "action:providers:healthCheckAll")]);
+    return buildKeyboardWithBack(rows);
   },
 
   async onCallback(data: string, ctx: ScreenContext): Promise<ScreenAction | void> {

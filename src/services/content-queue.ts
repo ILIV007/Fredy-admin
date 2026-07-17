@@ -179,9 +179,26 @@ export class ContentQueue {
   /** Get all items in a category queue (for dashboard display). */
   async listItems(category: Category): Promise<QueuedContent[]> {
     const queue = await this.getQueue(category);
-    // Filter out expired items.
+    // Filter out expired items AND items with malformed structure
+    // (missing .content, .id, .category — legacy/bad data).
+    // Per-item filter prevents one bad item from breaking the whole list.
     const now = Date.now();
-    return queue.filter((item) => item.expiresAt > now);
+    return queue.filter((item) => {
+      try {
+        if (!item || typeof item !== "object") return false;
+        if (item.expiresAt <= now) return false;
+        if (!item.content || !item.content.id) return false;
+        if (!item.content.category) return false;
+        // Ensure quality object exists (legacy items may lack it).
+        if (!item.content.quality || typeof item.content.quality.overallScore !== "number") {
+          // Patch missing quality so downstream rendering doesn't crash.
+          (item.content as { quality: { overallScore: number } }).quality = { overallScore: 0 };
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /** Delete a specific item from a category queue by content ID. */

@@ -27,6 +27,8 @@ export interface SlotTime {
   readonly epochMs: number;
   readonly category: Category;
   readonly jitterMinutes: number;
+  /** Annotated at runtime by SchedulerService.status() — true if slot already fired. */
+  readonly fired?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

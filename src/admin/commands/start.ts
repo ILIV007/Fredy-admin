@@ -37,7 +37,7 @@ export const startCommand: Command = {
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
     // Then send the dashboard
     const text = await mainScreen.text(screenCtx);
-    const keyboard = mainScreen.keyboard(settings);
+    const keyboard = mainScreen.keyboard(settings, screenCtx);
     await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,

@@ -104,7 +104,7 @@ export interface InlineKeyboard {
 
 export interface InlineKeyboardButton {
   readonly text: string;
-  readonly callback_data: string;
+  readonly callback_data?: string;
   readonly url?: string;
 }
 

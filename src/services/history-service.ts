@@ -37,8 +37,14 @@ export interface HistoryServiceDeps {
 
 const HISTORY_TTL_SECONDS = 90 * 24 * 3600; // 90 days
 const MAX_ENTRIES_PER_DAY = 100;
+/** TTL for the getRecent() in-memory cache (60s). Reduces KV reads when
+ *  the dashboard/bot is opened repeatedly within a minute. */
+const RECENT_CACHE_TTL_MS = 60_000;
 
 export class HistoryService {
+  /** In-memory cache for getRecent() — keyed by `days` arg. */
+  private recentCache = new Map<number, { entries: readonly HistoryEntry[]; expiresAt: number }>();
+
   constructor(private readonly deps: HistoryServiceDeps) {}
 
   /** Record a successfully published post. */
@@ -84,6 +90,7 @@ export class HistoryService {
       message: "Published post recorded in history",
     });
 
+    this.invalidateRecentCache();
     return entry;
   }
 
@@ -124,6 +131,8 @@ export class HistoryService {
       error,
       message: "Failed publish recorded in history",
     });
+
+    this.invalidateRecentCache();
   }
 
   /** Get history for a specific date. */
@@ -141,6 +150,14 @@ export class HistoryService {
 
   /** Get recent history (last N days). */
   async getRecent(days = 7): Promise<readonly HistoryEntry[]> {
+    // v7.4.0: In-memory cache for 60s — drastically reduces KV reads when
+    // the dashboard or bot menu is opened repeatedly. The cache is keyed
+    // by `days` and invalidated on recordPublished / recordFailed.
+    const cached = this.recentCache.get(days);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.entries;
+    }
+
     const timezone = await this.deps.timezone();
     const now = Date.now();
     const allEntries: HistoryEntry[] = [];
@@ -153,7 +170,15 @@ export class HistoryService {
 
     // Sort by publishedAt descending.
     allEntries.sort((a, b) => b.publishedAt - a.publishedAt);
+
+    // Cache the result.
+    this.recentCache.set(days, { entries: allEntries, expiresAt: Date.now() + RECENT_CACHE_TTL_MS });
     return allEntries;
+  }
+
+  /** Invalidate the recent-history cache (called after recordPublished / recordFailed). */
+  private invalidateRecentCache(): void {
+    this.recentCache.clear();
   }
 
   /** Get stats for a date (for the dashboard). */
@@ -204,6 +229,7 @@ export class HistoryService {
   /** Clear history for a date. */
   async clearForDate(date: string): Promise<void> {
     await this.deps.kv.delete(historyKey(date));
+    this.invalidateRecentCache();
   }
 
   // ────────────────────────────────────────────────────────────

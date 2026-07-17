@@ -23,7 +23,7 @@ export const menuCommand: Command = {
       query: {} as never,
     };
     const text = await mainScreen.text(screenCtx);
-    const keyboard = mainScreen.keyboard(settings as FredySettings);
+    const keyboard = mainScreen.keyboard(settings as FredySettings, screenCtx);
     await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,

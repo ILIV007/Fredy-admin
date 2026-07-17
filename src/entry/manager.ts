@@ -155,20 +155,30 @@ export async function managerHandler(
     const depths = await container.queue.depth().catch(() => []);
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     // Also fetch actual queued items for display.
+    // Per-category try/catch AND per-item mapping: a single bad item never
+    // blanks out an entire category (which was the v7.3.3 bug).
     const items: Record<string, unknown[]> = {};
     for (const cat of ["A", "B", "C"] as const) {
       try {
         const queued = await container.queue.listItems(cat);
-        items[cat] = queued.map(q => ({
-          id: q.content.id,
-          headline: q.content.headline ?? "(no headline)",
-          pluginId: q.content.pluginId,
-          language: q.content.language,
-          qualityScore: q.content.quality.overallScore,
-          enqueuedAt: q.enqueuedAt,
-          aiProvider: q.content.aiProvider,
-          aiModel: q.content.aiModel,
-        }));
+        items[cat] = queued.map(q => {
+          try {
+            return {
+              id: q.content.id,
+              headline: q.content.headline ?? "(no headline)",
+              pluginId: q.content.pluginId ?? "(unknown)",
+              language: q.content.language ?? "-",
+              qualityScore: q.content.quality?.overallScore ?? 0,
+              enqueuedAt: q.enqueuedAt,
+              aiProvider: q.content.aiProvider ?? "-",
+              aiModel: q.content.aiModel ?? "-",
+              sourceUrl: q.content.sourceUrl ?? "",
+            };
+          } catch {
+            // Single bad item: skip it, but keep the rest of the category.
+            return null;
+          }
+        }).filter(x => x !== null);
       } catch { items[cat] = []; }
     }
     return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items });
@@ -199,20 +209,56 @@ export async function managerHandler(
         await container.queue.deleteItem(cat, body.contentId);
         const adminId = Number(env.ADMIN_ID ?? "0");
         if (adminId > 0) {
+          // ── Send the FORMATTED POST to admin PM (photo or text) ──
+          // Previous version swallowed Telegram API errors via .catch(()=>{}),
+          // which silently dropped the post when HTML was malformed or text too long.
+          // Now: log errors and fall back to plain text so admin ALWAYS sees the post.
+          let postSentToAdmin = false;
+          let postSendError: string | null = null;
           try {
             const finalPost = await container.uxLayer.transform(target.content);
+            // Try with media first (if any).
             if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-              await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
+              const photoResult = await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" });
+              if (photoResult.ok) {
+                postSentToAdmin = true;
+              } else {
+                // Photo failed (URL 404, too large, etc.) — fall back to text-only.
+                postSendError = `sendPhoto: ${photoResult.description ?? "unknown"}`;
+                const textResult = await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" });
+                if (textResult.ok) postSentToAdmin = true;
+                else postSendError += ` | sendMessage: ${textResult.description ?? "unknown"}`;
+              }
             } else {
-              await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+              // Text-only post.
+              const textResult = await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" });
+              if (textResult.ok) {
+                postSentToAdmin = true;
+              } else {
+                postSendError = `sendMessage: ${textResult.description ?? "unknown"}`;
+                // Try plain-text fallback (strip HTML) so admin ALWAYS sees the content.
+                const plainText = finalPost.fullText
+                  .replace(/<[^>]+>/g, "")
+                  .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#64;/g, "@");
+                const truncated = plainText.length > 4000 ? plainText.slice(0, 4000) + "..." : plainText;
+                const fallbackResult = await container.tg.sendMessage(adminId, `⚠️ Formatted post failed (${postSendError}). Plain-text fallback:\n\n${truncated}`, {});
+                if (fallbackResult.ok) postSentToAdmin = true;
+              }
             }
-          } catch {}
+          } catch (transformErr) {
+            postSendError = `transform: ${transformErr instanceof Error ? transformErr.message : String(transformErr)}`;
+          }
+
+          // ── Send the summary report ──
           await container.tg.sendMessage(adminId, [
-            `<b>Published manually from Queue (Send Now)</b>`,
+            `📤 <b>Published manually from Queue (Send Now)</b>`,
             `<b>Category:</b> ${cat}`,
             `<b>AI:</b> ${target.content.aiProvider}/${target.content.aiModel}`,
             `<b>Quality:</b> ${target.content.quality.overallScore}`,
             `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+            postSentToAdmin
+              ? `<b>Admin PM:</b> ✅ Post sent above`
+              : `<b>Admin PM:</b> ⚠️ Post failed to send${postSendError ? ` (${postSendError})` : ""}`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
         return json({ ok: true, messageId: pubResult.telegramMessageId });
@@ -1275,10 +1321,12 @@ async function loadQueue(){
   c.innerHTML='<div class="card">Loading queue...</div>';
   try{
     const d=await api("queue");
-    if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+    if(!d.ok){c.innerHTML='<div class="card">Error: '+(d.error||"unknown")+'</div>';return;}
     const l=d.limits||{};
     const items=d.items||{};
-    let html='<div class="card" style="display:flex;gap:8px"><button class="btn" onclick="sortByProvider()">Sort by Provider</button><button class="btn" onclick="window._qsp=false;loadQueue()">Default View</button></div>';
+    // Escape any user-provided text before injecting into HTML.
+    const esc=function(s){if(s===null||s===undefined)return "";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");};
+    let html='<div class="card" style="display:flex;gap:8px"><button class="btn" id="q-sort-btn">Sort by Provider</button><button class="btn" id="q-default-btn">Default View</button><button class="btn btn-ghost" id="q-refresh-btn">🔄 Refresh</button></div>';
     for(const cat of["A","B","C"]){
       const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
       const lim=l[cat]||{min:0,target:0};
@@ -1287,18 +1335,44 @@ async function loadQueue(){
       if(window._qsp){catItems=catItems.slice().sort((a,b)=>(a.pluginId||"").localeCompare(b.pluginId||""));}
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
-        html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"-")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"-")+"/"+(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\\''+cat+'\\',\\''+it.id+'\\')">Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">Delete</button></td></tr>').join("")+
-        '</tbody></table>';
+        // Use data-* attributes + event delegation — no onclick string escaping.
+        // Each row's buttons carry their action, cat, id as data attributes.
+        html+='<table class="q-table" data-cat="'+cat+'" style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>';
+        for(const it of catItems){
+          // Per-item try/catch: a single bad row never breaks the whole table.
+          let row="";
+          try{
+            row='<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+esc(it.headline||"-")+'</td><td>'+esc(it.pluginId||"-")+'</td><td>'+esc(it.language||"-")+'</td><td>'+esc(it.qualityScore??"-")+'</td><td>'+esc(it.aiProvider||"-")+"/"+esc(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" data-action="send" data-cat="'+esc(cat)+'" data-id="'+esc(it.id)+'">Send Now</button> <button class="btn btn-sm btn-danger" data-action="delete" data-cat="'+esc(cat)+'" data-id="'+esc(it.id)+'">Delete</button></td></tr>';
+          }catch(e){row='<tr><td colspan="6" style="color:var(--red)">⚠️ Bad row data: '+esc(String(e))+'</td></tr>';}
+          html+=row;
+        }
+        html+='</tbody></table>';
       }else{html+='<p style="color:var(--text2);margin-top:8px">No items.</p>';}
       html+='</div>';
     }
     c.innerHTML=html;
-  }catch(e){c.innerHTML='<div class="card">Error: '+e+'</div>';}
+    // ── Event delegation: one click handler for all queue action buttons ──
+    // Replaces fragile onclick="sendQueueNow(\'A\',\'id\')" string-concat pattern
+    // that broke when TS template literal escaping was wrong.
+    c.querySelectorAll("button[data-action]").forEach(function(btn){
+      btn.addEventListener("click",function(){
+        const action=btn.getAttribute("data-action");
+        const cat=btn.getAttribute("data-cat");
+        const id=btn.getAttribute("data-id");
+        if(action==="send"){sendQueueNow(cat,id);}
+        else if(action==="delete"){deleteQueueItem(cat,id);}
+      });
+    });
+    const sortBtn=document.getElementById("q-sort-btn");
+    if(sortBtn)sortBtn.addEventListener("click",function(){window._qsp=true;loadQueue();});
+    const defBtn=document.getElementById("q-default-btn");
+    if(defBtn)defBtn.addEventListener("click",function(){window._qsp=false;loadQueue();});
+    const refBtn=document.getElementById("q-refresh-btn");
+    if(refBtn)refBtn.addEventListener("click",loadQueue);
+  }catch(e){c.innerHTML='<div class="card">Error: '+esc(String(e))+'</div>';}
 }
-function sortByProvider(){window._qsp=true;loadQueue();}
-async function deleteQueueItem(cat,id){if(!confirm("Delete?"))return;const d=await api("queue/"+cat+"/delete","POST",{contentId:id});toast(d.ok?"Deleted":"Failed");loadQueue();}
-async function sendQueueNow(cat,id){if(!confirm("Publish NOW?"))return;toast("Publishing...");const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});toast(d.ok?"Published! Msg: "+d.messageId:"Failed");loadQueue();}
+async function deleteQueueItem(cat,id){if(!confirm("Delete this item?"))return;const d=await api("queue/"+cat+"/delete","POST",{contentId:id});toast(d.ok?"✅ Deleted":"❌ Failed: "+(d.error||""));loadQueue();}
+async function sendQueueNow(cat,id){if(!confirm("Publish this item NOW to channel + admin PM?"))return;toast("Publishing...");const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});toast(d.ok?"✅ Published! Msg: "+d.messageId:"❌ Failed: "+(d.error||""));loadQueue();}
 
 async function loadAI(){
   const d=await api("ai");const c=document.getElementById("content");
