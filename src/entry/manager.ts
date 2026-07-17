@@ -184,6 +184,45 @@ export async function managerHandler(
     return json({ ok: deleted, message: deleted ? "Item deleted" : "Item not found" });
   }
 
+  // ── Queue: send now (publish a specific queue item immediately) ──
+  const queueSendMatch = apiPath.match(/^queue\/([ABC])\/send-now$/);
+  if (queueSendMatch && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as { contentId?: string };
+    const cat = queueSendMatch[1] as "A" | "B" | "C";
+    if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
+    try {
+      const items = await container.queue.listItems(cat);
+      const target = items.find(q => q.content.id === body.contentId);
+      if (!target) return json({ ok: false, error: "Item not found in queue" });
+      const pubResult = await container.finalPublisher.publish(target.content);
+      if (pubResult.ok) {
+        await container.queue.deleteItem(cat, body.contentId);
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        if (adminId > 0) {
+          try {
+            const finalPost = await container.uxLayer.transform(target.content);
+            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+              await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
+            } else {
+              await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+            }
+          } catch {}
+          await container.tg.sendMessage(adminId, [
+            `<b>Published manually from Queue (Send Now)</b>`,
+            `<b>Category:</b> ${cat}`,
+            `<b>AI:</b> ${target.content.aiProvider}/${target.content.aiModel}`,
+            `<b>Quality:</b> ${target.content.quality.overallScore}`,
+            `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+        return json({ ok: true, messageId: pubResult.telegramMessageId });
+      }
+      return json({ ok: false, error: pubResult.error ?? "Publish failed" });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
   // ── AI ──
   if (apiPath === "ai" && request.method === "GET") {
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
@@ -1249,7 +1288,7 @@ async function loadQueue(){
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
         html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"-")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"-")+"/"+(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\\"'+cat+'\\",\\"'+it.id+'\\")">Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\"'+cat+'\\",\\"'+it.id+'\\")">Delete</button></td></tr>').join("")+
+        catItems.map(it=>'<tr><td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"-")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"-")+"/"+(it.aiModel||"-")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow(\\''+cat+'\\',\\''+it.id+'\\')">Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem(\\''+cat+'\\',\\''+it.id+'\\')">Delete</button></td></tr>').join("")+
         '</tbody></table>';
       }else{html+='<p style="color:var(--text2);margin-top:8px">No items.</p>';}
       html+='</div>';
@@ -1270,7 +1309,7 @@ async function loadAI(){
     for(const[pid,models]of Object.entries(d.modelsByProvider)){
       const provInfo=(d.providers||[]).find(p=>p.id===pid)||{};
       modelsHtml+='<div style="margin-bottom:12px"><h4 style="margin-bottom:6px">'+(provInfo.name||pid)+' '+(provInfo.configured?'✅':'❌')+' '+(provInfo.enabled?'🟢':'🔴')+'</h4><table style="font-size:12px"><thead><tr><th>#</th><th>Model</th><th>Status</th><th>Test</th></tr></thead><tbody>'+
-      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/'/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
+      models.map(m=>'<tr><td style="color:var(--accent);font-weight:600">'+m.priority+'</td><td><code>'+m.model+'</code></td><td>'+(m.enabled?'<span class="badge badge-green">Ready</span>':'<span class="badge badge-gray">Off</span>')+'</td><td><button class="btn btn-sm" onclick="testAIModel(\\''+pid+'\\',\\''+m.model.replace(/['\"]/g,"")+'\\')">🧪 Test</button></td></tr>').join('')+
       '</tbody></table></div>';
     }
   }
