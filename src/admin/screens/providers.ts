@@ -130,12 +130,32 @@ export const providersScreen: Screen = {
       if (scope === "providers" && action === "toggle") {
         if (id === "gemini" || id === "openrouter") {
           const isEnabled = ctx.container.providers.isEnabled(id);
-          if (isEnabled) {
-            ctx.container.providers.disable(id);
-          } else {
+          const newEnabled = !isEnabled;
+          // 1. Update in-memory state.
+          if (newEnabled) {
             ctx.container.providers.enable(id);
+          } else {
+            ctx.container.providers.disable(id);
           }
-          return { toast: `✅ ${id} ${isEnabled ? "disabled" : "enabled"}` };
+          // 2. Persist to settings so other isolates (Manager dashboard, cron)
+          //    and Worker restarts see the change.
+          try {
+            const cur = await ctx.container.config.getSettings(ctx.adminId);
+            const curProviders = cur.providers ?? {};
+            const curProviderCfg = (curProviders as unknown as Record<string, { enabled: boolean; models: string[]; timeoutMs: number; retryCount: number; dailyLimit: number; priority: number }>)[id];
+            if (curProviderCfg) {
+              await ctx.container.config.updateSettings(ctx.adminId, {
+                providers: {
+                  ...curProviders,
+                  [id]: { ...curProviderCfg, enabled: newEnabled },
+                },
+              } as never);
+            }
+          } catch (e) {
+            // Settings persistence failed — in-memory toggle still worked.
+            console.warn("[providers] failed to persist toggle:", e);
+          }
+          return { toast: `✅ ${id} ${newEnabled ? "enabled" : "disabled"}` };
         }
       }
 
@@ -143,12 +163,32 @@ export const providersScreen: Screen = {
       if (scope === "plugins" && action === "toggle") {
         if (!id) return { alert: "❌ Missing plugin ID" };
         const isEnabled = ctx.container.plugins.isEnabled(id);
-        if (isEnabled) {
-          ctx.container.plugins.disable(id);
-        } else {
+        const newEnabled = !isEnabled;
+        // 1. Update in-memory state.
+        if (newEnabled) {
           ctx.container.plugins.enable(id);
+        } else {
+          ctx.container.plugins.disable(id);
         }
-        return { toast: `✅ ${id} ${isEnabled ? "disabled" : "enabled"}` };
+        // 2. Persist to settings.plugins.perPlugin[id].enabled so other
+        //    isolates and Worker restarts see the change.
+        try {
+          const cur = await ctx.container.config.getSettings(ctx.adminId);
+          const perPlugin = cur.plugins?.perPlugin ?? {};
+          const curOverride = perPlugin[id as keyof typeof perPlugin] ?? {};
+          await ctx.container.config.updateSettings(ctx.adminId, {
+            plugins: {
+              ...cur.plugins,
+              perPlugin: {
+                ...perPlugin,
+                [id]: { ...curOverride, enabled: newEnabled },
+              },
+            },
+          } as never);
+        } catch (e) {
+          console.warn("[plugins] failed to persist toggle:", e);
+        }
+        return { toast: `✅ ${id} ${newEnabled ? "enabled" : "disabled"}` };
       }
     }
 

@@ -6,6 +6,13 @@
  * the KV read latency for hot settings. Writes invalidate the cache entry
  * so the next read picks up the new value.
  *
+ * v7.4.1: TTL reduced from 30s to 5s to minimize cross-isolate staleness.
+ * The bot and the Manager dashboard often run on different isolates, so
+ * when one writes, the other may serve stale data for up to TTL seconds.
+ * 5s is short enough that the admin perceives near-real-time sync while
+ * still providing meaningful KV read reduction for hot paths (scheduler tick,
+ * queue maintenance).
+ *
  * See ARCHITECTURE_RULES.md §18.1 (cache aggressively, invalidate explicitly).
  */
 
@@ -20,7 +27,7 @@ interface CacheEntry {
   readonly expiresAt: number;
 }
 
-const DEFAULT_TTL_MS = 30_000; // 30 seconds
+const DEFAULT_TTL_MS = 5_000; // 5 seconds (was 30s — caused cross-isolate staleness)
 
 export class ConfigCache {
   private readonly cache = new Map<string, CacheEntry>();

@@ -98,27 +98,45 @@ export class ContentQueue {
     return queue[0] ?? null;
   }
 
-  /** Get queue depth per category. */
+  /** Get queue depth per category.
+   *  v7.4.1: Now counts ONLY non-expired, valid items (consistent with
+   *  listItems()). Previously it counted raw queue length including
+   *  expired items, which made the dashboard show "11 / 9" but the items
+   *  table was empty — confusing the admin. */
   async depth(): Promise<readonly QueueDepth[]> {
     const categories: Category[] = ["A", "B", "C"];
+    const now = Date.now();
     const depths = await Promise.all(
       categories.map(async (cat) => {
         const queue = await this.getQueue(cat);
-        const oldest = queue[0];
+        // Filter to valid, non-expired items — same logic as listItems().
+        const valid = queue.filter((item) => {
+          try {
+            return item && typeof item === "object"
+              && item.expiresAt > now
+              && item.content && item.content.id;
+          } catch { return false; }
+        });
+        const oldest = valid[0];
         return {
           category: cat,
-          depth: queue.length,
-          oldestItemAge: oldest ? Date.now() - oldest.enqueuedAt : null,
+          depth: valid.length,
+          oldestItemAge: oldest ? now - oldest.enqueuedAt : null,
         } satisfies QueueDepth;
       }),
     );
     return depths;
   }
 
-  /** Get depth for a single category. */
+  /** Get depth for a single category (counts only non-expired items). */
   async depthFor(category: Category): Promise<number> {
     const queue = await this.getQueue(category);
-    return queue.length;
+    const now = Date.now();
+    return queue.filter((item) => {
+      try {
+        return item && item.expiresAt > now && item.content && item.content.id;
+      } catch { return false; }
+    }).length;
   }
 
   /** Move an item to the dead-letter queue. */
@@ -176,29 +194,37 @@ export class ContentQueue {
     return [...all[0], ...all[1], ...all[2]];
   }
 
-  /** Get all items in a category queue (for dashboard display). */
+  /** Get all items in a category queue (for dashboard display).
+   *  v7.4.1: Also triggers a background cleanup of expired items so the
+   *  KV store doesn't accumulate stale entries. */
   async listItems(category: Category): Promise<QueuedContent[]> {
     const queue = await this.getQueue(category);
-    // Filter out expired items AND items with malformed structure
-    // (missing .content, .id, .category — legacy/bad data).
-    // Per-item filter prevents one bad item from breaking the whole list.
     const now = Date.now();
-    return queue.filter((item) => {
+    // Per-item filter: reject expired or malformed items.
+    const valid: QueuedContent[] = [];
+    const expired: QueuedContent[] = [];
+    for (const item of queue) {
       try {
-        if (!item || typeof item !== "object") return false;
-        if (item.expiresAt <= now) return false;
-        if (!item.content || !item.content.id) return false;
-        if (!item.content.category) return false;
-        // Ensure quality object exists (legacy items may lack it).
+        if (!item || typeof item !== "object") continue;
+        if (item.expiresAt <= now) { expired.push(item); continue; }
+        if (!item.content || !item.content.id) continue;
+        if (!item.content.category) continue;
+        // Patch missing quality (legacy items).
         if (!item.content.quality || typeof item.content.quality.overallScore !== "number") {
-          // Patch missing quality so downstream rendering doesn't crash.
           (item.content as { quality: { overallScore: number } }).quality = { overallScore: 0 };
         }
-        return true;
+        valid.push(item);
       } catch {
-        return false;
+        // skip bad item
       }
-    });
+    }
+    // Background cleanup: if expired items were found, rewrite the queue
+    // without them. This keeps the KV store tidy without blocking the response.
+    if (expired.length > 0) {
+      // Don't await — fire and forget.
+      this.saveQueue(category, valid).catch(() => {});
+    }
+    return valid;
   }
 
   /** Delete a specific item from a category queue by content ID. */

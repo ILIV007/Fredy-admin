@@ -142,6 +142,27 @@ export class PluginManager {
     return entry?.enabled ?? false;
   }
 
+  /**
+   * Sync in-memory enabled state from persisted settings.
+   * Called at container build time (after settings are loaded) so that
+   * plugin enable/disable changes made via the bot/Manager persist across
+   * isolates and Worker restarts.
+   *
+   * v7.4.1: Previously, plugin enable/disable was in-memory only — other
+   * isolates (and the Manager dashboard) didn't see the change. Now the
+   * source of truth is `settings.plugins.perPlugin[id].enabled`.
+   */
+  syncFromSettings(perPlugin: Readonly<Record<string, { enabled?: boolean; priority?: number; dailyLimit?: number }>>): void {
+    for (const [id, override] of Object.entries(perPlugin)) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+      if (typeof override.enabled === "boolean") {
+        entry.enabled = override.enabled;
+        this.updateStatus(id, { enabled: override.enabled });
+      }
+    }
+  }
+
   // ────────────────────────────────────────────────────────────
   // Reload
   // ────────────────────────────────────────────────────────────

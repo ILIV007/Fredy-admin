@@ -170,6 +170,8 @@ export async function managerHandler(
               language: q.content.language ?? "-",
               qualityScore: q.content.quality?.overallScore ?? 0,
               enqueuedAt: q.enqueuedAt,
+              expiresAt: q.expiresAt,
+              isExpired: q.expiresAt <= Date.now(),
               aiProvider: q.content.aiProvider ?? "-",
               aiModel: q.content.aiModel ?? "-",
               sourceUrl: q.content.sourceUrl ?? "",
@@ -182,6 +184,35 @@ export async function managerHandler(
       } catch { items[cat] = []; }
     }
     return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items });
+  }
+
+  // ── Queue debug: shows RAW queue contents (including expired items) ──
+  // Useful for diagnosing "depth shows N but items table is empty" issues.
+  if (apiPath === "queue/debug" && request.method === "GET") {
+    const raw: Record<string, unknown> = {};
+    for (const cat of ["A", "B", "C"] as const) {
+      try {
+        // Access the internal queue directly via listItems + depthFor.
+        const valid = await container.queue.listItems(cat);
+        const validCount = await container.queue.depthFor(cat);
+        raw[cat] = {
+          validItemCount: valid.length,
+          depthFor: validCount,
+          validItems: valid.map(q => ({
+            id: q.content.id,
+            headline: (q.content.headline ?? "").slice(0, 80),
+            pluginId: q.content.pluginId,
+            enqueuedAt: q.enqueuedAt,
+            expiresAt: q.expiresAt,
+            ageMinutes: Math.round((Date.now() - q.enqueuedAt) / 60_000),
+            expiresMinutes: Math.round((q.expiresAt - Date.now()) / 60_000),
+          })),
+        };
+      } catch (e) {
+        raw[cat] = { error: errMsg(e) };
+      }
+    }
+    return json({ ok: true, time: Date.now(), raw });
   }
 
   // ── Queue: delete item ──
@@ -380,6 +411,24 @@ export async function managerHandler(
       container.plugins.enable(pluginId);
     }
     const newState = container.plugins.isEnabled(pluginId);
+    // v7.4.1: Persist to settings so other isolates (bot, cron) see the change.
+    try {
+      const adminId = Number(env.ADMIN_ID ?? "0");
+      const cur = await container.config.getSettings(adminId);
+      const perPlugin = cur.plugins?.perPlugin ?? {};
+      const curOverride = (perPlugin as Record<string, Record<string, unknown>>)[pluginId] ?? {};
+      await container.config.updateSettings(adminId, {
+        plugins: {
+          ...cur.plugins,
+          perPlugin: {
+            ...perPlugin,
+            [pluginId]: { ...curOverride, enabled: newState },
+          },
+        },
+      } as never);
+    } catch (e) {
+      console.warn("[manager] failed to persist plugin toggle:", e);
+    }
     return json({ ok: true, pluginId, enabled: newState });
   }
 
