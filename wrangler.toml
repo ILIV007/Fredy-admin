@@ -51,13 +51,13 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # ============================================================
 # Cron Triggers
 # ============================================================
-# Backup cron: runs every 24 hours as a fallback in case
+# Backup cron: runs once every 24 hours as a fallback in case
 # the external cron-job.org stops working.
 # The external cron (cron-job.org) calls /internal/tick every 2 hours.
-# This internal cron is a safety net only.
+# This internal cron is a safety net only — runs at midnight UTC daily.
 
 [triggers]
-crons = ["0 */24 * * *"]
+crons = ["0 0 * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)
