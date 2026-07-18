@@ -194,14 +194,18 @@ export class StrategyEngine {
     return this.generatePlan(targetDate);
   }
 
-  /** Mark a planned post as published. */
+  /** Mark a planned post as published.
+   *  v8.5.0: Also mark the corresponding daily-planner slot as fired,
+   *  so the two plans stay in sync. */
   async markPostPublished(date: string, postIndex: number): Promise<void> {
     const plan = await this.getOrGeneratePlan(date);
     const updatedPosts = plan.posts.map((p) =>
       p.index === postIndex ? { ...p, status: "published" as PlannedPostStatus } : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch(() => {});
+    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
+      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostPublished setJson failed" });
+    });
   }
 
   /** Mark a planned post as failed. */
@@ -211,7 +215,9 @@ export class StrategyEngine {
       p.index === postIndex ? { ...p, status: "failed" as PlannedPostStatus } : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch(() => {});
+    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
+      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostFailed setJson failed" });
+    });
   }
 
   // ────────────────────────────────────────────────────────

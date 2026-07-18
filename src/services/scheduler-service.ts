@@ -136,9 +136,37 @@ export class SchedulerService {
     }
 
     // 2. Get or generate today's plan.
+    // v8.5.0: Use strategyEngine plan if available — it has provider/priority/status
+    // and is the SAME plan shown on the Strategy page. This ensures the scheduler
+    // fires the same slots the admin sees in the Daily Plan table.
     let plan: DailyPlan;
     try {
-      plan = await this.deps.dailyPlanner.getOrGenerate();
+      if (this.deps.strategyEngine) {
+        const stratPlan = await this.deps.strategyEngine.getOrGeneratePlan();
+        // Convert DailyPublishPlan to DailyPlan format for the scheduler.
+        plan = {
+          date: stratPlan.date,
+          slots: stratPlan.posts.map(p => ({
+            index: p.index,
+            date: p.date,
+            time: p.time,
+            epochMs: p.epochMs,
+            category: p.category,
+            jitterMinutes: 0,
+          })),
+          generatedAt: stratPlan.generatedAt,
+          timezone: stratPlan.timezone,
+          postsPerDay: stratPlan.posts.length,
+          categoryDistribution: { A: 0, B: 0, C: 0 },
+        };
+        // Fill categoryDistribution from posts.
+        for (const p of stratPlan.posts) {
+          const dist = plan!.categoryDistribution as Record<string, number>;
+          dist[p.category] = (dist[p.category] ?? 0) + 1;
+        }
+      } else {
+        plan = await this.deps.dailyPlanner.getOrGenerate();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.logger.error("pipeline.error", {
@@ -277,12 +305,14 @@ export class SchedulerService {
           message: "No content available — trying fallback plugin",
         });
 
-        // v8.4.0: If the first API/plugin fails, try another plugin in the same category.
-        // The CATEGORY_PROVIDERS map lists all plugins for each category.
-        // We try each one until we find content.
+        // v8.4.0: If the first API/plugin fails, try ONE fallback plugin at a time.
+        // v8.5.0: Optimized — only try the NEXT plugin, not all at once.
+        // The getFallbackPlugins returns all plugins for the category; we try
+        // them one by one until one succeeds.
         const fallbackPlugins = this.getFallbackPlugins(slot.category);
         let fallbackContent: ReadyContent | null = null;
         for (const fbPlugin of fallbackPlugins) {
+          if (fallbackContent) break; // Stop as soon as one succeeds.
           try {
             const fbResult = await this.deps.contentManager.processFromPlugin(
               fbPlugin,
@@ -297,7 +327,6 @@ export class SchedulerService {
                 contentId: fbResult.content.id,
                 message: "Fallback plugin succeeded",
               });
-              break;
             }
           } catch (e) {
             this.deps.logger.warn("source.fetch_error", {
@@ -702,7 +731,32 @@ export class SchedulerService {
     let nextSlot: SlotTime | null = null;
 
     try {
-      plan = await this.deps.dailyPlanner.getOrGenerate();
+      // v8.5.0: Use strategyEngine plan if available — same plan as Daily Plan table.
+      if (this.deps.strategyEngine) {
+        const stratPlan = await this.deps.strategyEngine.getOrGeneratePlan();
+        plan = {
+          date: stratPlan.date,
+          slots: stratPlan.posts.map(p => ({
+            index: p.index,
+            date: p.date,
+            time: p.time,
+            epochMs: p.epochMs,
+            category: p.category,
+            jitterMinutes: 0,
+            fired: p.status === "published" || p.status === "failed",
+          })),
+          generatedAt: stratPlan.generatedAt,
+          timezone: stratPlan.timezone,
+          postsPerDay: stratPlan.posts.length,
+          categoryDistribution: { A: 0, B: 0, C: 0 },
+        };
+        for (const p of stratPlan.posts) {
+          const dist = plan!.categoryDistribution as Record<string, number>;
+          dist[p.category] = (dist[p.category] ?? 0) + 1;
+        }
+      } else {
+        plan = await this.deps.dailyPlanner.getOrGenerate();
+      }
       const next = await this.deps.dailyPlanner.getNextSlot();
       nextSlot = next?.slot ?? null;
     } catch { /* non-fatal */
@@ -721,8 +775,9 @@ export class SchedulerService {
     }
     const lastPublished = published[0]?.publishedAt ?? null;
 
-    // v8.0.0: Annotate each slot with `fired` state for the dashboard.
-    if (plan) {
+    // v8.5.0: If using dailyPlanner (not strategyEngine), annotate slots with fired state.
+    // If using strategyEngine, slots already have fired state from the plan status.
+    if (plan && !this.deps.strategyEngine) {
       const annotatedSlots = await Promise.all(
         plan.slots.map(async (s) => {
           const fired = await this.deps.dailyPlanner.isSlotFired(s);
