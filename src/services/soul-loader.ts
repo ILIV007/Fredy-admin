@@ -2,7 +2,9 @@
  * src/services/soul-loader.ts
  * Loads and parses soul.md. The bundled docs/soul.md is the default;
  * KV override (fredy:soul) takes precedence when set via the admin panel.
- * See ARCHITECTURE_RULES.md §21.1 (no dead knowledge base — soul.md is sent to AI).
+ *
+ * v8.7.0: Module-level cache singleton — persists across buildContainer()
+ * calls within the same Worker isolate, matching ConfigCache's pattern.
  */
 
 import { soulKey } from "../core/storage/keys";
@@ -11,58 +13,71 @@ import type { KVStore } from "./kv-store";
 
 export interface SoulLoaderDeps {
   readonly kv: KVStore;
-  /** Bundled default soul.md content (imported as a raw string at build time). */
   readonly defaultSoul: string;
 }
 
+const SOUL_CACHE_TTL_MS = 60_000; // 1 minute
+
+/** v8.7.0: Module-level cache — survives across buildContainer() calls. */
+let _cachedSoul: Soul | null = null;
+let _cachedSoulAt = 0;
+let _soulKv: KVStore | null = null;
+let _soulDefault: string = "";
+
+function setSoulDeps(kv: KVStore, defaultSoul: string): void {
+  _soulKv = kv;
+  _soulDefault = defaultSoul;
+}
+
 export class SoulLoader {
-  private cached: Soul | null = null;
-  private cachedAt = 0;
-  private static readonly CACHE_TTL_MS = 60_000; // 1 minute
+  constructor(private readonly deps: SoulLoaderDeps) {
+    // v8.7.0: Register deps for module-level cache.
+    setSoulDeps(deps.kv, deps.defaultSoul);
+  }
 
-  constructor(private readonly deps: SoulLoaderDeps) {}
-
-  /** Load the current soul. KV override if present, else bundled default. */
   async load(): Promise<Soul> {
-    // Cache hit — return cached if fresh.
-    if (this.cached && Date.now() - this.cachedAt < SoulLoader.CACHE_TTL_MS) {
-      return this.cached;
+    // v8.7.0: Use module-level cache.
+    if (_cachedSoul && Date.now() - _cachedSoulAt < SOUL_CACHE_TTL_MS) {
+      return _cachedSoul;
     }
 
-    const override = await this.deps.kv.get(soulKey());
-    const raw = override ?? this.deps.defaultSoul;
-    const soul = this.parse(raw);
-    this.cached = soul;
-    this.cachedAt = Date.now();
+    const kv = _soulKv ?? this.deps.kv;
+    const defaultSoul = _soulDefault || this.deps.defaultSoul;
+
+    const override = await kv.get(soulKey());
+    const raw = override ?? defaultSoul;
+    const soul = parseSoul(raw);
+    _cachedSoul = soul;
+    _cachedSoulAt = Date.now();
     return soul;
   }
 
-  /** Save a new soul to KV (overrides the bundled default). */
   async save(raw: string): Promise<void> {
-    await this.deps.kv.set(soulKey(), raw);
-    this.cached = this.parse(raw);
-    this.cachedAt = Date.now();
+    const kv = _soulKv ?? this.deps.kv;
+    await kv.set(soulKey(), raw);
+    _cachedSoul = parseSoul(raw);
+    _cachedSoulAt = Date.now();
   }
 
-  /** Reset to the bundled default by deleting the KV override. */
   async reset(): Promise<void> {
-    await this.deps.kv.delete(soulKey());
-    this.cached = this.parse(this.deps.defaultSoul);
-    this.cachedAt = Date.now();
+    const kv = _soulKv ?? this.deps.kv;
+    const defaultSoul = _soulDefault || this.deps.defaultSoul;
+    await kv.delete(soulKey());
+    _cachedSoul = parseSoul(defaultSoul);
+    _cachedSoulAt = Date.now();
   }
+}
 
-  /** Parse a raw soul.md string into sections (separated by `# Heading`). */
-  private parse(raw: string): Soul {
-    const sections: Record<string, string> = {};
-    const parts = raw.split(/^# (.+)$/m);
-    // parts[0] is the preamble (before the first # heading); parts[1], parts[2], ... are heading/content pairs.
-    if (parts.length > 1) {
-      for (let i = 1; i < parts.length; i += 2) {
-        const heading = (parts[i] ?? "").trim();
-        const content = (parts[i + 1] ?? "").trim();
-        sections[heading] = content;
-      }
+/** Parse a raw soul.md string into sections. */
+function parseSoul(raw: string): Soul {
+  const sections: Record<string, string> = {};
+  const parts = raw.split(/^# (.+)$/m);
+  if (parts.length > 1) {
+    for (let i = 1; i < parts.length; i += 2) {
+      const heading = (parts[i] ?? "").trim();
+      const content = (parts[i + 1] ?? "").trim();
+      sections[heading] = content;
     }
-    return { raw, sections };
   }
+  return { raw, sections };
 }

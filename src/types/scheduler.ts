@@ -29,6 +29,8 @@ export interface SlotTime {
   readonly jitterMinutes: number;
   /** v8.0.0: True if the slot has been fired (set by status()). */
   readonly fired?: boolean;
+  /** v8.7.0: Real 3-state status from strategy plan — "published" | "failed" | "pending". */
+  readonly status?: string;
 }
 
 // ────────────────────────────────────────────────────────────

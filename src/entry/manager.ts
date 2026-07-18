@@ -529,13 +529,19 @@ export async function managerHandler(
 
   // ── Strategy: regenerate plan ──
   if (apiPath === "strategy/regenerate" && request.method === "POST") {
-    // v8.2.0: Also clear fired markers when regenerating.
+    // v8.7.0: Clear BOTH plans (daily planner + strategy) + fired markers.
+    // Previously only cleared fredy:sched:slots but not fredy:strategy:plan,
+    // so the scheduler could still read the old plan.
     try {
       const { formatDateInZone } = await import("../primitives/time");
       const { slotsKey } = await import("../core/storage/keys");
       const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
       const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+      // Clear daily planner plan.
       await container.kv.delete(slotsKey(today));
+      // Clear strategy plan (fredy:strategy:plan:<date>).
+      await container.kv.delete(`fredy:strategy:plan:${today}`);
+      // Clear all fired markers for today.
       const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
       for (const k of firedKeys) {
         await container.kv.delete(k).catch(() => {});
@@ -1444,7 +1450,7 @@ async function loadScheduler(){
   }else if(st.today&&st.today.slots&&st.today.slots.length>0){
     // Fallback to scheduler status slots (no provider/priority info)
     scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
-    st.today.slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'<span class="badge badge-green">✅ Published</span>':'<span class="badge badge-yellow">⏳ Pending</span>')+'</td></tr>').join("")+
+    st.today.slots.map((sl,i)=>{const s=sl.status||'pending';const badge=s==='published'?'<span class="badge badge-green">✅ Published</span>':s==='failed'?'<span class="badge badge-red">❌ Failed</span>':'<span class="badge badge-yellow">⏳ Pending</span>';return '<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+badge+'</td></tr>';}).join("")+
     '</tbody></table></div>';
   }else{
     scheduleHtml='<div class="card"><p style="color:var(--red)">⚠️ Could not generate today'+ "'" +'s plan. Check scheduler settings.</p></div>';
@@ -1513,7 +1519,7 @@ async function loadStrategy(){
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+card("Mode",s.mode??"balanced")+card("Language",s.language??"auto")+card("Weekly Themes",s.weeklyThemesEnabled?"✅":"❌")+card("Quality Threshold",s.qualityThreshold??"80")+'</div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
   (s.mode==="custom"?'<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>':'')+
-  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>{const s=p.status||"pending";const badge=s==="published"?'<span class="badge badge-green">✅ Published</span>':s==="failed"?'<span class="badge badge-gray">⏭️ Passed</span>':'<span class="badge badge-yellow">⏳ Pending</span>';return "<tr><td>"+p.index+"</td><td>"+p.time+"</td><td>"+p.category+"</td><td>"+(p.provider||"—")+"</td><td>"+p.priority+"</td><td>"+badge+"</td></tr>";}).join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
+  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>{const s=p.status||"pending";const badge=s==="published"?'<span class="badge badge-green">✅ Published</span>':s==="failed"?'<span class="badge badge-red">❌ Failed</span>':'<span class="badge badge-yellow">⏳ Pending</span>';return "<tr><td>"+p.index+"</td><td>"+p.time+"</td><td>"+p.category+"</td><td>"+(p.provider||"—")+"</td><td>"+p.priority+"</td><td>"+badge+"</td></tr>";}).join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
 }
 async function switchStrategy(mode){const d=await api("strategy","POST",{mode});toast(d.ok?"✅ Strategy: "+mode:"❌ Failed");loadStrategy();}
 async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C}});toast(d.ok?"✅ Custom distribution saved":"❌ Failed");loadStrategy();}

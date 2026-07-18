@@ -123,7 +123,9 @@ export const scheduleScreen: Screen = {
           const { slotsKey } = await import("../../core/storage/keys");
           const settings = await ctx.container.config.getSettings(ctx.adminId);
           const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+          // v8.7.0: Clear BOTH plans (daily planner + strategy).
           await ctx.container.kv.delete(slotsKey(today));
+          await ctx.container.kv.delete(`fredy:strategy:plan:${today}`);
           const firedKeys = await ctx.container.kv.list(`fredy:sched:sent:${today}:`);
           for (const k of firedKeys) {
             await ctx.container.kv.delete(k).catch(() => {});

@@ -766,6 +766,7 @@ export class SchedulerService {
             category: p.category,
             jitterMinutes: 0,
             fired: p.status === "published" || p.status === "failed",
+            status: p.status, // v8.7.0: carry real 3-state status
           })),
           generatedAt: stratPlan.generatedAt,
           timezone: stratPlan.timezone,
