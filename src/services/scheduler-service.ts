@@ -436,7 +436,7 @@ export class SchedulerService {
                 if (adminId > 0 && this.deps.tg) {
                   await this.deps.tg.sendMessage(adminId, [
                     ``,
-                    `🔄 <b>BACKUP POST PUBLISHED</b>`,
+                    `<b>━━━ 🔄 BACKUP POST PUBLISHED ━━━</b>`,
                     ``,
                     ``,
                     `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
@@ -483,7 +483,7 @@ export class SchedulerService {
         if (adminId > 0 && this.deps.tg) {
           await this.deps.tg.sendMessage(adminId, [
             ``,
-            `❌ <b>POST FAILED (NO BACKUP)</b>`,
+            `<b>━━━ ❌ POST FAILED ━━━</b>`,
             ``,
             ``,
             `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
@@ -556,7 +556,7 @@ export class SchedulerService {
         if (adminId > 0 && this.deps.tg) {
           await this.deps.tg.sendMessage(adminId, [
             ``,
-            `⚠️ <b>KV QUOTA EXCEEDED</b>`,
+            `<b>━━━ ⚠️ KV QUOTA EXCEEDED ━━━</b>`,
             ``,
             ``,
             `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
@@ -694,8 +694,8 @@ export class SchedulerService {
 
     // 3. Send the summary report with professional UI.
     const statusBanner = pubResult.ok
-      ? `\n✅ <b>AUTO-PUBLISHED SUCCESSFULLY</b>\n`
-      : `\n❌ <b>AUTO-PUBLISH FAILED</b>\n`;
+      ? `<b>━━━ ✅ AUTO-PUBLISHED ━━━</b>`
+      : `<b>━━━ ❌ AUTO-PUBLISH FAILED ━━━</b>`;
 
     const qualityEmoji = content.quality.overallScore >= 80 ? "🟢" : content.quality.overallScore >= 60 ? "🟡" : "🔴";
 
@@ -744,7 +744,7 @@ export class SchedulerService {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg) return;
 
-    const statusBanner = `\n⚠️ <b>SCHEDULED POST FAILED</b>\n`;
+    const statusBanner = `<b>━━━ ⚠️ SCHEDULED POST FAILED ━━━</b>`;
 
     const lines = [
       statusBanner,

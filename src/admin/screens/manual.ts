@@ -198,7 +198,7 @@ export const manualScreen: Screen = {
           try {
             await ctx.container.tg.sendMessage(ctx.adminId, [
               ``,
-              `🔁 <b>DUPLICATE DETECTED</b>`,
+              `<b>━━━ 🔁 DUPLICATE DETECTED ━━━</b>`,
               ``,
               ``,
               `<blockquote>🔌 <b>Source:</b> ${arg}</blockquote>`,

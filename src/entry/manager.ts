@@ -509,7 +509,7 @@ export async function managerHandler(
         if (adminId > 0) {
           await container.tg.sendMessage(adminId, [
             ``,
-            `🎯 <b>STRATEGY CHANGED</b>`,
+            `<b>━━━ 🎯 STRATEGY CHANGED ━━━</b>`,
             ``,
             ``,
             `<blockquote>📊 <b>Old:</b> ${oldMode}</blockquote>`,
@@ -789,7 +789,7 @@ export async function managerHandler(
             // Process with skipDedup=true so it goes all the way through
             // the AI pipeline (we already know it's a duplicate — we want
             // the formatted output now).
-            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true });
+            const dupProcessed = await container.content.process(dupItem, lang, { skipDedup: true, skipEnqueue: true });
             if (dupProcessed.ok && dupProcessed.content) {
               const finalPost = await container.uxLayer.transform(dupProcessed.content);
               // Send the formatted post (photo or text) — prefixed with a
@@ -810,7 +810,7 @@ export async function managerHandler(
           try {
             const previewLines = [
               ``,
-              `🔁 <b>DUPLICATE DETECTED</b>`,
+              `<b>━━━ 🔁 DUPLICATE DETECTED ━━━</b>`,
               ``,
               ``,
               `<blockquote>🔌 <b>Source:</b> ${pluginId}</blockquote>`,
@@ -830,6 +830,24 @@ export async function managerHandler(
       if (!result || !result.content) {
         report["ok"] = false;
         report["error"] = `All ${attempts.length} items were rejected (quality or processing failed)`;
+
+        // v8.10.2: Check if any item failed due to KV quota — notify admin.
+        const kvError = attempts.find(a => a.error?.includes("KV put() limit") || a.error?.includes("quota"));
+        if (kvError) {
+          const adminId = Number(env.ADMIN_ID ?? "0");
+          if (adminId > 0) {
+            await container.tg.sendMessage(adminId, [
+              ``,
+              `<b>━━━ ⚠️ KV QUOTA EXCEEDED ━━━</b>`,
+              ``,
+              ``,
+              `<blockquote>❌ <b>Error:</b> ${escapeHtml(kvError.error ?? "KV quota exceeded")}</blockquote>`,
+              `<blockquote>📅 <b>Time:</b> ${new Date().toISOString()}</blockquote>`,
+              `<blockquote>💡 <b>Action:</b> KV daily write limit (1000) exceeded. Publishing will resume after midnight UTC reset.</blockquote>`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+          }
+        }
+
         return json(report);
       }
 
@@ -900,7 +918,7 @@ export async function managerHandler(
             // If even the transform fails, send a plain-text fallback.
             await container.tg.sendMessage(adminId, [
               ``,
-              `❌ <b>POST REJECTED</b>`,
+              `<b>━━━ ❌ POST REJECTED ━━━</b>`,
               ``,
               ``,
               `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
@@ -916,7 +934,7 @@ export async function managerHandler(
           // Send a short failure summary.
           await container.tg.sendMessage(adminId, [
             ``,
-            `❌ <b>PUBLISH FAILED</b>`,
+            `<b>━━━ ❌ PUBLISH FAILED ━━━</b>`,
             ``,
             ``,
             `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
@@ -976,7 +994,7 @@ export async function managerHandler(
         if (adminId > 0) {
           await container.tg.sendMessage(adminId, [
             ``,
-            `⚠️ <b>KV QUOTA EXCEEDED</b>`,
+            `<b>━━━ ⚠️ KV QUOTA EXCEEDED ━━━</b>`,
             ``,
             ``,
             `<blockquote>❌ <b>Error:</b> ${escapeHtml(errMsg)}</blockquote>`,
