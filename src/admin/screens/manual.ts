@@ -107,9 +107,9 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `╔══════════════════════════╗`,
+              ``,
               `   📤 MANUAL PUBLISH — CATEGORY ${arg}`,
-              `╚══════════════════════════╝`,
+              ``,
               ``,
               `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
               `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
@@ -197,9 +197,9 @@ export const manualScreen: Screen = {
           // 2. Send the duplicate notice.
           try {
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `╔══════════════════════════╗`,
-              `   🔁 DUPLICATE DETECTED`,
-              `╚══════════════════════════╝`,
+              ``,
+              `🔁 <b>DUPLICATE DETECTED</b>`,
+              ``,
               ``,
               `<blockquote>🔌 <b>Source:</b> ${arg}</blockquote>`,
               `<blockquote>📰 <b>Item:</b> ${escapeHtml(dupItem.title?.slice(0, 200) ?? "(no title)")}</blockquote>`,
@@ -229,9 +229,9 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `╔══════════════════════════╗`,
+              ``,
               `   📤 MANUAL PUBLISH — ${arg}`,
-              `╚══════════════════════════╝`,
+              ``,
               ``,
               `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
               `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,

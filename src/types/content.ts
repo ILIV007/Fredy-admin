@@ -171,7 +171,8 @@ export type RejectionReason =
   | "invalid_source"
   | "ai_failed"
   | "quality_below_threshold"
-  | "quality_hard_reject";
+  | "quality_hard_reject"
+  | "kv_quota";
 
 // ────────────────────────────────────────────────────────────
 // Duplicate detection

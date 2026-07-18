@@ -24,7 +24,7 @@ export const aiDefaults: AIConfig = {
   primaryProvider: "gemini",
   fallbackProvider: "openrouter",
   temperature: 0.7,
-  maxTokens: 2500,
+  maxTokens: 1500, // v8.10.1: Reduced from 2500 — most posts are 200-500 tokens, 1500 is plenty
   retryCount: 0,
   promptProfile: "default",
   qualityThreshold: 60,

@@ -220,9 +220,9 @@ export async function managerHandler(
           } catch {}
           // Send summary report.
           await container.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
+            ``,
             `   📤 QUEUE SEND NOW — CAT ${cat}`,
-            `╚══════════════════════════╝`,
+            ``,
             ``,
             `<blockquote>🔌 <b>Source Plugin:</b> ${target.content.pluginId}</blockquote>`,
             `<blockquote>🤖 <b>AI Model:</b> ${target.content.aiProvider}/${target.content.aiModel}</blockquote>`,
@@ -508,9 +508,9 @@ export async function managerHandler(
         // Notify admin about strategy change.
         if (adminId > 0) {
           await container.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
-            `   🎯 STRATEGY CHANGED`,
-            `╚══════════════════════════╝`,
+            ``,
+            `🎯 <b>STRATEGY CHANGED</b>`,
+            ``,
             ``,
             `<blockquote>📊 <b>Old:</b> ${oldMode}</blockquote>`,
             `<blockquote>📊 <b>New:</b> ${body.mode}</blockquote>`,
@@ -809,9 +809,9 @@ export async function managerHandler(
           // 2. Send the duplicate notice (with item info + match reason).
           try {
             const previewLines = [
-              `╔══════════════════════════╗`,
-              `   🔁 DUPLICATE DETECTED`,
-              `╚══════════════════════════╝`,
+              ``,
+              `🔁 <b>DUPLICATE DETECTED</b>`,
+              ``,
               ``,
               `<blockquote>🔌 <b>Source:</b> ${pluginId}</blockquote>`,
               `<blockquote>📰 <b>Item:</b> ${escapeHtml(dupItem.title?.slice(0, 200) ?? "(no title)")}</blockquote>`,
@@ -866,9 +866,9 @@ export async function managerHandler(
             }
           } catch { /* skip if transform fails */ }
           await container.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
+            ``,
             `   📤 MANUAL PUBLISH — ${pluginId}`,
-            `╚══════════════════════════╝`,
+            ``,
             ``,
             `<blockquote>🏷️ <b>Category:</b> ${result.content.category}</blockquote>`,
             `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
@@ -899,9 +899,9 @@ export async function managerHandler(
           } catch { /* non-fatal */
             // If even the transform fails, send a plain-text fallback.
             await container.tg.sendMessage(adminId, [
-              `╔══════════════════════════╗`,
-              `   ❌ POST REJECTED`,
-              `╚══════════════════════════╝`,
+              ``,
+              `❌ <b>POST REJECTED</b>`,
+              ``,
               ``,
               `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
               `<blockquote>⚠️ <b>Reason:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
@@ -915,9 +915,9 @@ export async function managerHandler(
           }
           // Send a short failure summary.
           await container.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
-            `   ❌ PUBLISH FAILED`,
-            `╚══════════════════════════╝`,
+            ``,
+            `❌ <b>PUBLISH FAILED</b>`,
+            ``,
             ``,
             `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
             `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
@@ -975,9 +975,9 @@ export async function managerHandler(
         const adminId = Number(env.ADMIN_ID ?? "0");
         if (adminId > 0) {
           await container.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
-            `   ⚠️ KV QUOTA EXCEEDED`,
-            `╚══════════════════════════╝`,
+            ``,
+            `⚠️ <b>KV QUOTA EXCEEDED</b>`,
+            ``,
             ``,
             `<blockquote>❌ <b>Error:</b> ${escapeHtml(errMsg)}</blockquote>`,
             `<blockquote>📅 <b>Time:</b> ${new Date().toISOString()}</blockquote>`,

@@ -435,9 +435,9 @@ export class SchedulerService {
                 const adminId = this.deps.adminId?.() ?? 0;
                 if (adminId > 0 && this.deps.tg) {
                   await this.deps.tg.sendMessage(adminId, [
-                    `╔══════════════════════════╗`,
-                    `   🔄 BACKUP POST PUBLISHED`,
-                    `╚══════════════════════════╝`,
+                    ``,
+                    `🔄 <b>BACKUP POST PUBLISHED</b>`,
+                    ``,
                     ``,
                     `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
                     `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
@@ -482,9 +482,9 @@ export class SchedulerService {
         const adminId = this.deps.adminId?.() ?? 0;
         if (adminId > 0 && this.deps.tg) {
           await this.deps.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
-            `   ❌ POST FAILED (NO BACKUP)`,
-            `╚══════════════════════════╝`,
+            ``,
+            `❌ <b>POST FAILED (NO BACKUP)</b>`,
+            ``,
             ``,
             `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
             `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
@@ -555,9 +555,9 @@ export class SchedulerService {
         const adminId = this.deps.adminId?.() ?? 0;
         if (adminId > 0 && this.deps.tg) {
           await this.deps.tg.sendMessage(adminId, [
-            `╔══════════════════════════╗`,
-            `   ⚠️ KV QUOTA EXCEEDED`,
-            `╚══════════════════════════╝`,
+            ``,
+            `⚠️ <b>KV QUOTA EXCEEDED</b>`,
+            ``,
             ``,
             `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
             `<blockquote>❌ <b>Error:</b> ${escapeHtml(message)}</blockquote>`,
@@ -647,9 +647,9 @@ export class SchedulerService {
         error: err instanceof Error ? err.message : String(err),
       });
       await this.deps.tg.sendMessage(adminId, [
-        `╔══════════════════════════╗`,
+        ``,
         `   🤖 AUTO-PUBLISH NOTICE`,
-        `╚══════════════════════════╝`,
+        ``,
         ``,
         `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
         `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
@@ -694,8 +694,8 @@ export class SchedulerService {
 
     // 3. Send the summary report with professional UI.
     const statusBanner = pubResult.ok
-      ? `╔══════════════════════════╗\n   ✅ AUTO-PUBLISHED SUCCESSFULLY\n╚══════════════════════════╝`
-      : `╔══════════════════════════╗\n   ❌ AUTO-PUBLISH FAILED\n╚══════════════════════════╝`;
+      ? `\n✅ <b>AUTO-PUBLISHED SUCCESSFULLY</b>\n`
+      : `\n❌ <b>AUTO-PUBLISH FAILED</b>\n`;
 
     const qualityEmoji = content.quality.overallScore >= 80 ? "🟢" : content.quality.overallScore >= 60 ? "🟡" : "🔴";
 
@@ -744,7 +744,7 @@ export class SchedulerService {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg) return;
 
-    const statusBanner = `╔══════════════════════════╗\n   ⚠️ SCHEDULED POST FAILED\n╚══════════════════════════╝`;
+    const statusBanner = `\n⚠️ <b>SCHEDULED POST FAILED</b>\n`;
 
     const lines = [
       statusBanner,
