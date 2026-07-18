@@ -968,6 +968,24 @@ export async function managerHandler(
       };
       report["ok"] = false;
       report["error"] = error instanceof Error ? error.message : String(error);
+
+      // v8.10.0: If KV quota exceeded, notify admin PM.
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes("KV put() limit") || errMsg.includes("quota")) {
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        if (adminId > 0) {
+          await container.tg.sendMessage(adminId, [
+            `╔══════════════════════════╗`,
+            `   ⚠️ KV QUOTA EXCEEDED`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>❌ <b>Error:</b> ${escapeHtml(errMsg)}</blockquote>`,
+            `<blockquote>📅 <b>Time:</b> ${new Date().toISOString()}</blockquote>`,
+            `<blockquote>💡 <b>Action needed:</b> KV daily write limit (1000) exceeded. Publishing will resume automatically after the limit resets (midnight UTC). Consider upgrading to Cloudflare Workers Paid plan for higher limits.</blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+      }
+
       return json(report, 500);
     }
   }

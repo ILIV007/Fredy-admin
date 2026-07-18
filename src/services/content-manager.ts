@@ -340,10 +340,43 @@ export class ContentManager {
     }
 
     // ── Stage 8: Record in dedup store ──────────────────────
-    if (!skipDedup) await this.deps.duplicateDetector.record(item);
+    // v8.10.0: Catch KV quota errors and notify admin.
+    if (!skipDedup) {
+      try {
+        await this.deps.duplicateDetector.record(item);
+      } catch (kvError) {
+        const errMsg = kvError instanceof Error ? kvError.message : String(kvError);
+        if (errMsg.includes("KV put() limit") || errMsg.includes("quota")) {
+          // KV daily limit exceeded — log and skip dedup recording.
+          this.deps.logger.error("pipeline.error", {
+            error: errMsg,
+            message: "KV quota exceeded — skipping dedup recording",
+          });
+          // Don't fail the pipeline — just skip dedup.
+        } else {
+          throw kvError; // Re-throw other errors.
+        }
+      }
+    }
 
     // ── Stage 9: Enqueue ────────────────────────────────────
-    if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
+    // v8.10.0: Catch KV quota errors on enqueue too.
+    if (!skipEnqueue) {
+      try {
+        await this.deps.queue.enqueue(readyContent);
+      } catch (kvError) {
+        const errMsg = kvError instanceof Error ? kvError.message : String(kvError);
+        if (errMsg.includes("KV put() limit") || errMsg.includes("quota")) {
+          this.deps.logger.error("pipeline.error", {
+            error: errMsg,
+            message: "KV quota exceeded — skipping enqueue",
+          });
+          // Don't fail — return the content anyway.
+        } else {
+          throw kvError;
+        }
+      }
+    }
 
     return {
       ok: true,

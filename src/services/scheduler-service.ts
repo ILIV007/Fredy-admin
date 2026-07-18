@@ -550,6 +550,36 @@ export class SchedulerService {
       // Mark slot as fired to prevent infinite retry loop.
       await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
 
+      // v8.10.0: If KV quota exceeded, notify admin immediately.
+      if (message.includes("KV put() limit") || message.includes("quota")) {
+        const adminId = this.deps.adminId?.() ?? 0;
+        if (adminId > 0 && this.deps.tg) {
+          await this.deps.tg.sendMessage(adminId, [
+            `╔══════════════════════════╗`,
+            `   ⚠️ KV QUOTA EXCEEDED`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
+            `<blockquote>❌ <b>Error:</b> ${escapeHtml(message)}</blockquote>`,
+            `<blockquote>💡 <b>Action:</b> KV daily write limit exceeded. Publishing will resume after midnight UTC reset.</blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+        // Mark strategy plan as failed too.
+        if (this.deps.strategyEngine) {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        }
+        return {
+          ok: false,
+          contentId: content.id,
+          category: slot.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: message,
+          attempts: 0,
+        };
+      }
+
       // Track consecutive failures and alert admin.
       this.consecutiveFailures++;
       if (this.consecutiveFailures >= 3) {
