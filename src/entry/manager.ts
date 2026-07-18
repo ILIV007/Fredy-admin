@@ -6,6 +6,7 @@
 
 import type { Env, Container } from "../types/env";
 import { APP_VERSION, APP_BUILD_DATE } from "../core/constants";
+import { escapeHtml } from "../primitives/strings";
 
 export interface ManagerHandlerDeps {
   readonly env: Env;
@@ -796,14 +797,16 @@ export async function managerHandler(
           // 2. Send the duplicate notice (with item info + match reason).
           try {
             const previewLines = [
-              `🔁 <b>Duplicate detected (not published to channel)</b>`,
+              `╔══════════════════════════╗`,
+              `   🔁 DUPLICATE DETECTED`,
+              `╚══════════════════════════╝`,
               ``,
-              `<b>Source:</b> ${pluginId}`,
-              `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
-              `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
-              `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
+              `<blockquote>🔌 <b>Source:</b> ${pluginId}</blockquote>`,
+              `<blockquote>📰 <b>Item:</b> ${escapeHtml(dupItem.title?.slice(0, 200) ?? "(no title)")}</blockquote>`,
+              `<blockquote>🔗 <b>URL:</b> ${escapeHtml(dupItem.url ?? "(no url)")}</blockquote>`,
+              `<blockquote>⚠️ <b>Matches existing:</b> <code>${escapeHtml(firstDuplicate.existingId)}</code> (${firstDuplicate.reason})</blockquote>`,
               ``,
-              `<i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i>`,
+              `<blockquote>💡 <i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i></blockquote>`,
             ].join("\n");
             await container.tg.sendMessage(adminId, previewLines, { parse_mode: "HTML" }).catch(() => {});
           } catch { /* skip */ }
@@ -851,13 +854,16 @@ export async function managerHandler(
             }
           } catch { /* skip if transform fails */ }
           await container.tg.sendMessage(adminId, [
-            `📤 <b>Post published from: ${pluginId}</b>`,
+            `╔══════════════════════════╗`,
+            `   📤 MANUAL PUBLISH — ${pluginId}`,
+            `╚══════════════════════════╝`,
             ``,
-            `<b>Category:</b> ${result.content.category}`,
-            `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-            `<b>Quality:</b> ${result.content.quality.overallScore}`,
-            `<b>Tokens:</b> ${result.content.tokensUsed}`,
-            `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`,
+            `<blockquote>🏷️ <b>Category:</b> ${result.content.category}</blockquote>`,
+            `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+            `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+            `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
+            `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+            `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         } else {
           // ── FAILURE: send the raw post + failure notice ──

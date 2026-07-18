@@ -55,6 +55,9 @@ export interface SchedulerServiceDeps {
   readonly tg?: TelegramService;
   readonly uxLayer?: UXLayer;
   readonly adminId?: () => number;
+  readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
+  /** v8.2.1: Strategy engine — used to update Daily Plan status after publish. */
+  readonly strategyEngine?: import("./strategy-engine").StrategyEngine;
 }
 
 export class SchedulerService {
@@ -194,6 +197,10 @@ export class SchedulerService {
       // after a long scheduler outage).
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
         await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
+        // v8.2.1: Mark strategy plan post as failed (passed) too.
+        if (this.deps.strategyEngine) {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        }
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
           date: slot.date,
@@ -281,6 +288,11 @@ export class SchedulerService {
         } : null;
         await this.notifyAdminOfFailure(slot, pipelineResult.error ?? "Pipeline failed", failItem).catch(() => {});
 
+        // v8.2.1: Mark strategy plan post as failed too.
+        if (this.deps.strategyEngine) {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        }
+
         // Mark slot as fired (to avoid retrying with no content).
         await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
 
@@ -305,6 +317,15 @@ export class SchedulerService {
 
       // 4. Mark slot as fired (success or failure — prevents infinite retry).
       await this.deps.dailyPlanner.markSlotFired(slot, content.id);
+
+      // v8.2.1: Update strategy plan status too — so Daily Plan shows correct status.
+      if (this.deps.strategyEngine) {
+        if (result.ok) {
+          await this.deps.strategyEngine.markPostPublished(slot.date, slot.index).catch(() => {});
+        } else {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        }
+      }
 
       // 5. Notify admin PM — ALWAYS, both on success and on failure.
       //    The previous code only notified on success (result.ok), which

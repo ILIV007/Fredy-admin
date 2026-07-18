@@ -11,6 +11,7 @@ import type { InlineKeyboard } from "../../types/telegram";
 import type { Category } from "../../types/category";
 import { buildKeyboardWithBack, labelButton, navButton } from "../keyboards";
 import { header, divider, kv } from "../helpers/formatting";
+import { escapeHtml } from "../../primitives/strings";
 
 export const manualScreen: Screen = {
   id: "manual",
@@ -106,10 +107,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from category ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `╔══════════════════════════╗`,
+              `   📤 MANUAL PUBLISH — CATEGORY ${arg}`,
+              `╚══════════════════════════╝`,
+              ``,
+              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
+              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
+              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
@@ -190,14 +197,16 @@ export const manualScreen: Screen = {
           // 2. Send the duplicate notice.
           try {
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `🔁 <b>Duplicate detected (not published to channel)</b>`,
+              `╔══════════════════════════╗`,
+              `   🔁 DUPLICATE DETECTED`,
+              `╚══════════════════════════╝`,
               ``,
-              `<b>Source:</b> ${arg}`,
-              `<b>Item:</b> ${dupItem.title?.slice(0, 200) ?? "(no title)"}`,
-              `<b>URL:</b> ${dupItem.url ?? "(no url)"}`,
-              `<b>Matches existing:</b> <code>${firstDuplicate.existingId}</code> (${firstDuplicate.reason})`,
+              `<blockquote>🔌 <b>Source:</b> ${arg}</blockquote>`,
+              `<blockquote>📰 <b>Item:</b> ${escapeHtml(dupItem.title?.slice(0, 200) ?? "(no title)")}</blockquote>`,
+              `<blockquote>🔗 <b>URL:</b> ${escapeHtml(dupItem.url ?? "(no url)")}</blockquote>`,
+              `<blockquote>⚠️ <b>Matches existing:</b> <code>${escapeHtml(firstDuplicate.existingId)}</code> (${firstDuplicate.reason})</blockquote>`,
               ``,
-              `<i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i>`,
+              `<blockquote>💡 <i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
           } catch { /* skip */ }
           return { toast: `🔁 ${arg}: duplicate — formatted post sent to PM for forwarding`, redirectTo: "menu:main" };
@@ -220,10 +229,16 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `📤 <b>Published from: ${arg}</b>`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
+              `╔══════════════════════════╗`,
+              `   📤 MANUAL PUBLISH — ${arg}`,
+              `╚══════════════════════════╝`,
+              ``,
+              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
+              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
+              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }

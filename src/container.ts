@@ -288,6 +288,8 @@ export function buildContainer(env: Env): Container {
     tg,
     uxLayer,
     adminId: () => Number(env.ADMIN_ID ?? "0"),
+    // v8.2.1: Strategy engine — for updating Daily Plan status after publish.
+    strategyEngine,
   });
 
   return {
