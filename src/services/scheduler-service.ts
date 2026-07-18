@@ -234,7 +234,7 @@ export class SchedulerService {
       let alreadyFired = false;
       if (stratPlan) {
         const post = stratPlan.posts.find(p => p.index === slot.index);
-        if (post && (post.status === "published" || post.status === "failed")) {
+        if (post && (post.status === "published" || post.status === "failed" || post.status === "backup")) {
           alreadyFired = true;
         }
       } else {
@@ -401,8 +401,102 @@ export class SchedulerService {
       // 4. Mark slot as fired (success or failure — prevents infinite retry).
       await this.deps.dailyPlanner.markSlotFired(slot, content.id);
 
-      // v8.2.1: Update strategy plan status too — so Daily Plan shows correct status.
-      // v8.4.0: Removed silent .catch() — log errors so we can diagnose.
+      // v8.8.0: If publish failed (quality gate, sendPhoto error, etc.),
+      // try a fallback plugin from the same category before giving up.
+      if (!result.ok && this.deps.contentManager) {
+        this.deps.logger.warn("scheduler.skip", {
+          slotIndex: slot.index,
+          contentId: content.id,
+          error: result.error,
+          message: "Publish failed — trying fallback plugin",
+        });
+
+        const settings = await this.deps.settings();
+        const fallbackPlugins = this.getFallbackPlugins(slot.category);
+        let backupContent: ReadyContent | null = null;
+
+        for (const fbPlugin of fallbackPlugins) {
+          if (backupContent) break;
+          try {
+            const fbResult = await this.deps.contentManager.processFromPlugin(
+              fbPlugin,
+              settings.language.default,
+              { skipEnqueue: true },
+            );
+            if (fbResult.ok && fbResult.content) {
+              const fbPubResult = await this.deps.publishingService.publish(fbResult.content);
+              if (fbPubResult.ok) {
+                backupContent = fbResult.content;
+                // v8.8.0: Mark as "backup" (not "published" or "failed").
+                if (this.deps.strategyEngine) {
+                  await this.deps.strategyEngine.markPostBackup(slot.date, slot.index).catch(() => {});
+                }
+                // Send admin notification about the backup.
+                const adminId = this.deps.adminId?.() ?? 0;
+                if (adminId > 0 && this.deps.tg) {
+                  await this.deps.tg.sendMessage(adminId, [
+                    `╔══════════════════════════╗`,
+                    `   🔄 BACKUP POST PUBLISHED`,
+                    `╚══════════════════════════╝`,
+                    ``,
+                    `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
+                    `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+                    `<blockquote>❌ <b>Original failed:</b> ${escapeHtml(result.error ?? "unknown")}</blockquote>`,
+                    `<blockquote>✅ <b>Backup plugin:</b> ${fbPlugin}</blockquote>`,
+                    `<blockquote>📤 <b>Channel Msg ID:</b> <code>${fbPubResult.telegramMessageId}</code></blockquote>`,
+                  ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+                }
+                // Return the backup result.
+                await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
+                return {
+                  ok: true,
+                  contentId: fbResult.content.id,
+                  category: slot.category,
+                  telegramMessageId: fbPubResult.telegramMessageId,
+                  telegramChatId: fbPubResult.telegramChatId,
+                  publishedAt: Date.now(),
+                  attempts: 1,
+                };
+              }
+            }
+          } catch (e) {
+            this.deps.logger.warn("source.fetch_error", {
+              fallbackPlugin: fbPlugin,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+
+        // No backup succeeded — mark as failed.
+        if (this.deps.strategyEngine) {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch((e: unknown) => {
+            this.deps.logger.warn("scheduler.skip", {
+              slotIndex: slot.index,
+              error: e instanceof Error ? e.message : String(e),
+              message: "markPostFailed failed",
+            });
+          });
+        }
+
+        // Send failure report to admin.
+        const adminId = this.deps.adminId?.() ?? 0;
+        if (adminId > 0 && this.deps.tg) {
+          await this.deps.tg.sendMessage(adminId, [
+            `╔══════════════════════════╗`,
+            `   ❌ POST FAILED (NO BACKUP)`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
+            `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+            `<blockquote>❌ <b>Error:</b> ${escapeHtml(result.error ?? "unknown")}</blockquote>`,
+            `<blockquote>⚠️ <b>All fallback plugins also failed.</b></blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+
+        return result;
+      }
+
+      // v8.2.1: Update strategy plan status too.
       if (this.deps.strategyEngine) {
         if (result.ok) {
           await this.deps.strategyEngine.markPostPublished(slot.date, slot.index).catch((e: unknown) => {
@@ -765,7 +859,7 @@ export class SchedulerService {
             epochMs: p.epochMs,
             category: p.category,
             jitterMinutes: 0,
-            fired: p.status === "published" || p.status === "failed",
+            fired: p.status === "published" || p.status === "failed" || p.status === "backup",
             status: p.status, // v8.7.0: carry real 3-state status
           })),
           generatedAt: stratPlan.generatedAt,

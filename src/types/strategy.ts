@@ -104,7 +104,8 @@ export type PlannedPostStatus =
   | "pending"    // not yet due
   | "due"        // time has arrived, waiting for publish
   | "published"  // successfully published
-  | "failed"     // publish failed
+  | "failed"     // publish failed, no backup succeeded
+  | "backup"     // original failed but a backup plugin succeeded
   | "skipped";   // skipped (quiet hours, no content, etc.)
 
 // ────────────────────────────────────────────────────────────

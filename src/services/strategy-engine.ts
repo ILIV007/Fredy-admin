@@ -220,6 +220,18 @@ export class StrategyEngine {
     });
   }
 
+  /** v8.8.0: Mark a planned post as backup (original failed, backup succeeded). */
+  async markPostBackup(date: string, postIndex: number): Promise<void> {
+    const plan = await this.getOrGeneratePlan(date);
+    const updatedPosts = plan.posts.map((p) =>
+      p.index === postIndex ? { ...p, status: "backup" as PlannedPostStatus } : p,
+    );
+    const updatedPlan = { ...plan, posts: updatedPosts };
+    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
+      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostBackup setJson failed" });
+    });
+  }
+
   // ────────────────────────────────────────────────────────
   // Internal: Provider Selection
   // ────────────────────────────────────────────────────────
