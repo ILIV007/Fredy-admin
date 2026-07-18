@@ -899,26 +899,30 @@ export async function managerHandler(
           } catch { /* non-fatal */
             // If even the transform fails, send a plain-text fallback.
             await container.tg.sendMessage(adminId, [
-              `⚠️ <b>Post REJECTED (not published to channel)</b>`,
+              `╔══════════════════════════╗`,
+              `   ❌ POST REJECTED`,
+              `╚══════════════════════════╝`,
               ``,
-              `<b>Plugin:</b> ${pluginId}`,
-              `<b>Reason:</b> ${pubResult.error ?? "unknown"}`,
-              `<b>Headline:</b> ${result.content.headline ?? "(none)"}`,
-              `<b>Source URL:</b> ${result.content.sourceUrl ?? "(none)"}`,
-              `<b>Quality:</b> ${result.content.quality.overallScore}`,
-              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
+              `<blockquote>⚠️ <b>Reason:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+              `<blockquote>📰 <b>Headline:</b> ${escapeHtml(result.content.headline ?? "(none)")}</blockquote>`,
+              `<blockquote>🔗 <b>Source URL:</b> ${escapeHtml(result.content.sourceUrl ?? "(none)")}</blockquote>`,
+              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
               ``,
-              `<i>Could not format the post for forwarding. Check the API response for details.</i>`,
+              `<blockquote>💡 <i>Could not format the post for forwarding. Check the API response for details.</i></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
           }
           // Send a short failure summary.
           await container.tg.sendMessage(adminId, [
-            `❌ <b>Publish failed</b>`,
+            `╔══════════════════════════╗`,
+            `   ❌ PUBLISH FAILED`,
+            `╚══════════════════════════╝`,
             ``,
-            `<b>Plugin:</b> ${pluginId}`,
-            `<b>Quality:</b> ${result.content.quality.overallScore}`,
-            `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
-            `<b>Error:</b> ${pubResult.error ?? "unknown"}`,
+            `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
+            `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+            `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+            `<blockquote>⚠️ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
       }
