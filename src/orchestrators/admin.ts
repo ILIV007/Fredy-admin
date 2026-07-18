@@ -58,13 +58,12 @@ export class AdminOrchestrator {
       return;
     }
 
-    // v8.1.1: Send "is typing" indicator + a "Processing..." message for long operations.
-    // The typing indicator alone is too subtle — the admin may think the bot is broken
-    // during 5-15 second AI generation. A visible "Processing..." message makes it clear.
-    await tg.sendChatAction(chatId, "typing").catch(() => {});
-
-    // For manual publish actions (which take 5-15s), send a "Processing..." message.
+    // v8.4.0: Only send "is typing" + "Processing..." for LONG operations (manual publish).
+    // Previously, typing was sent for EVERY callback — including simple navigation
+    // (menu:main, menu:schedule, etc.) which made the bot show "is typing" when
+    // the admin was just browsing the menu.
     if (data.startsWith("action:manual:")) {
+      await tg.sendChatAction(chatId, "typing").catch(() => {});
       await tg.sendMessage(chatId, "⏳ <b>Processing...</b>\n\n<i>Fetching content, running AI pipeline, and publishing. This may take 5-15 seconds.</i>", {
         parse_mode: "HTML",
         disable_web_page_preview: true,

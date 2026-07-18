@@ -274,41 +274,73 @@ export class SchedulerService {
           slotIndex: slot.index,
           category: slot.category,
           reason: pipelineResult.error ?? "Pipeline failed",
-          message: "No content available — skipping slot",
+          message: "No content available — trying fallback plugin",
         });
 
-        // v8.1.3: Send failure report to admin PM.
-        // When a scheduled post fails (duplicate, low score, pipeline error),
-        // send a report to the admin so they know what happened.
-        const failItem = pipelineResult.item ? {
-          id: pipelineResult.item.id,
-          title: pipelineResult.item.title,
-          url: pipelineResult.item.url,
-          source: pipelineResult.item.pluginId,
-        } : null;
-        await this.notifyAdminOfFailure(slot, pipelineResult.error ?? "Pipeline failed", failItem).catch(() => {});
-
-        // v8.2.1: Mark strategy plan post as failed too.
-        if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        // v8.4.0: If the first API/plugin fails, try another plugin in the same category.
+        // The CATEGORY_PROVIDERS map lists all plugins for each category.
+        // We try each one until we find content.
+        const fallbackPlugins = this.getFallbackPlugins(slot.category);
+        let fallbackContent: ReadyContent | null = null;
+        for (const fbPlugin of fallbackPlugins) {
+          try {
+            const fbResult = await this.deps.contentManager.processFromPlugin(
+              fbPlugin,
+              settings.language.default,
+              { skipEnqueue: true },
+            );
+            if (fbResult.ok && fbResult.content) {
+              fallbackContent = fbResult.content;
+              this.deps.logger.info("pipeline.complete", {
+                slotIndex: slot.index,
+                fallbackPlugin: fbPlugin,
+                contentId: fbResult.content.id,
+                message: "Fallback plugin succeeded",
+              });
+              break;
+            }
+          } catch (e) {
+            this.deps.logger.warn("source.fetch_error", {
+              fallbackPlugin: fbPlugin,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
 
-        // Mark slot as fired (to avoid retrying with no content).
-        await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+        if (fallbackContent) {
+          content = fallbackContent;
+        } else {
+          // v8.1.3: Send failure report to admin PM.
+          const failItem = pipelineResult.item ? {
+            id: pipelineResult.item.id,
+            title: pipelineResult.item.title,
+            url: pipelineResult.item.url,
+            source: pipelineResult.item.pluginId,
+          } : null;
+          await this.notifyAdminOfFailure(slot, pipelineResult.error ?? "Pipeline failed (no fallback content)", failItem).catch(() => {});
 
-        return {
-          ok: false,
-          contentId: null,
-          category: slot.category,
-          telegramMessageId: null,
-          telegramChatId: null,
-          publishedAt: Date.now(),
-          error: pipelineResult.error ?? "No content available",
-          attempts: 0,
-        };
+          // v8.2.1: Mark strategy plan post as failed too.
+          if (this.deps.strategyEngine) {
+            await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+          }
+
+          // Mark slot as fired (to avoid retrying with no content).
+          await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+
+          return {
+            ok: false,
+            contentId: null,
+            category: slot.category,
+            telegramMessageId: null,
+            telegramChatId: null,
+            publishedAt: Date.now(),
+            error: pipelineResult.error ?? "No content available",
+            attempts: 0,
+          };
+        }
+      } else {
+        content = pipelineResult.content;
       }
-
-      content = pipelineResult.content;
     }
 
     // 3. Publish.
@@ -319,11 +351,24 @@ export class SchedulerService {
       await this.deps.dailyPlanner.markSlotFired(slot, content.id);
 
       // v8.2.1: Update strategy plan status too — so Daily Plan shows correct status.
+      // v8.4.0: Removed silent .catch() — log errors so we can diagnose.
       if (this.deps.strategyEngine) {
         if (result.ok) {
-          await this.deps.strategyEngine.markPostPublished(slot.date, slot.index).catch(() => {});
+          await this.deps.strategyEngine.markPostPublished(slot.date, slot.index).catch((e: unknown) => {
+            this.deps.logger.warn("scheduler.skip", {
+              slotIndex: slot.index,
+              error: e instanceof Error ? e.message : String(e),
+              message: "markPostPublished failed",
+            });
+          });
         } else {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch((e: unknown) => {
+            this.deps.logger.warn("scheduler.skip", {
+              slotIndex: slot.index,
+              error: e instanceof Error ? e.message : String(e),
+              message: "markPostFailed failed",
+            });
+          });
         }
       }
 
@@ -498,6 +543,21 @@ export class SchedulerService {
    * so the admin can see what would have been published and decide whether
    * to manually trigger it.
    */
+  /**
+   * v8.4.0: Get fallback plugins for a category — used when the primary
+   * plugin fails to produce content. Returns all plugins for the category
+   * from CATEGORY_PROVIDERS (excluding the one that already failed, which
+   * is handled by the caller).
+   */
+  private getFallbackPlugins(category: Category): string[] {
+    const providers: Record<string, readonly string[]> = {
+      A: ["github", "github-trending", "github-releases", "devto", "stackexchange"],
+      B: ["news", "hackernews"],
+      C: ["nasa", "xkcd", "wikimedia", "joke", "reddit"],
+    };
+    return [...(providers[category] ?? [])];
+  }
+
   private async notifyAdminOfFailure(
     slot: SlotTime,
     error: string,

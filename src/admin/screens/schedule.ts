@@ -17,6 +17,26 @@ export const scheduleScreen: Screen = {
   async text(ctx) {
     const sched = ctx.settings.scheduler;
     const status = await ctx.container.scheduler.status();
+
+    // v8.4.0: Fetch strategy plan for Daily Plan table.
+    let dailyPlanHtml = "";
+    try {
+      const plan = await ctx.container.strategyEngine.getOrGeneratePlan();
+      if (plan && plan.posts && plan.posts.length > 0) {
+        const statusLines = plan.posts.map(p => {
+          let s = p.status || "pending";
+          // Check if fired from scheduler status.
+          if (status.today && status.today.slots) {
+            const firedSlot = status.today.slots.find(sl => sl.index === p.index);
+            if (firedSlot && firedSlot.fired) s = "published";
+          }
+          const icon = s === "published" ? "✅" : s === "failed" ? "⏭️" : "⏳";
+          return `${icon} ${p.time} | ${p.category} | ${p.provider || "—"}`;
+        });
+        dailyPlanHtml = `\n${header("Daily Plan", "📋")}\n${statusLines.join("\n")}\n`;
+      }
+    } catch { /* non-fatal */ }
+
     return [
       header("Scheduler", "📅"),
       "",
@@ -30,9 +50,10 @@ export const scheduleScreen: Screen = {
       "",
       header("Status", "📊"),
       kv("Next slot", status.nextSlot ? formatTime(status.nextSlot.epochMs) : "(none)"),
+      kv("Posts today", status.postsPublishedToday ?? 0),
       kv("Queue depth", status.queueDepth),
       kv("Last fired", formatTime(status.lastFiredAt)),
-      "",
+      dailyPlanHtml,
       divider(),
       "<i>Tap toggles and steppers to configure.</i>",
     ].join("\n");
@@ -52,6 +73,7 @@ export const scheduleScreen: Screen = {
       [labelButton("─── Actions ───")],
       [{ text: "🔄 Refresh status", callback_data: "action:scheduler:refresh" }],
       [{ text: "▶️ Force tick", callback_data: "action:scheduler:forceTick" }],
+      [{ text: "♻️ Regenerate Plan", callback_data: "action:scheduler:regenerate" }],
     ]);
   },
 
@@ -94,6 +116,23 @@ export const scheduleScreen: Screen = {
         return result.fired
           ? { toast: `✅ Slot fired: ${result.slot?.category}` }
           : { toast: `⏭️ Skipped: ${result.skipReason}` };
+      }
+      if (op === "regenerate") {
+        try {
+          const { formatDateInZone } = await import("../../primitives/time");
+          const { slotsKey } = await import("../../core/storage/keys");
+          const settings = await ctx.container.config.getSettings(ctx.adminId);
+          const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+          await ctx.container.kv.delete(slotsKey(today));
+          const firedKeys = await ctx.container.kv.list(`fredy:sched:sent:${today}:`);
+          for (const k of firedKeys) {
+            await ctx.container.kv.delete(k).catch(() => {});
+          }
+          await ctx.container.strategyEngine.generatePlan();
+          return { toast: `♻️ Plan regenerated` };
+        } catch (e) {
+          return { alert: `❌ Regenerate failed: ${e instanceof Error ? e.message : String(e)}` };
+        }
       }
     }
 
