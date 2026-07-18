@@ -184,6 +184,53 @@ export async function managerHandler(
     return json({ ok: deleted, message: deleted ? "Item deleted" : "Item not found" });
   }
 
+  // ── Queue: send now (publish a specific queue item immediately) ──
+  const queueSendMatch = apiPath.match(/^queue\/([ABC])\/send-now$/);
+  if (queueSendMatch && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as { contentId?: string };
+    const cat = queueSendMatch[1] as "A" | "B" | "C";
+    if (!body.contentId) return json({ ok: false, error: "Missing contentId" }, 400);
+    try {
+      const items = await container.queue.listItems(cat);
+      const target = items.find(q => q.content.id === body.contentId);
+      if (!target) return json({ ok: false, error: "Item not found in queue" });
+      const pubResult = await container.finalPublisher.publish(target.content);
+      if (pubResult.ok) {
+        await container.queue.deleteItem(cat, body.contentId);
+        const adminId = Number(env.ADMIN_ID ?? "0");
+        if (adminId > 0) {
+          // Send formatted post to admin PM.
+          try {
+            const finalPost = await container.uxLayer.transform(target.content);
+            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
+              const photoResult = await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, { parse_mode: "HTML" });
+              if (!photoResult.ok) {
+                await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+              }
+            } else {
+              await container.tg.sendMessage(adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+            }
+          } catch {}
+          // Send summary report.
+          await container.tg.sendMessage(adminId, [
+            `╔══════════════════════════╗`,
+            `   📤 QUEUE SEND NOW — CAT ${cat}`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>🔌 <b>Source Plugin:</b> ${target.content.pluginId}</blockquote>`,
+            `<blockquote>🤖 <b>AI Model:</b> ${target.content.aiProvider}/${target.content.aiModel}</blockquote>`,
+            `<blockquote>${target.content.quality.overallScore >= 80 ? "🟢" : target.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${target.content.quality.overallScore}/100</blockquote>`,
+            `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+        return json({ ok: true, messageId: pubResult.telegramMessageId });
+      }
+      return json({ ok: false, error: pubResult.error ?? "Publish failed" });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
   // ── AI ──
   if (apiPath === "ai" && request.method === "GET") {
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
@@ -433,13 +480,60 @@ export async function managerHandler(
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const adminId = Number(env.ADMIN_ID ?? "0");
     const cur = await container.config.getSettings(adminId);
+    const oldMode = cur.strategy.mode;
     const patch: Record<string, unknown> = { strategy: { ...cur.strategy, ...body } };
     const result = await container.config.updateSettings(adminId, patch);
+
+    // v8.2.0: When strategy mode changes, clear today's plan + all fired markers
+    // so the new strategy takes effect immediately. Also mark unfired slots as "pass".
+    if (body.mode && body.mode !== oldMode) {
+      try {
+        const { formatDateInZone } = await import("../primitives/time");
+        const { slotsKey } = await import("../core/storage/keys");
+        const settings = await container.config.getSettings(adminId);
+        const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+        // Delete today's plan.
+        await container.kv.delete(slotsKey(today));
+        // Don't delete fired markers (already published posts stay published).
+        // Generate a new plan with the new strategy.
+        await container.strategyEngine.generatePlan();
+
+        // Notify admin about strategy change.
+        if (adminId > 0) {
+          await container.tg.sendMessage(adminId, [
+            `╔══════════════════════════╗`,
+            `   🎯 STRATEGY CHANGED`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>📊 <b>Old:</b> ${oldMode}</blockquote>`,
+            `<blockquote>📊 <b>New:</b> ${body.mode}</blockquote>`,
+            `<blockquote>📅 <b>Date:</b> ${today}</blockquote>`,
+            `<blockquote>🔄 <b>Plan regenerated with new strategy.</b></blockquote>`,
+            `<blockquote>⏭️ <b>Unfired slots marked as "pass".</b></blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+      } catch (e) {
+        console.warn("[manager] strategy change plan regeneration failed:", e);
+      }
+    }
+
     return json(result);
   }
 
   // ── Strategy: regenerate plan ──
   if (apiPath === "strategy/regenerate" && request.method === "POST") {
+    // v8.2.0: Also clear fired markers when regenerating.
+    try {
+      const { formatDateInZone } = await import("../primitives/time");
+      const { slotsKey } = await import("../core/storage/keys");
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+      await container.kv.delete(slotsKey(today));
+      const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
+      for (const k of firedKeys) {
+        await container.kv.delete(k).catch(() => {});
+      }
+    } catch {}
     const plan = await container.strategyEngine.generatePlan();
     return json({ ok: true, plan });
   }
@@ -1012,6 +1106,7 @@ function managerHTML(env: Env): string {
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Fredy Manager</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
 <style>
 :root{--bg:#0a0a0f;--surface:#12121a;--surface2:#1a1a26;--border:#252535;--text:#e0e0ea;--text2:#8888a0;--accent:#6366f1;--accent2:#818cf8;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--blue:#3b82f6;--radius:10px;--sidebar-w:220px}
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;overflow:hidden}
@@ -1248,7 +1343,7 @@ async function loadQueue(){
       html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
         html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td><button class="btn btn-sm btn-danger" onclick="deleteQueueItem('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">🗑️ Delete</button></td></tr>').join("")+
+        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">📤 Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">🗑️ Delete</button></td></tr>').join("")+
         '</tbody></table>';
       }else{
         html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
@@ -1262,6 +1357,13 @@ async function deleteQueueItem(cat,id){
   if(!confirm("Delete this item from queue?"))return;
   const d=await api("queue/"+cat+"/delete","POST",{contentId:id});
   toast(d.ok?"🗑️ Item deleted":"❌ Failed");
+  loadQueue();
+}
+async function sendQueueNow(cat,id){
+  if(!confirm("Publish this item NOW to channel + admin PM?"))return;
+  toast("📤 Publishing...");
+  const d=await api("queue/"+cat+"/send-now","POST",{contentId:id});
+  toast(d.ok?"✅ Published! Msg: "+d.messageId:"❌ Failed: "+(d.error||""));
   loadQueue();
 }
 
@@ -1307,9 +1409,28 @@ async function loadScheduler(){
   const d=await api("scheduler");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.settings||{};const st=d.status||{};
-  // v8.1.1: Build Today Schedule table from st.today.slots (with fired status)
+  // v8.2.0: Fetch strategy plan too — unify with Strategy page's Daily Plan.
+  let stratPlan=null;
+  try{const sp=await api("strategy");if(sp.ok&&sp.plan){stratPlan=sp.plan;}}catch{}
+  // v8.2.0: Build Today Schedule table using strategy plan data (provider, priority, status)
+  // to match the Strategy page's Daily Plan table exactly.
   let scheduleHtml='';
-  if(st.today&&st.today.slots&&st.today.slots.length>0){
+  if(stratPlan&&stratPlan.posts&&stratPlan.posts.length>0){
+    // Use strategy plan posts (has provider, priority, status)
+    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
+    stratPlan.posts.map(p=>{
+      // Check if this slot was fired from scheduler status
+      let status=p.status||'pending';
+      if(st.today&&st.today.slots){
+        const firedSlot=st.today.slots.find(sl=>sl.index===p.index);
+        if(firedSlot&&firedSlot.fired)status='published';
+      }
+      const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>':status==='pass'?'<span class="badge badge-gray">⏭️ Passed</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      return '<tr><td>'+p.index+'</td><td>'+p.time+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td>'+p.priority+'</td><td>'+statusBadge+'</td></tr>';
+    }).join("")+
+    '</tbody></table>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+stratPlan.theme.dayName+' — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
+  }else if(st.today&&st.today.slots&&st.today.slots.length>0){
+    // Fallback to scheduler status slots (no provider/priority info)
     scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
     st.today.slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'<span class="badge badge-green">✅ Published</span>':'<span class="badge badge-yellow">⏳ Pending</span>')+'</td></tr>').join("")+
     '</tbody></table></div>';

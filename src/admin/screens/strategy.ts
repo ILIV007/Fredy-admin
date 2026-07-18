@@ -72,6 +72,7 @@ export const strategyScreen: Screen = {
       if (!validModes.includes(value as StrategyMode)) {
         return { alert: `❌ Invalid strategy mode: ${value}` };
       }
+      const oldMode = ctx.settings.strategy.mode;
       const patch: Partial<FredySettings> = {
         strategy: { ...ctx.settings.strategy, mode: value as StrategyMode },
       };
@@ -79,6 +80,36 @@ export const strategyScreen: Screen = {
       if (!result.ok) {
         return { alert: `❌ Validation failed: ${result.error}` };
       }
+
+      // v8.2.0: When strategy mode changes, clear today's plan + regenerate.
+      // Also notify admin about the strategy change.
+      if (value !== oldMode) {
+        try {
+          const { formatDateInZone } = await import("../../primitives/time");
+          const { slotsKey } = await import("../../core/storage/keys");
+          const settings = await ctx.container.config.getSettings(ctx.adminId);
+          const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
+          // Delete today's plan.
+          await ctx.container.kv.delete(slotsKey(today));
+          // Generate a new plan with the new strategy.
+          await ctx.container.strategyEngine.generatePlan();
+
+          // Notify admin about strategy change.
+          await ctx.container.tg.sendMessage(ctx.adminId, [
+            `╔══════════════════════════╗`,
+            `   🎯 STRATEGY CHANGED`,
+            `╚══════════════════════════╝`,
+            ``,
+            `<blockquote>📊 <b>Old:</b> ${oldMode}</blockquote>`,
+            `<blockquote>📊 <b>New:</b> ${value}</blockquote>`,
+            `<blockquote>📅 <b>Date:</b> ${today}</blockquote>`,
+            `<blockquote>🔄 <b>Plan regenerated with new strategy.</b></blockquote>`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        } catch (e) {
+          console.warn("[strategy] plan regeneration failed:", e);
+        }
+      }
+
       return { toast: `✅ Strategy set to ${value}` };
     }
   },
