@@ -29,7 +29,13 @@ export async function managerHandler(
   }
 
   if (url.pathname === "/Manager" || url.pathname === "/manager") {
-    return new Response(managerHTML(env), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(managerHTML(env), { headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      // v8.3.0: Allow inline scripts and eval for the Manager dashboard.
+      // The dashboard uses inline <script> tags and template literals that
+      // may trigger CSP violations on some browsers/CDN configurations.
+      "Content-Security-Policy": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'",
+    } });
   }
 
   const apiPath = url.pathname.replace(/^\/[Mm]anager\/api\//, "");

@@ -83,14 +83,76 @@ export class AdminOrchestrator {
       return;
     }
 
-    // ── v8.0.0: Bot UI language callback (botui:<lang>) ──────────────
-    // Stores the admin's preferred bot UI language in KV.
-    if (data.startsWith("botui:")) {
-      const lang = data.slice(6);
-      if (["en", "fa"].includes(lang)) {
-        await container.kv.set(`fredy:botui:${fromId}`, lang).catch(() => {});
+    // ── v8.3.0: Bot UI language flow (botui:open / botui:set:<lang> / botui:back) ──
+    if (data === "botui:open" || data.startsWith("botui:set:") || data === "botui:back") {
+      try {
+        const { setBotUiLanguage, getBotUiLanguage, buildWelcomeMessage, buildLanguageSelectionMessage, buildLanguageKeyboard, langDisplayName } = await import("../admin/commands/start");
+
+        if (data === "botui:open") {
+          // Open the language selection message (send a new message).
+          const cur = await getBotUiLanguage(fromId, container.kv);
+          const text = buildLanguageSelectionMessage(cur);
+          const kb = buildLanguageKeyboard(cur);
+          await tg.answerCallbackQuery(query.id).catch(() => {});
+          await tg.sendMessage(chatId, text, {
+            parse_mode: "HTML",
+            reply_markup: kb,
+            disable_web_page_preview: true,
+          }).catch(() => {});
+          return;
+        }
+
+        if (data.startsWith("botui:set:")) {
+          const lang = data.slice("botui:set:".length) as "en" | "fa";
+          if (lang !== "en" && lang !== "fa") {
+            await tg.answerCallbackQuery(query.id, "❌ Invalid language").catch(() => {});
+            return;
+          }
+          await setBotUiLanguage(fromId, container.kv, lang);
+          const cur = await getBotUiLanguage(fromId, container.kv);
+          const text = buildLanguageSelectionMessage(cur);
+          const kb = buildLanguageKeyboard(cur);
+          await tg.answerCallbackQuery(query.id, cur === "fa" ? "🟢 فارسی انتخاب شد" : "🟢 English selected").catch(() => {});
+          // Edit the current (language selection) message in-place.
+          await tg.editMessageText(chatId, messageId, text, {
+            parse_mode: "HTML",
+            reply_markup: kb,
+            disable_web_page_preview: true,
+          }).catch(async () => {
+            await tg.sendMessage(chatId, text, {
+              parse_mode: "HTML",
+              reply_markup: kb,
+              disable_web_page_preview: true,
+            }).catch(() => {});
+          });
+          return;
+        }
+
+        if (data === "botui:back") {
+          // Return to the /start welcome message.
+          const cur = await getBotUiLanguage(fromId, container.kv);
+          const text = buildWelcomeMessage(cur);
+          const buttons = [
+            [{ text: `🌐 Language: ${langDisplayName(cur)}`, callback_data: "botui:open" }],
+            [{ text: cur === "fa" ? "📋 باز کردن داشبورد" : "📋 Open Dashboard", callback_data: "menu:main" }],
+          ];
+          await tg.answerCallbackQuery(query.id).catch(() => {});
+          await tg.editMessageText(chatId, messageId, text, {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: buttons },
+            disable_web_page_preview: true,
+          }).catch(async () => {
+            await tg.sendMessage(chatId, text, {
+              parse_mode: "HTML",
+              reply_markup: { inline_keyboard: buttons },
+              disable_web_page_preview: true,
+            }).catch(() => {});
+          });
+          return;
+        }
+      } catch (e) {
+        await tg.answerCallbackQuery(query.id, `❌ ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
       }
-      await tg.answerCallbackQuery(query.id, `🌐 Bot UI: ${lang}`).catch(() => {});
       return;
     }
 
