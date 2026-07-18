@@ -21,7 +21,6 @@ import { escapeHtml } from "../primitives/strings";
 import { registerScreens } from "../admin/screens/register";
 import { registerCommands } from "../admin/commands/register";
 import { unauthorizedMessage } from "../admin/helpers/auth";
-import { setBotUiLanguage, getBotUiLanguage } from "../admin/commands/start";
 
 export class AdminOrchestrator {
   readonly screens = new ScreenRegistry();
@@ -59,6 +58,19 @@ export class AdminOrchestrator {
       return;
     }
 
+    // v8.1.1: Send "is typing" indicator + a "Processing..." message for long operations.
+    // The typing indicator alone is too subtle — the admin may think the bot is broken
+    // during 5-15 second AI generation. A visible "Processing..." message makes it clear.
+    await tg.sendChatAction(chatId, "typing").catch(() => {});
+
+    // For manual publish actions (which take 5-15s), send a "Processing..." message.
+    if (data.startsWith("action:manual:")) {
+      await tg.sendMessage(chatId, "⏳ <b>Processing...</b>\n\n<i>Fetching content, running AI pipeline, and publishing. This may take 5-15 seconds.</i>", {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }).catch(() => {});
+    }
+
     // Authorization check.
     if (!this.isAdmin(fromId)) {
       await tg.answerCallbackQuery(query.id, "⛔ Unauthorized").catch(() => {});
@@ -71,79 +83,14 @@ export class AdminOrchestrator {
       return;
     }
 
-    // ── Bot UI language flow (botui:*) ──
-    // v7.5.0: "🌐 Language" button on /start opens a NEW message with language
-    // selection. Cleaner UX than cramming both language buttons onto /start.
-    if (data === "botui:open" || data.startsWith("botui:set:") || data === "botui:back") {
-      try {
-        if (data === "botui:open") {
-          // Open the language selection message (send a new message).
-          const cur = await getBotUiLanguage(fromId, container.kv);
-          const { buildLanguageSelectionMessage, buildLanguageKeyboard } = await import("../admin/commands/start");
-          const text = buildLanguageSelectionMessage(cur);
-          const kb = buildLanguageKeyboard(cur);
-          await tg.answerCallbackQuery(query.id).catch(() => {});
-          await tg.sendMessage(chatId, text, {
-            parse_mode: "HTML",
-            reply_markup: kb,
-            disable_web_page_preview: true,
-          }).catch(() => {});
-          return;
-        }
-
-        if (data.startsWith("botui:set:")) {
-          const lang = data.slice("botui:set:".length) as "en" | "fa";
-          if (lang !== "en" && lang !== "fa") {
-            await tg.answerCallbackQuery(query.id, "❌ Invalid language").catch(() => {});
-            return;
-          }
-          await setBotUiLanguage(fromId, container.kv, lang);
-          const cur = await getBotUiLanguage(fromId, container.kv);
-          const { buildLanguageSelectionMessage, buildLanguageKeyboard } = await import("../admin/commands/start");
-          const text = buildLanguageSelectionMessage(cur);
-          const kb = buildLanguageKeyboard(cur);
-          await tg.answerCallbackQuery(query.id, cur === "fa" ? "🟢 فارسی انتخاب شد" : "🟢 English selected").catch(() => {});
-          // Edit the current (language selection) message in-place.
-          await tg.editMessageText(chatId, messageId, text, {
-            parse_mode: "HTML",
-            reply_markup: kb,
-            disable_web_page_preview: true,
-          }).catch(async () => {
-            await tg.sendMessage(chatId, text, {
-              parse_mode: "HTML",
-              reply_markup: kb,
-              disable_web_page_preview: true,
-            }).catch(() => {});
-          });
-          return;
-        }
-
-        if (data === "botui:back") {
-          // Return to the /start welcome message.
-          const cur = await getBotUiLanguage(fromId, container.kv);
-          const { buildWelcomeMessage, langDisplayName } = await import("../admin/commands/start");
-          const text = buildWelcomeMessage(cur);
-          const buttons = [
-            [{ text: `🌐 Language: ${langDisplayName(cur)}`, callback_data: "botui:open" }],
-            [{ text: cur === "fa" ? "📋 باز کردن داشبورد" : "📋 Open Dashboard", callback_data: "menu:main" }],
-          ];
-          await tg.answerCallbackQuery(query.id).catch(() => {});
-          await tg.editMessageText(chatId, messageId, text, {
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: buttons },
-            disable_web_page_preview: true,
-          }).catch(async () => {
-            await tg.sendMessage(chatId, text, {
-              parse_mode: "HTML",
-              reply_markup: { inline_keyboard: buttons },
-              disable_web_page_preview: true,
-            }).catch(() => {});
-          });
-          return;
-        }
-      } catch (e) {
-        await tg.answerCallbackQuery(query.id, `❌ ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
+    // ── v8.0.0: Bot UI language callback (botui:<lang>) ──────────────
+    // Stores the admin's preferred bot UI language in KV.
+    if (data.startsWith("botui:")) {
+      const lang = data.slice(6);
+      if (["en", "fa"].includes(lang)) {
+        await container.kv.set(`fredy:botui:${fromId}`, lang).catch(() => {});
       }
+      await tg.answerCallbackQuery(query.id, `🌐 Bot UI: ${lang}`).catch(() => {});
       return;
     }
 
@@ -446,10 +393,11 @@ export class AdminOrchestrator {
     // "set:<scope>:..." → scope maps to screen ID
     if (first === "set") {
       if (second === "scheduler") return "schedule";
-      if (second === "language") return "language";
       if (second === "providers") return "providers";
       if (second === "plugins") return "providers";
       if (second === "general" || second === "content" || second === "quality" || second === "debug") return "settings";
+      if (second === "language") return "language";
+      if (second === "strategy") return "strategy";
       if (second === "ai") return "ai";
       if (second === "categories") return "categories";
       if (second === "editor") return "editor";

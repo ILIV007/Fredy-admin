@@ -82,7 +82,7 @@ SCHEDULER_TIMEZONE = "Asia/Tehran"
 SCHEDULE_SLOTS = "09:00,13:00,18:00,22:00"
 SCHEDULE_JITTER_MINUTES = "30"
 
-# --- Manager Dashboard URL (shown as a button in the Telegram bot menu) ---
+# --- Manager UI ---
 MANAGER_URL = "https://fredy-admin.iliv007-34b.workers.dev/Manager"
 
 # ============================================================

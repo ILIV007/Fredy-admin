@@ -17,7 +17,6 @@ export interface Env {
   SCHEDULER_TIMEZONE: string;
   SCHEDULE_SLOTS: string;
   SCHEDULE_JITTER_MINUTES: string;
-  /** Public URL of the Manager dashboard (for Telegram bot menu link). */
   MANAGER_URL?: string;
 
   // Secrets

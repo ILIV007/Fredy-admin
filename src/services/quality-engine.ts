@@ -147,11 +147,11 @@ export class QualityEngine {
     let score = 100;
     const reasons: string[] = [];
 
-    // Check if source URL is preserved in the output.
-    if (sourceItem.url && !content.text.includes(sourceItem.url)) {
-      score -= 30;
-      reasons.push("source URL not preserved");
-    }
+    // v8.1.1: Removed the "source URL not preserved" penalty.
+    // The source URL is NOT supposed to be in the AI-generated body text —
+    // the UX layer adds it as a blockquote below the body. Penalizing for
+    // this was causing NewsAPI posts (and others) to lose 30 points unfairly,
+    // often pushing their score below the threshold.
 
     // Check for code blocks (if source had code).
     if (sourceItem.body && sourceItem.body.includes("```")) {
@@ -162,9 +162,14 @@ export class QualityEngine {
     }
 
     // Penalize if text is suspiciously short (may have lost technical detail).
-    if (content.text.length < sourceItem.body.length * 0.3) {
-      score -= 25;
-      reasons.push("text much shorter than source — may have lost detail");
+    // v8.1.1: Only penalize if source body was substantial (>200 chars).
+    // Short source bodies (like NewsAPI descriptions ~100 chars) shouldn't
+    // be penalized for producing equally short output.
+    if (sourceItem.body && sourceItem.body.length > 200) {
+      if (content.text.length < sourceItem.body.length * 0.3) {
+        score -= 25;
+        reasons.push("text much shorter than source — may have lost detail");
+      }
     }
 
     return {

@@ -10,6 +10,7 @@ export type DebugEventName =
   | "pipeline.complete"
   | "pipeline.timeout"
   | "pipeline.error"
+  | "pipeline.warn"
   | "pipeline.popularity_filter"
   | "ai.start"
   | "ai.success"

@@ -153,15 +153,13 @@ export class WikimediaPlugin implements Plugin {
     const text = (event.text ?? "").toLowerCase();
     if (!text) return false;
 
-    // Count how many tech keywords match. Require at least 1 match,
-    // but use word-boundary matching to avoid substring false positives
-    // (e.g., "data" matching inside "database" is fine, but "data"
-    // matching inside "metadata" is a false positive — though we removed
-    // "data" from the list, the principle applies to other keywords).
+    // Count how many tech keywords match. Require at least 2 matches
+    // for better filtering — a single keyword like "computer" in a
+    // non-tech article (e.g., "The first computer-generated music was
+    // played at a conference about biology") should not pass.
+    // v8.1.1: Increased threshold from 1 to 2 to reduce false positives.
     let matchCount = 0;
     for (const kw of TECH_KEYWORDS) {
-      // Use word-boundary regex for keywords that are common words.
-      // For keywords with special chars (c++, c#), use plain includes.
       if (kw.includes("+") || kw.includes("#") || kw.includes("/")) {
         if (text.includes(kw)) matchCount++;
       } else {
@@ -170,8 +168,8 @@ export class WikimediaPlugin implements Plugin {
       }
     }
 
-    // Require at least 1 tech keyword match in the event text.
-    return matchCount >= 1;
+    // v8.1.1: Require at least 2 tech keyword matches for better precision.
+    return matchCount >= 2;
   }
 
   normalize(raw: unknown): SourceItem {

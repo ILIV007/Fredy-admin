@@ -20,9 +20,9 @@
 import type { Env, Container } from "../types/env";
 import { processScheduledQueue } from "./cron";
 import { SchedulerOrchestrator } from "../orchestrators/scheduler";
-import { acquireTickLock } from "../services/tick-lock";
 import type { Category } from "../types/category";
 import type { FredySettings } from "../types/config";
+import { acquireTickLock } from "../services/tick-lock";
 
 export interface TickHandlerDeps {
   readonly env: Env;
@@ -55,8 +55,6 @@ export async function tickHandler(
   }
 
   // ── 2. Acquire KV lock (timeout from runtime config) ───
-  // v8.0.0: Uses shared acquireTickLock from tick-lock.ts so cron.ts
-  // can reuse the same lock and prevent concurrent execution.
   const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
   const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
   const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
@@ -101,6 +99,8 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
   const log: string[] = [];
 
   try {
+    // v8.1.1: Settings are already cached by ConfigCache (module-level singleton),
+    // so this is an in-memory hit, not a KV read.
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
     log.push("config loaded");
 
@@ -153,11 +153,6 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
 }
 
 // ────────────────────────────────────────────────────────────
-// KV Lock — moved to src/services/tick-lock.ts in v8.0.0
-// (cron.ts now shares the same lock to prevent concurrent execution)
-// ────────────────────────────────────────────────────────────
-
-// ────────────────────────────────────────────────────────────
 // Queue Maintenance (smart refill)
 // ────────────────────────────────────────────────────────────
 
@@ -178,10 +173,18 @@ async function maintainQueue(
     C: settings.content.queueTargetC,
   };
 
+  // v8.1.1: Batch depth checks — use depth() once instead of depthFor() per category.
+  // This reduces 3 KV reads to 1.
+  const allDepths = await container.queue.depth();
+  const depthMap: Record<string, number> = {};
+  for (const d of allDepths) {
+    depthMap[d.category] = d.depth;
+  }
+
   for (const cat of categories) {
     if (!settings.categories[cat].enabled) continue;
 
-    const depth = await container.queue.depthFor(cat);
+    const depth = depthMap[cat] ?? 0;
     const min = minMap[cat];
     const target = targetMap[cat];
 
@@ -230,7 +233,11 @@ async function refreshSourcesIfNeeded(
     return;
   }
 
-  // Check if refresh is actually needed (queue already full = skip).
+  // v8.1.1: Reuse the depths from maintainQueue if available (passed via log),
+  // otherwise fetch. This avoids a duplicate depth() KV read.
+  // Since maintainQueue already fetched depths, we pass them in to avoid
+  // re-reading. But for simplicity (and since depth() is cached by ConfigCache
+  // for 5s), we just fetch again here — it's a single KV read.
   const depths = await container.queue.depth();
   const totalDepth = depths.reduce((sum, d) => sum + d.depth, 0);
   if (totalDepth > 20) {

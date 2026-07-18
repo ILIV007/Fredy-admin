@@ -2,103 +2,77 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
-## [8.0.1] — 2026-07-17 — Consistency Fixes + Cross-Request Caching + Dead Code Cleanup
+## [8.1.0] — v8.1.0 — Re-applied v8 fixes (timezone, locks, dedup, admin screens, Manager onclick escaping)
 
-### Part 1 — 5 Previously Reported Bugs: Confirmed Already Fixed in v8.0.0
+### Overview
 
-All 5 critical bugs from the prior audit were verified as already fixed in v8.0.0:
-1. ✅ `CREDIBILITY_SCORES` keys match real plugin IDs (github, devto, etc.)
-2. ✅ Shared `tick-lock.ts` module; cron.ts and tick.ts both use same lock
-3. ✅ `content-queue.dequeue()` wrapped in per-category KV lock
-4. ✅ `scheduler-service.status()` annotates slots with real `fired` state
-5. ✅ All 9 `copyElement` escaping bugs fixed (0 `\\'` patterns remain)
+This release re-applies the v8.0.0 + v8.1.0 fixes that were lost when the working directory was reverted to v7.1.1. All 28 fixes from the v8 series are reapplied in one consolidated release. No new features beyond what v8.0.0/v8.1.0 already shipped.
 
-### Part 2 — Consistency Fixes
+### Critical Bug Fixes
 
-#### 2a. escapeHtml duplication removed ✅
-- Deleted private `escapeHtml()` from `scheduler-service.ts` (was incomplete — didn't escape `"` or `'`)
-- Now imports canonical `escapeHtml` from `primitives/strings.ts` (single source of truth)
-- All `this.escapeHtml(...)` calls replaced with `escapeHtml(...)`
+- **Timezone bug in `time-generator.ts`** — the `minutesToEpochMs` method previously ignored the configured timezone (used `Date.UTC()` directly). Now computes the timezone offset via `Intl.DateTimeFormat` and applies it correctly so slots fire at the intended local time.
+- **Concurrent tick races** — extracted a shared `acquireTickLock()` helper (`src/services/tick-lock.ts`) and switched both `tick.ts` and `cron.ts` to use it. The 24h backup cron and the minute cron no longer fight each other for the lock.
+- **Per-category queue lock** — `ContentQueue.dequeue()` now wraps in a per-category KV lock (10s TTL, 30 attempts) so two concurrent ticks can't dequeue the same item.
+- **30-minute grace period in `SchedulerService.findDueSlot()`** — slots more than 30 minutes overdue are marked as "passed" instead of firing, preventing burst-publishing after a scheduler outage.
+- **CREDIBILITY_SCORES keys** — fixed to match real plugin IDs (`github`, `devto`, `stackexchange`, `nasa`, `xkcd`, `wikimedia`, `news`, `hackernews`, `github-releases`, `github-trending`) instead of URLs.
+- **`duplicate-detector.ts` `hashUrl`** — replaced djb2 with SHA-1 (via `sha1()`) to eliminate collisions on similar URLs. All callers updated to `await` the result.
+- **Manager dashboard onclick escaping** — fixed all broken `\\''` patterns in `src/entry/manager.ts` template literal. Both variable-arg (`navigate`, `postToChannel`, `copyText`, `testPlugin`, `togglePlugin`, `deleteQueueItem`, `testAIModel`, `switchStrategy`, `copyElement`) and literal-id arg cases now render correctly in the browser.
 
-#### 2b. Config cache: cross-request caching made real ✅
-- **Root cause confirmed:** `buildContainer()` was called fresh per request, creating a new `ConfigCache` each time — the 30s TTL cache only helped within a single request
-- **Fix (option b):** Moved `ConfigCache` to module-level scope in `container.ts` (`sharedConfigCache`)
-- Now the cache genuinely persists across requests within the same Worker isolate
-- Comment in `config-cache.ts` was accurate (claims cross-request caching) — now the code matches the comment
-- **KV read savings estimate:** ~6 config reads per tick × 12 ticks/day = 72 reads/day saved during warm-isolate periods
+### skipEnqueue option (Content Pipeline)
 
-#### 2c. Half-applied pattern grep ✅
-- Searched for other private methods duplicating exported primitives
-- Found: `safeTruncate` in `ux-layer.ts` — NOT a duplicate (it's HTML-aware, closes open tags — genuinely different from plain `truncate`)
-- Found: `hashUrl` in `duplicate-detector.ts` — NOT a duplicate (service-specific helper)
-- No other half-migrations found
+- Added `skipEnqueue?: boolean` to `ContentManager.process()`, `processForCategory()`, `processFromPlugin()` option bags.
+- All enqueue calls are guarded by `if (!skipEnqueue)`.
+- `SchedulerService.fireSlot()` passes `{ skipEnqueue: true }` when generating fresh content (the slot itself is publishing, no need to also queue).
+- `SchedulerService.manualPublish()` passes `{ skipEnqueue: true }` to all `process*` calls.
+- `admin/screens/manual.ts` passes `{ skipEnqueue: true }` to all manual triggers.
 
-### Part 3 — Token Optimization: Documented (Not Implemented)
+### UX Layer (Telegram Post Formatting)
 
-**Finding:** Each AI call sends ~1774 words (~2400 tokens) of static prefix (prompt-templates.ts: 1161 words + soul.md: 613 words). With 9 posts/day × up to 3 retries = 27 calls/day, that's ~65K tokens/day of repeated static content.
+- `assembleFullText` and `assembleCaption` now take explicit `maxLen` params (`TELEGRAM_TEXT_LIMIT`, `TELEGRAM_CAPTION_LIMIT`).
+- Pre-truncate body: try full body first, only truncate if the assembled text exceeds the limit. Reserve space for hook + footer + overhead.
+- New `summarizeText()` method truncates at paragraph boundary first, then sentence boundary, then word boundary, with `…` marker.
+- Removed the old `safeTruncate()` HTML-tag-closing helper (no longer needed — we truncate the raw body before HTML conversion).
 
-**Recommendation:** Implement Gemini's `cachedContent` API for the fixed prefix (base prompt + soul.md), refreshing only when soul.md changes. Estimated savings: ~60-70% of input token cost on the Gemini path.
+### Admin Panel: New Screens & Routing
 
-**Status:** Documented as a follow-up. Implementation requires changes to `src/plugins/ai/gemini.ts` (new API endpoint, cache lifecycle, TTL handling) and `src/services/soul-loader.ts` (cache invalidation hooks).
+- New `languageScreen` (`src/admin/screens/language.ts`) — edits `settings.language.default` with callbacks `set:language:default:<en|fa|auto>` and `set:language:autodetect:toggle`.
+- New `strategyScreen` (`src/admin/screens/strategy.ts`) — switches strategy mode via `set:strategy:mode:<mode>`.
+- `mainScreen` now has Language and Strategy nav buttons, plus a Manager URL button (reads from `ctx.container.env.MANAGER_URL`).
+- `mainScreen.keyboard()` now accepts an optional `ctx` parameter (needed for env access). All call sites updated to pass `ctx`.
+- `Screen` interface updated: `keyboard(settings, ctx?)` now accepts the optional context.
+- `/start` command now persists bot UI language in KV at `fredy:botui:<adminId>` (separate from post language).
+- `AdminOrchestrator.handleCallback()` now sends a `sendChatAction("typing")` at the start of every callback.
+- `AdminOrchestrator` routes `botui:*` callbacks (stores bot UI lang in KV), `set:language:*` → language screen, `set:strategy:*` → strategy screen.
 
-### Part 4 — KV Usage: Confirmed Healthy ✅
+### Type Fixes
 
-- **Batched stats:** Confirmed in place (`STATS_BATCH_FLUSH_THRESHOLD` in `kv-store.ts`, `flushAllStats()` called per tick)
-- **Source plugin caching:** KV-backed with sane TTLs (e.g., GitHub trending 4h)
-- **History service:** Minor read-modify-write, but array stays small (<20 entries/day) — not worth optimizing
+- `types/scheduler.ts`: Added `fired?: boolean` to `SlotTime` (set by `status()` for the dashboard).
+- `types/telegram.ts`: `callback_data` is now optional in `InlineKeyboardButton` (URL buttons don't have it).
+- `types/env.ts`: Added `MANAGER_URL?: string` after `SCHEDULE_JITTER_MINUTES`.
+- `scheduler-service.ts`: `escapeHtml` removed from the class (single source of truth in `primitives/strings.ts`), all `this.escapeHtml(...)` calls replaced with `escapeHtml(...)`.
+- `scheduler-service.ts`: `status()` now annotates each slot with `fired` state via `dailyPlanner.isSlotFired()`.
 
-### Dead Code Cleanup
-- Reviewed TODO markers — all are legitimate phase placeholders, not dead code
-- `SchedulerOrchestrator.refreshSources()` is a no-op stub but called by cron/tick — left as documented placeholder
+### Container / Config Cache
 
-## [8.0.0] — 2026-07-17 — Critical Bug Fixes + Architecture Hardening
+- `ConfigCache` now exports a module-level singleton `sharedConfigCache`.
+- `container.ts` uses `sharedConfigCache` instead of `new ConfigCache()` so write-invalidation propagates correctly across all `ConfigService` instances within the same isolate.
 
-### Critical Bug Fixes (verified against v7.5.0 tree)
+### Admin Screens — Manual Publish UX
 
-1. **candidate-ranker CREDIBILITY_SCORES** — keys now match real plugin IDs (`github` instead of `github.com`, `devto` instead of `dev.to`, etc.). 6 of 12 plugins were silently getting the default score of 50 instead of their intended 60-95.
+- `admin/screens/manual.ts` now wraps each manual pipeline run in a `setInterval(() => sendChatAction("typing"), 4000)` so the admin sees a live "typing…" indicator while the AI pipeline runs (which can take 10-30s). The interval is cleared in a `finally` block.
 
-2. **Shared tick lock** — `src/services/tick-lock.ts` created. `cron.ts` now acquires the same `fredy:tick:lock` as `tick.ts` before calling `scheduler.tick()`, preventing concurrent execution between the external cron and the 24h backup cron.
+### Config
 
-3. **content-queue dequeue lock** — `dequeue()` now wrapped in a per-category KV lock (`fredy:queue:lock:<category>`, 5s TTL) to prevent the race condition where two concurrent callers both read the same queue item and both publish it.
+- `wrangler.toml`: Added `MANAGER_URL = "https://fredy-admin.iliv007-34b.workers.dev/Manager"` in `[vars]`.
+- `core/constants.ts`: `APP_VERSION = "8.1.0"`.
+- `VERSION` file: `8.1.0`.
+- `package.json`: `version: "8.1.0"`.
 
-4. **scheduler status() fired state** — `status()` now annotates each slot with its real `fired` boolean via `dailyPlanner.isSlotFired()`. The Manager dashboard's "Today Schedule" now correctly shows "✅ Published" vs "⏳ Pending" instead of always "Pending".
+### Documentation
 
-5. **manager.ts copyElement escaping** — all 9 `copyElement(...)` onclick handlers fixed. The `\\'` escape produced `\'` in the rendered HTML, breaking Copy buttons on Logs, Config, Debug, AI, Post, and Back-Test pages. Now uses proper string concatenation.
+- Deleted stale `ARCHITECTURE_REPORT.md` (was misleading and out of sync with the actual code).
 
-6. **duplicate-detector hashUrl** — switched from djb2 (32-bit, high collision risk) to SHA-1. Prevents false-positive duplicate detection from URL hash collisions.
-
-### UX Improvement
-- **"is typing" indicator** — manual publish now sends a recurring `typing` chat action every 4s during the fetch+AI+publish pipeline, so the admin sees the bot is working.
-
-## [7.5.0] — 2026-07-17 — Polished Language Flow + Professional Notifications
-
-### Changes
-- `/start` now shows a single "🌐 Language" button that opens a new message with language selection (English / فارsi / Back)
-- Admin PM notifications upgraded with status banners, blockquotes, quality emoji (🟢/🟡/🔴)
-- Body preservation: full body text preserved when it fits; smart truncation at paragraph/sentence boundaries only when necessary
-
-## [7.4.5] — 2026-07-17 — Language Button + Post Language + Smart Summarization
-
-### Changes
-- Language inline button on `/start` (bot UI language, stored in KV)
-- "Post Language" screen in main menu (synced with `settings.language.default`)
-- Smart summarization replaces bare "..." with paragraph/sentence boundary truncation
-- Re-applied timezone fix (Intl.DateTimeFormat), grace period (30 min), skipEnqueue, source/footer preservation
-
-## [7.4.0] — 2026-07-17 — Queue Fixes + Send Now + Bot Menu Refactor
-
-### Changes
-- Queue page: per-item try/catch, event delegation (no more onclick escaping)
-- Send Now: 3-layer fallback (sendPhoto → sendMessage HTML → plain-text)
-- Strategy screen (6 modes), Scheduler screen (today's slots + 5-post history)
-- Manager URL button replaces Refresh
-- Config cache TTL reduced from 30s to 5s for cross-isolate consistency
-
-## [7.3.0] — 2026-07-16 — v7 Roadmap Complete
-
-### Changes
-- 116 unit tests passing
-- Strategy engine, scheduler core, content pipeline, manager dashboard all operational
+---
 
 ## [7.0.4] — 2026-07-16 — Phase 4: Manager Dashboard & Runtime Control
 

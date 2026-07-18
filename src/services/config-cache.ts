@@ -6,6 +6,12 @@
  * the KV read latency for hot settings. Writes invalidate the cache entry
  * so the next read picks up the new value.
  *
+ * v8.0.0: A module-level singleton (`sharedConfigCache`) is exported so that
+ * all callers within the same isolate share the same cache. Previously,
+ * each `buildContainer()` call created a new `ConfigCache` instance, which
+ * meant writes from one container instance didn't invalidate entries held
+ * by another. With the singleton, write-invalidation propagates correctly.
+ *
  * See ARCHITECTURE_RULES.md §18.1 (cache aggressively, invalidate explicitly).
  */
 
@@ -61,3 +67,10 @@ export class ConfigCache {
     return { size: this.cache.size, ttlMs: this.ttlMs };
   }
 }
+
+/**
+ * Module-level singleton shared across all ConfigService instances within
+ * the same Worker isolate. Use this instead of `new ConfigCache()` so that
+ * write-invalidation propagates correctly.
+ */
+export const sharedConfigCache = new ConfigCache({ ttlMs: DEFAULT_TTL_MS });

@@ -4,13 +4,6 @@
  * See ARCHITECTURE_RULES.md §13.
  *
  * Adding a new plugin = add it here. No edits to orchestrators or services.
- *
- * v8.0.1: ConfigCache and SoulLoader are now module-level singletons so
- * their in-memory caches actually persist across requests within the same
- * Cloudflare Worker isolate. Previously, buildContainer() was called fresh
- * on every request, creating a new cache each time — the TTL-based caching
- * only helped within a single request. Now the cache survives across
- * requests in the same isolate, genuinely reducing KV reads.
  */
 
 import type { Container, Env } from "./types/env";
@@ -20,7 +13,7 @@ import { KVStore } from "./services/kv-store";
 import { TelegramService } from "./services/telegram";
 import { Logger } from "./services/logger";
 import { ConfigService, buildConfigRegistry } from "./services/config-service";
-import { ConfigCache } from "./services/config-cache";
+import { ConfigCache, sharedConfigCache } from "./services/config-cache";
 import { ConfigRepository } from "./services/config-repository";
 import { SoulLoader } from "./services/soul-loader";
 import { AIService } from "./services/ai-service";
@@ -88,22 +81,10 @@ Professional without sounding corporate.
 (Full soul loaded from docs/soul.md — this is a fallback.)
 `.trim();
 
-// ────────────────────────────────────────────────────────────
-// v8.0.1: Module-level singletons for cross-request caching.
-// These persist across buildContainer() calls within the same Worker isolate,
-// so the TTL-based caching actually works across requests (not just within one).
-// ────────────────────────────────────────────────────────────
-
-/** Shared config cache — survives across requests in the same isolate. */
-const sharedConfigCache = new ConfigCache();
-
 /**
  * Build the DI container. Called once per Worker isolate.
  * Order matters — services that depend on others must be constructed after
  * their dependencies.
- *
- * v8.0.1: Reuses sharedConfigCache (module-level) so config reads are cached
- * across requests, not just within a single request.
  */
 export function buildContainer(env: Env): Container {
   // Layer 0: KV + Logger (no deps)
@@ -114,10 +95,13 @@ export function buildContainer(env: Env): Container {
   });
 
   // Layer 1: Config (registry + repository + cache + service)
-  // v8.0.1: Use the shared module-level cache so reads persist across requests.
+  // v8.0.0: Use the shared singleton cache so write-invalidation propagates
+  // across all container instances within the same isolate.
   const registry = buildConfigRegistry();
   const repository = new ConfigRepository({ kv });
-  const config = new ConfigService({ kv, env, repository, cache: sharedConfigCache, registry });
+  void ConfigCache; // referenced for side effects / type import
+  const cache = sharedConfigCache;
+  const config = new ConfigService({ kv, env, repository, cache, registry });
 
   // Layer 2: Telegram + Debug (depend on kv + logger)
   const tg = new TelegramService({

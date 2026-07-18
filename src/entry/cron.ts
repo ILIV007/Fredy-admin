@@ -40,24 +40,22 @@ export async function cronHandler(
   const { env, container, ctx } = deps;
 
   // 24-hour backup cron — runs the full tick as a safety net.
-  // v8.0.0: Now acquires the SAME tick lock as /internal/tick, so if the
-  // external cron and this backup fire at the same time, only one runs.
   if (event.cron === "0 */24 * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
         const lock = await acquireTickLock(container.kv, 90);
         if (!lock.acquired) {
-          console.log("[cron] tick lock held — skipping backup tick");
+          console.log("[cron] tick lock held — skipping");
           return;
         }
         try {
           const scheduler = new SchedulerOrchestrator(container);
           const result = await scheduler.tick();
           if (result.fired) {
-            console.log(`[cron] slot fired: cat=${result.slot?.category ?? "?"}`);
+            console.log("[cron-24h] slot fired:", result.slot?.category);
           } else if (result.skipped) {
-            console.log(`[cron] skipped: ${result.skipReason ?? "unknown"}`);
+            console.log("[cron-24h] slot skipped:", result.skipReason);
           }
           // Also refresh sources.
           await scheduler.refreshSources();
@@ -70,23 +68,22 @@ export async function cronHandler(
   }
 
   // Every-minute tick (if enabled).
-  // v8.0.0: Also acquires the shared lock.
   if (event.cron === "* * * * *") {
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
         const lock = await acquireTickLock(container.kv, 90);
         if (!lock.acquired) {
-          console.log("[cron] tick lock held — skipping minute tick");
+          console.log("[cron] tick lock held — skipping");
           return;
         }
         try {
           const scheduler = new SchedulerOrchestrator(container);
           const result = await scheduler.tick();
           if (result.fired) {
-            console.log(`[cron] slot fired: cat=${result.slot?.category ?? "?"}`);
+            console.log("[cron-min] slot fired:", result.slot?.category);
           } else if (result.skipped) {
-            console.log(`[cron] skipped: ${result.skipReason ?? "unknown"}`);
+            console.log("[cron-min] slot skipped:", result.skipReason);
           }
         } finally {
           await lock.release();

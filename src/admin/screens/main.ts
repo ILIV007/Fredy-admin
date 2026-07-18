@@ -4,9 +4,9 @@
  * Bot ON/OFF toggle is the first button, alone in its row.
  */
 
-import type { Screen } from "../registry";
+import type { Screen, ScreenContext } from "../registry";
 import type { FredySettings } from "../../types/config";
-import type { InlineKeyboard } from "../../types/telegram";
+import type { InlineKeyboard, InlineKeyboardButton } from "../../types/telegram";
 import { buildKeyboard, navRow } from "../keyboards";
 import { header, kv, statusBadge, divider } from "../helpers/formatting";
 import { APP_VERSION } from "../../core/constants";
@@ -37,39 +37,51 @@ export const mainScreen: Screen = {
     return lines.join("\n");
   },
 
-  keyboard(settings: FredySettings, ctx?: { container: { env: { MANAGER_URL?: string } } }): InlineKeyboard {
+  keyboard(settings: FredySettings, ctx?: ScreenContext): InlineKeyboard {
+    // Use safe defaults if settings sections are missing.
     const botEnabled = settings?.general?.botEnabled ?? true;
     const approveMode = settings?.approveMode ?? false;
-    const managerUrl = ctx?.container?.env?.MANAGER_URL;
-    return buildKeyboard([
+
+    const rows: InlineKeyboardButton[][] = [
+      // Bot ON/OFF — first row, ALONE
       [
         { text: botEnabled ? "🟢 Bot: ON" : "🔴 Bot: OFF", callback_data: "toggle:botEnabled" },
       ],
-      navRow(
-        { text: "🌐 Post Language", target: "menu:language" },
+      [...navRow(
         { text: "📅 Scheduler", target: "menu:schedule" },
-      ),
-      navRow(
         { text: "📚 Categories", target: "menu:categories" },
+      )],
+      [...navRow(
         { text: "🔌 Providers", target: "menu:providers" },
-      ),
-      navRow(
         { text: "🤖 AI", target: "menu:ai" },
-        { text: "✍️ Manual Post", target: "menu:manual" },
-      ),
-      navRow(
+      )],
+      [...navRow(
+        { text: "🌐 Language", target: "menu:language" },
+        { text: "🎯 Strategy", target: "menu:strategy" },
+      )],
+      [...navRow(
         { text: "⚙️ Settings", target: "menu:settings" },
+        { text: "✍️ Manual Post", target: "menu:manual" },
+      )],
+      [...navRow(
         { text: "🎨 Editor", target: "menu:editor" },
-      ),
+        { text: "🔄 Refresh", target: "menu:main" },
+      )],
       [
         { text: approveMode ? "🔐 Approve: ON ✅" : "🔓 Approve: OFF", callback_data: "toggle:approve" },
-        managerUrl
-          ? { text: "🖥️ Manager", url: managerUrl }
-          : { text: "📊 Stats", callback_data: "menu:stats" },
+        { text: "📊 Stats", callback_data: "menu:stats" },
       ],
       [
         { text: "🐛 Debug", callback_data: "menu:debug" },
       ],
-    ]);
+    ];
+
+    // Manager URL button (only if env var is set).
+    const managerUrl = ctx?.container?.env?.MANAGER_URL;
+    if (managerUrl) {
+      rows.push([{ text: "🎛️ Manager", url: managerUrl, callback_data: "ignore" }]);
+    }
+
+    return buildKeyboard(rows);
   },
 };

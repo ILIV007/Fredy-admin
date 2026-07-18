@@ -153,9 +153,8 @@ export class DuplicateDetector {
   }
 
   /** Hash a URL for KV key (URLs can be long).
-   *  v8.0.0: Uses SHA-1 instead of djb2 (32-bit). djb2 had collision risk
-   *  that could cause two different URLs to map to the same dedup record,
-   *  falsely blocking legitimate content. SHA-1 is practically collision-free. */
+   *  v8.0.0: Replaced djb2 with SHA-1 for collision safety (djb2 had
+   *  frequent collisions on similar URLs causing false-positive dedup). */
   private async hashUrl(url: string): Promise<string> {
     return sha1(url);
   }

@@ -37,9 +37,7 @@ export interface ScoreFactors {
   readonly trending: number;
 }
 
-/** Known credible sources and their credibility scores (0–100).
- *  v8.0.0: Keys now match actual plugin manifest IDs (github, devto, etc.)
- *  instead of domain names (github.com, dev.to) that never matched. */
+/** Known credible sources and their credibility scores (0–100). */
 const CREDIBILITY_SCORES: Readonly<Record<string, number>> = {
   "github": 95,
   "github-releases": 95,
@@ -51,8 +49,6 @@ const CREDIBILITY_SCORES: Readonly<Record<string, number>> = {
   "nasa": 90,
   "xkcd": 60,
   "wikimedia": 70,
-  // Intentionally default-scored plugins (no strong credibility signal):
-  // "joke" → 50, "reddit" → 50 (fall through to default)
 };
 
 /** Tech relevance keywords (bonus for matching content). */

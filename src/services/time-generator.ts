@@ -186,9 +186,7 @@ export class TimeGenerator {
   }
 
   /** Convert minutes-since-midnight to epoch ms for a date in a timezone.
-   *  v7.4.5: FIXED — was using Date.UTC() which ignored the timezone.
-   *  For Tehran (UTC+3:30), slot "09:00" was computed as 09:00 UTC = 12:30
-   *  Tehran time, causing posts to fire 3.5 hours late. */
+   *  v8.0.0: FIXED — was using Date.UTC() which ignored the timezone. */
   private minutesToEpochMs(date: string, minutes: number, timezone: string): number {
     const [year, month, day] = date.split("-").map(Number);
     const utcMidnight = Date.UTC(year!, month! - 1, day!, 0, 0, 0);

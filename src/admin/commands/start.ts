@@ -1,65 +1,60 @@
 /**
  * src/admin/commands/start.ts
- * /start command — shows a brief overview with a single "🌐 Language" button.
+ * /start command — opens the main admin panel (dashboard).
  *
- * v7.5.0: The Language button on /start opens a NEW message with language
- * selection options (English / فارسی). This is cleaner than showing both
- * language buttons inline on the welcome message.
- *
- * The language controlled here is the BOT UI language (how admin messages
- * are displayed), NOT the post content language.
+ * v8.0.0: Stores the bot UI language in KV (`fredy:botui:<adminId>`)
+ * so the admin panel can render in the admin's preferred language
+ * independently from the post language (settings.language.default).
  */
 
 import type { Command, CommandContext } from "../registry";
-import type { InlineKeyboard, InlineKeyboardButton } from "../../types/telegram";
-import type { KVStore } from "../../services/kv-store";
-
-/** Available bot UI languages. */
-export const BOT_UI_LANGUAGES = ["en", "fa"] as const;
-export type BotUiLanguage = (typeof BOT_UI_LANGUAGES)[number];
-
-/** KV key for the admin's chosen bot UI language. */
-const BOT_UI_LANG_KEY = (adminId: number) => `fredy:botui:${adminId}`;
-
-/** Get the admin's bot UI language (default: en). */
-export async function getBotUiLanguage(adminId: number, kv: KVStore): Promise<BotUiLanguage> {
-  const v = await kv.get(BOT_UI_LANG_KEY(adminId));
-  if (v === "fa" || v === "en") return v;
-  return "en";
-}
-
-/** Set the admin's bot UI language. */
-export async function setBotUiLanguage(adminId: number, kv: KVStore, lang: BotUiLanguage): Promise<void> {
-  await kv.set(BOT_UI_LANG_KEY(adminId), lang);
-}
-
-/** Get the display name for a language. */
-export function langDisplayName(lang: BotUiLanguage): string {
-  return lang === "fa" ? "فارسی" : "English";
-}
+import { mainScreen } from "../screens/main";
+import type { ScreenContext } from "../registry";
 
 export const startCommand: Command = {
   name: "/start",
-  description: "Welcome message with Language button",
+  description: "Welcome message and open admin panel",
 
   async handle(ctx: CommandContext): Promise<void> {
     const { container, adminId, chatId } = ctx;
-    const curLang = await getBotUiLanguage(adminId, container.kv);
+    const settings = await container.config.getSettings(adminId);
 
-    const lines = buildWelcomeMessage(curLang);
+    // Persist bot UI language (defaults to "en"; admin can switch via inline
+    // button later). Stored separately from post language.
+    const botUiKey = `fredy:botui:${adminId}`;
+    const existing = await container.kv.get(botUiKey).catch(() => null);
+    if (!existing) {
+      await container.kv.set(botUiKey, "en").catch(() => {});
+    }
 
-    // Single Language button + Open Dashboard button.
-    const buttons: InlineKeyboardButton[][] = [
-      [
-        { text: `🌐 Language: ${langDisplayName(curLang)}`, callback_data: "botui:open" },
-      ],
-      [
-        { text: curLang === "fa" ? "📋 باز کردن داشبورد" : "📋 Open Dashboard", callback_data: "menu:main" },
-      ],
-    ];
-    const keyboard: InlineKeyboard = { inline_keyboard: buttons };
+    const screenCtx: ScreenContext = {
+      container,
+      adminId,
+      chatId,
+      messageId: 0,
+      settings,
+      query: {} as never,
+    };
 
-    await container.tg.sendMessage(chatId, lines, {
+    // Send welcome message first
+    await container.tg.sendMessage(chatId, [
+      "👋 <b>Welcome to Fredy!</b>",
+      "",
+      "Fredy is an AI-powered content engine for the ILIVIR3 Telegram channel.",
+      "",
+      "<b>Quick commands:</b>",
+      "• <code>/menu</code> — Open admin dashboard",
+      "• <code>/help</code> — Show all commands",
+      "• <code>/stats</code> — View statistics",
+      "• <code>/health</code> — System health check",
+      "",
+      "<i>Opening dashboard...</i>",
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+
+    // Then send the dashboard
+    const text = await mainScreen.text(screenCtx);
+    const keyboard = mainScreen.keyboard(settings, screenCtx);
+    await container.tg.sendMessage(chatId, text, {
       parse_mode: "HTML",
       reply_markup: keyboard,
       disable_web_page_preview: true,
@@ -69,76 +64,3 @@ export const startCommand: Command = {
     void ctx.reply;
   },
 };
-
-/** Build the welcome message — localized based on bot UI language. */
-export function buildWelcomeMessage(lang: BotUiLanguage): string {
-  if (lang === "fa") {
-    return [
-      `👋 <b>به فردی خوش آمدید!</b>`,
-      ``,
-      `<blockquote>🤖 <b>فردی</b> — موتور محتوای هوش مصنوعی برای کانال تلگرام ILIVIR3</blockquote>`,
-      `<blockquote>📡 ۱۲ پلاگین منبع: GitHub، Dev.to، HackerNews، NASA، NewsAPI و غیره</blockquote>`,
-      `<blockquote>🧠 بازنویسی با Gemini/OpenRouter AI</blockquote>`,
-      `<blockquote>📅 زمان‌بندی قابل تنظیم با کنترل کیفیت</blockquote>`,
-      ``,
-      `<b>📋 دستورات:</b>`,
-      `  • <code>/menu</code> — داشبورد مدیریت`,
-      `  • <code>/help</code> — راهنما`,
-      `  • <code>/stats</code> — آمار`,
-      `  • <code>/health</code> — سلامت سیستم`,
-    ].join("\n");
-  }
-  return [
-    `👋 <b>Welcome to Fredy!</b>`,
-    ``,
-    `<blockquote>🤖 <b>Fredy</b> — AI-powered content engine for the ILIVIR3 Telegram channel</blockquote>`,
-    `<blockquote>📡 12 source plugins: GitHub, Dev.to, HackerNews, NASA, NewsAPI, and more</blockquote>`,
-    `<blockquote>🧠 AI rewriting via Gemini/OpenRouter</blockquote>`,
-    `<blockquote>📅 Configurable schedule with quality control</blockquote>`,
-    ``,
-    `<b>📋 Commands:</b>`,
-    `  • <code>/menu</code> — Admin dashboard`,
-    `  • <code>/help</code> — Help`,
-    `  • <code>/stats</code> — Statistics`,
-    `  • <code>/health</code> — System health`,
-  ].join("\n");
-}
-
-/** Build the language selection message (shown when "🌐 Language" is tapped). */
-export function buildLanguageSelectionMessage(lang: BotUiLanguage): string {
-  if (lang === "fa") {
-    return [
-      `🌐 <b>انتخاب زبان ربات</b>`,
-      ``,
-      `<blockquote>زبان فعلی: <b>${langDisplayName(lang)}</b></blockquote>`,
-      `<blockquote>این زبان نحوه نمایش پیام‌های ربات به ادمین را کنترل می‌کند.</blockquote>`,
-      `<blockquote>⚠️ این زبان، زبان محتوای پست‌ها نیست. زبان پست‌ها از منوی اصلی ← Post Language تنظیم می‌شود.</blockquote>`,
-      ``,
-      `<i>برای انتخاب، روی یکی از گزینه‌های زیر بزنید:</i>`,
-    ].join("\n");
-  }
-  return [
-    `🌐 <b>Bot Language Selection</b>`,
-    ``,
-    `<blockquote>Current language: <b>${langDisplayName(lang)}</b></blockquote>`,
-    `<blockquote>This controls how admin messages from the bot are displayed.</blockquote>`,
-    `<blockquote>⚠️ This is NOT the post content language. Post language is set via Main Menu ← Post Language.</blockquote>`,
-    ``,
-    `<i>Tap one of the options below to select:</i>`,
-  ].join("\n");
-}
-
-/** Build the language selection keyboard. */
-export function buildLanguageKeyboard(cur: BotUiLanguage): InlineKeyboard {
-  return {
-    inline_keyboard: [
-      [
-        { text: cur === "en" ? "🟢 English ✓" : "English", callback_data: "botui:set:en" },
-        { text: cur === "fa" ? "🟢 فارسی ✓" : "فارسی", callback_data: "botui:set:fa" },
-      ],
-      [
-        { text: cur === "fa" ? "↩️ بازگشت" : "↩️ Back", callback_data: "botui:back" },
-      ],
-    ],
-  };
-}

@@ -66,18 +66,6 @@ export const manualScreen: Screen = {
     const type = parts[2] ?? "";
     const arg = parts[3] ?? "";
 
-    // v8.0.0: Send "typing" indicator immediately so the admin sees the bot
-    // is working. The manual publish pipeline (fetch + AI + publish) can take
-    // 5-15 seconds — without this, the admin might think the bot is broken.
-    // Also set up a recurring typing indicator every 4s during the operation.
-    const typingInterval = setInterval(() => {
-      ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
-    }, 4000);
-    // Send the first one immediately.
-    await ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
-    try {
-      // The actual publish logic continues below.
-
     if (type === "simulate") {
       return { toast: "🧪 Simulation not implemented yet" };
     }
@@ -89,12 +77,18 @@ export const manualScreen: Screen = {
       try {
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
-        const result = await ctx.container.content.processForCategory(
-          arg as Category,
-          null,
-          lang,
-          { skipEnqueue: true },
-        );
+        // v8.0.0: typing indicator while the pipeline runs.
+        const typingTimer = setInterval(() => {
+          ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
+        }, 4000);
+        try {
+          // v8.0.0: Add skipEnqueue so manual triggers don't pollute the queue.
+          const result = await ctx.container.content.processForCategory(
+            arg as Category,
+            null,
+            lang,
+            { skipEnqueue: true },
+          );
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
@@ -112,22 +106,19 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `╔══════════════════════════╗`,
-              `   📤 <b>MANUAL PUBLISH — CATEGORY ${arg}</b>`,
-              `╚══════════════════════════╝`,
-              ``,
-              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
-              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
-              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
-              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
+              `📤 <b>Published from category ${arg}</b>`,
+              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
         return { alert: `❌ No content for ${arg}` };
+        } finally {
+          clearInterval(typingTimer);
+        }
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
@@ -144,6 +135,11 @@ export const manualScreen: Screen = {
         }
         const settings = await ctx.container.config.getSettings(ctx.adminId);
         const lang = settings?.language?.default ?? "auto";
+        // v8.0.0: typing indicator while the pipeline runs.
+        const typingTimer = setInterval(() => {
+          ctx.container.tg.sendChatAction(ctx.chatId, "typing").catch(() => {});
+        }, 4000);
+        try {
         // Try up to 5 items until one passes.
         // NOTE: dedup is now always checked (skipDedup=false). When the
         // first item is a duplicate, the result carries `duplicateOf`
@@ -152,6 +148,7 @@ export const manualScreen: Screen = {
         let result = null;
         let firstDuplicate: { itemId: string; existingId: string; reason: string; item: typeof items[number] } | null = null;
         for (let i = 0; i < Math.min(items.length, 5); i++) {
+          // v8.0.0: skipEnqueue so manual triggers don't pollute the queue.
           const r = await ctx.container.content.process(items[i]!, lang, { skipDedup: false, skipEnqueue: true });
           if (r.ok && r.content) { result = r; break; }
           if (!firstDuplicate && r.duplicateOf) {
@@ -223,29 +220,22 @@ export const manualScreen: Screen = {
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
-              `╔══════════════════════════╗`,
-              `   📤 <b>MANUAL PUBLISH — ${arg}</b>`,
-              `╚══════════════════════════╝`,
-              ``,
-              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
-              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
-              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
-              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
+              `📤 <b>Published from: ${arg}</b>`,
+              `<b>AI:</b> ${result.content.aiProvider}/${result.content.aiModel}`,
+              `<b>Quality:</b> ${result.content.quality.overallScore}`,
+              `<b>Msg ID:</b> ${pubResult.telegramMessageId}`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error ?? "unknown"}` };
         }
         return { alert: `❌ All items rejected` };
+        } finally {
+          clearInterval(typingTimer);
+        }
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }
-    }
-    } finally {
-      // Clear the typing interval when the operation completes.
-      clearInterval(typingInterval);
     }
   },
 };

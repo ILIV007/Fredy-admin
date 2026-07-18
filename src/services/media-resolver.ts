@@ -294,6 +294,12 @@ function isUsableImageUrl(url: string): boolean {
   for (const host of IMAGE_CDN_ALLOWLIST) {
     if (lower.includes(host)) return true;
   }
+  // v8.1.1: Also accept URLs that contain image-like path segments.
+  // Many news sites use URLs like /assets/images/... or /photo/... without
+  // a file extension. These are often valid images.
+  if (lower.match(/\/(image|images|photo|photos|picture|pictures|img|media|thumbnail|thumbnail|asset|assets|cdn)\//)) return true;
+  // v8.1.1: Also accept URLs with image-related query parameters.
+  if (lower.includes("format=") || lower.includes("type=image") || lower.includes("width=")) return true;
   // Default: reject (preserves safety — article URLs won't leak through).
   return false;
 }
@@ -306,4 +312,18 @@ const IMAGE_CDN_ALLOWLIST: readonly string[] = [
   "cdn.sstatic.net",
   "dev-to-uploads.s3.amazonaws.com",
   "res.cloudinary.com",
+  // v8.1.1: Added major news/media CDNs that serve images without extensions.
+  "cdn.cnn.com",
+  "media-cldnry.s-nbcnews.com",
+  "images.foxtv.com",
+  "static.foxnews.com",
+  "media.npr.org",
+  "cdn.vox-cdn.com",
+  "techcrunch.com/wp-content",
+  "venturebeat.com/wp-content",
+  "arstechnica.net/wp-content",
+  "theverge.com/wp-content",
+  "images.unsplash.com",
+  "mshcdn.com",
+  "zmescience.com/wp-content",
 ];

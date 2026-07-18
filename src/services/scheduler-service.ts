@@ -178,31 +178,29 @@ export class SchedulerService {
     };
   }
 
-  /** Find a due, unfired slot.
-   *  v7.4.5: Added grace period — if a slot is more than 30 minutes past due,
-   *  it's marked as "passed" (skipped) instead of fired. This prevents catch-up
-   *  bursts where multiple overdue slots fire back-to-back. */
+  /** Find a due, unfired slot. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
     const GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
-
     for (const slot of plan.slots) {
+      // Check if slot is due (epochMs <= now).
       if (slot.epochMs > now) continue;
 
+      // Check if already fired.
       const fired = await this.deps.dailyPlanner.isSlotFired(slot);
       if (fired) continue;
 
-      // Grace period check — skip slots that are too far past due.
-      const overdueMs = now - slot.epochMs;
-      if (overdueMs > GRACE_PERIOD_MS) {
+      // v8.0.0: 30-minute grace period — if slot is >30min overdue, mark
+      // as "passed" instead of firing (avoids burst-publishing missed slots
+      // after a long scheduler outage).
+      if (now - slot.epochMs > GRACE_PERIOD_MS) {
+        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
           date: slot.date,
           time: slot.time,
-          category: slot.category,
-          overdueMinutes: Math.round(overdueMs / 60_000),
-          message: "Slot past grace period — marking as passed (no catch-up)",
+          reason: "slot_overdue_grace",
+          message: "Slot >30min overdue — marking as passed",
         });
-        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace-period");
         continue;
       }
 
@@ -256,8 +254,6 @@ export class SchedulerService {
     }
 
     // 2. If queue is empty (or all stale), process a fresh item from a plugin.
-    //    v7.4.5: skipEnqueue=true — this content is about to be published
-    //    immediately, so it should NOT also go to the queue.
     if (!content) {
       const pipelineResult = await this.deps.contentManager.processForCategory(
         slot.category,
@@ -393,29 +389,29 @@ export class SchedulerService {
     try {
       finalPost = await this.deps.uxLayer.transform(content);
     } catch (err) {
+      // If even the transform fails, send a minimal plain-text notice.
       this.deps.logger.warn("scheduler.transform_failed", {
         contentId: content.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      // Minimal fallback notice with professional UI.
       await this.deps.tg.sendMessage(adminId, [
-        `🤖 <b>Auto-Publish Notice</b>`,
+        `🤖 <b>Auto-publish notice</b>`,
         ``,
-        `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
-        `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-        `<blockquote>📰 <b>Headline:</b> ${escapeHtml(content.headline ?? "(none)")}</blockquote>`,
-        `<blockquote>🔗 <b>Source:</b> ${escapeHtml(content.sourceUrl ?? "(none)")}</blockquote>`,
+        `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+        `<b>Headline:</b> ${escapeHtml(content.headline ?? "(none)")}`,
+        `<b>URL:</b> ${escapeHtml(content.sourceUrl ?? "(none)")}`,
         pubResult.ok
-          ? `<blockquote>✅ <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-          : `<blockquote>❌ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+          ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+          : `<b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}`,
       ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
       return;
     }
 
-    // 2. Send the formatted post (photo or text). Fall back to text-only if sendPhoto fails.
+    // 2. Send the formatted post (photo or text). Fall back to text-only
+    //    if sendPhoto fails.
     const sentPostNotice = pubResult.ok
-      ? "🤖 <b>📤 Auto-Published Post — Copy of Channel Message:</b>"
-      : "⚠️ <b>Auto-Publish FAILED — Post for Manual Forwarding:</b>";
+      ? "🤖 <b>Auto-published (scheduler) — copy of channel post:</b>"
+      : "⚠️ <b>Auto-publish FAILED — formatted post for manual forwarding:</b>";
 
     try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
@@ -428,58 +424,47 @@ export class SchedulerService {
         });
       }
     } catch (err) {
+      // sendPhoto or sendMessage failed — retry with text-only fallback.
       this.deps.logger.warn("scheduler.send_formatted_failed", {
         contentId: content.id,
         error: err instanceof Error ? err.message : String(err),
       });
       try {
         if (finalPost.media && finalPost.media.type === "image") {
+          // Photo failed — send as text.
           await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
             parse_mode: "HTML",
           });
         }
-      } catch { /* non-fatal */ }
+      } catch { /* non-fatal */
+        // Even text-only failed — give up on the formatted post; the
+        // summary below will still go out.
+      }
     }
 
-    // 3. Send the summary report with professional UI.
-    //    v7.5.0: Blockquotes for each field, status banner, metadata grid.
-    const statusBanner = pubResult.ok
-      ? `╔══════════════════════════╗\n   ✅ <b>AUTO-PUBLISHED SUCCESSFULLY</b>\n╚══════════════════════════╝`
-      : `╔══════════════════════════╗\n   ❌ <b>AUTO-PUBLISH FAILED</b>\n╚══════════════════════════╝`;
-
-    const qualityEmoji = content.quality.overallScore >= 80 ? "🟢" : content.quality.overallScore >= 60 ? "🟡" : "🔴";
-
-    const summaryLines = [
-      statusBanner,
-      ``,
-      `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
-      `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-      `<blockquote>🔌 <b>Source Plugin:</b> ${escapeHtml(content.pluginId)}</blockquote>`,
-      `<blockquote>🤖 <b>AI Model:</b> ${escapeHtml(content.aiProvider)}/${escapeHtml(content.aiModel)}</blockquote>`,
-      `<blockquote>${qualityEmoji} <b>Quality Score:</b> ${content.quality.overallScore}/100</blockquote>`,
-      `<blockquote>📊 <b>Tokens Used:</b> ${content.tokensUsed}</blockquote>`,
-      `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(content.id)}</code></blockquote>`,
+    // 3. Send the summary notification (always — even if the formatted
+    //    post failed to send, this gives the admin the key facts).
+    await this.deps.tg.sendMessage(adminId, [
       pubResult.ok
-        ? `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-        : `<blockquote>⚠️ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
-    ];
-
-    await this.deps.tg.sendMessage(adminId, summaryLines.join("\n"), {
-      parse_mode: "HTML",
-    }).catch(() => {});
+        ? `✅ <b>Auto-published successfully</b>`
+        : `❌ <b>Auto-publish failed</b>`,
+      ``,
+      `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+      `<b>AI:</b> ${escapeHtml(content.aiProvider)}/${escapeHtml(content.aiModel)}`,
+      `<b>Quality:</b> ${content.quality.overallScore}`,
+      `<b>Tokens:</b> ${content.tokensUsed}`,
+      `<b>Content ID:</b> <code>${escapeHtml(content.id)}</code>`,
+      pubResult.ok
+        ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
+        : `<b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}`,
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
-
-  // v8.0.1: private escapeHtml() removed — now imports canonical escapeHtml
-  // from primitives/strings.ts. The private version was incomplete (didn't
-  // escape " or '), and duplicating the utility violated single-source-of-truth.
 
   /**
    * Manual publish — publish a specific category, plugin, or random.
    */
   async manualPublish(options: ManualPublishOptions): Promise<PublishResult> {
     const settings = await this.deps.settings();
-    // v7.4.5: skipEnqueue=true so manual posts don't ALSO go to the queue.
-    const pipelineOptions = { skipEnqueue: true };
 
     // 1. Determine what to publish.
     let pipelineResult;
@@ -488,7 +473,7 @@ export class SchedulerService {
       pipelineResult = await this.deps.contentManager.processFromPlugin(
         options.source,
         options.language ?? settings.language.default,
-        pipelineOptions,
+        { skipEnqueue: true },
       );
     } else if (options.category) {
       // Publish a specific category.
@@ -496,7 +481,7 @@ export class SchedulerService {
         options.category,
         null,
         options.language ?? settings.language.default,
-        pipelineOptions,
+        { skipEnqueue: true },
       );
     } else {
       // Publish random — pick a random enabled category.
@@ -519,7 +504,7 @@ export class SchedulerService {
         randomCat,
         null,
         options.language ?? settings.language.default,
-        pipelineOptions,
+        { skipEnqueue: true },
       );
     }
 
@@ -598,24 +583,20 @@ export class SchedulerService {
     }
     const lastPublished = published[0]?.publishedAt ?? null;
 
-    // v8.0.0: Annotate each slot with its real fired state so the dashboard
-    // can show "✅ Published" vs "⏳ Pending" correctly. Previously, the raw
-    // DailyPlan was returned and SlotTime had no `fired` field — every slot
-    // always showed "Pending" regardless of actual state.
-    let todayAnnotated: (DailyPlan & { slots: SlotTime[] }) | null = null;
+    // v8.0.0: Annotate each slot with `fired` state for the dashboard.
     if (plan) {
       const annotatedSlots = await Promise.all(
-        plan.slots.map(async (s) => ({
-          ...s,
-          fired: await this.deps.dailyPlanner.isSlotFired(s),
-        })),
+        plan.slots.map(async (s) => {
+          const fired = await this.deps.dailyPlanner.isSlotFired(s);
+          return { ...s, fired };
+        }),
       );
-      todayAnnotated = { ...plan, slots: annotatedSlots };
+      plan = { ...plan, slots: annotatedSlots };
     }
 
     return {
       enabled: settings.scheduler.enabled,
-      today: todayAnnotated,
+      today: plan,
       nextSlot,
       queueDepth: totalQueue,
       lastFiredAt: lastPublished,

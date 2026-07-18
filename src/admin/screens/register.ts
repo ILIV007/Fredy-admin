@@ -13,11 +13,12 @@ import {
   aiScreen,
   manualScreen,
   scheduleScreen,
-  languageScreen,
   soulScreen,
   debugScreen,
   statsScreen,
   editorScreen,
+  languageScreen,
+  strategyScreen,
 } from "./index";
 
 export function registerScreens(registry: ScreenRegistry): void {
@@ -28,9 +29,10 @@ export function registerScreens(registry: ScreenRegistry): void {
   registry.register(aiScreen);
   registry.register(manualScreen);
   registry.register(scheduleScreen);
-  registry.register(languageScreen);
   registry.register(soulScreen);
   registry.register(debugScreen);
   registry.register(statsScreen);
   registry.register(editorScreen);
+  registry.register(languageScreen);
+  registry.register(strategyScreen);
 }

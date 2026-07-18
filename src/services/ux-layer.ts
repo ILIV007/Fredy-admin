@@ -36,18 +36,18 @@ export class UXLayerImpl implements UXLayer {
     const hook = (content.headline ?? content.text?.split("\n")[0] ?? "").trim();
 
     // 2. Body = AI text (full, no truncation, no URL stripping).
+    //    If AI didn't run (format-only), body = content.text as-is.
     const body = (content.text ?? "").trim();
+    // Apply Persian half-space fixing if language is fa.
     const fixedBody = content.language === "fa" ? fixPersianHalfSpaces(body) : body;
 
     // 3. Source line with random emoji.
     const { emoji } = await this.deps.sourceFormatter.buildFooter();
 
-    // 4. Assemble the full text — with body pre-truncated so source/footer always survive.
-    //    v7.4.5: Previously, safeTruncate(fullText, 4096) was applied AFTER assembly,
-    //    which meant long bodies could cut off the source blockquote and @ILIVIR3 footer.
-    //    Now we compute the overhead (hook + source + footer) and truncate the BODY
-    //    to fit within the limit, THEN assemble. Source and footer are ALWAYS present.
+    // 4. Assemble the full text.
     const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_TEXT_LIMIT);
+
+    // 5. Caption for image posts (shorter).
     const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_CAPTION_LIMIT);
 
     return {
@@ -77,10 +77,8 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble the full post text.
-   *  v7.5.0: Body is preserved as-is whenever possible. Only when the
-   *  assembled text would exceed Telegram's 4096-char limit do we
-   *  truncate — and we truncate at paragraph/sentence boundaries with
-   *  a clear continuation marker, never mid-word with bare "...". */
+   *  v8.0.0: Pre-truncates the body to fit within maxLen — try full first,
+   *  only truncate if the assembled text exceeds the limit. */
   private assembleFullText(
     hook: string,
     body: string,
@@ -88,78 +86,57 @@ export class UXLayerImpl implements UXLayer {
     emoji: string,
     maxLen: number,
   ): string {
-    const hasHook = hook && body && !body.startsWith(hook);
-    const hasSource = sourceUrl && this.isLinkableUrl(sourceUrl);
-
-    const beforeBody = hasHook ? `<b>${escapeHtml(hook)}</b>\n\n` : "";
-    const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
-      + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
-
-    // First, try assembling with the FULL body — no truncation.
-    const bodyHtml = this.formatBody(body);
-    const fullResult = beforeBody + bodyHtml + afterBody;
-
-    // If it fits, we're done — no truncation needed.
-    if (fullResult.length <= maxLen) {
-      return fullResult;
+    // First, try the full body — most posts fit within the Telegram limit.
+    const fullAttempt = this.buildFullTextParts(hook, body, sourceUrl, emoji);
+    if (fullAttempt.length <= maxLen) {
+      return fullAttempt;
     }
 
-    // Otherwise, we need to truncate the body. Compute the budget for
-    // the raw (pre-HTML) body text. We leave a small safety margin for
-    // HTML tags that formatBody will add.
-    const overheadLen = beforeBody.length + afterBody.length;
-    const bodyBudget = maxLen - overheadLen;
-    const safetyMargin = 150; // buffer for HTML tags added by formatBody
-    const rawBudget = Math.max(200, bodyBudget - safetyMargin);
+    // Need to truncate the body. Reserve space for hook + footer + overhead.
+    const footer = this.buildFooter(sourceUrl, emoji);
+    const hookBlock = this.buildHookBlock(hook, body);
+    const overhead = hookBlock.length + footer.length + 4; // newlines + safety margin
+    const bodyBudget = Math.max(200, maxLen - overhead);
 
-    const truncatedBody = this.summarizeText(body, rawBudget);
-    const truncatedBodyHtml = this.formatBody(truncatedBody);
-    const truncatedResult = beforeBody + truncatedBodyHtml + afterBody;
-
-    // Final safety — if still over limit, hard-truncate the HTML body
-    // but ALWAYS keep source + footer.
-    if (truncatedResult.length > maxLen) {
-      const bodyMax = maxLen - beforeBody.length - afterBody.length;
-      const safeBody = this.safeTruncate(truncatedBodyHtml, bodyMax > 100 ? bodyMax : 100);
-      return beforeBody + safeBody + afterBody;
-    }
-
-    return truncatedResult;
+    const truncatedBody = this.summarizeText(body, bodyBudget);
+    return this.buildFullTextParts(hook, truncatedBody, sourceUrl, emoji);
   }
 
-  /** Summarize text by truncating at paragraph/sentence boundaries.
-   *  v7.5.0: Cleaner truncation — tries paragraph → sentence → word → hard.
-   *  Uses "…" (single ellipsis) as a subtle continuation marker instead
-   *  of a long Persian phrase. */
-  private summarizeText(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text;
-
-    // 1. Try to cut at the last paragraph break (double newline) before maxLen.
-    const paraCut = text.lastIndexOf("\n\n", maxLen);
-    if (paraCut > maxLen * 0.5) {
-      return text.slice(0, paraCut).trimEnd() + "\n\n…";
+  /** Build the full text parts (helper used by assembleFullText). */
+  private buildFullTextParts(hook: string, body: string, sourceUrl: string, emoji: string): string {
+    const parts: string[] = [];
+    if (hook && body && !body.startsWith(hook)) {
+      parts.push(`<b>${escapeHtml(hook)}</b>`);
+      parts.push("");
     }
+    parts.push(this.formatBody(body));
+    parts.push(...this.buildFooterParts(sourceUrl, emoji));
+    return parts.join("\n");
+  }
 
-    // 2. Try to cut at the last sentence end (. ! ? ؟).
-    const sentenceEnd = Math.max(
-      text.lastIndexOf(". ", maxLen),
-      text.lastIndexOf("! ", maxLen),
-      text.lastIndexOf("? ", maxLen),
-      text.lastIndexOf("؟ ", maxLen),
-      text.lastIndexOf(".\n", maxLen),
-    );
-    if (sentenceEnd > maxLen * 0.5) {
-      return text.slice(0, sentenceEnd + 1).trimEnd() + " …";
+  /** Build the hook block (used for overhead calculation). */
+  private buildHookBlock(hook: string, body: string): string {
+    if (hook && body && !body.startsWith(hook)) {
+      return `<b>${escapeHtml(hook)}</b>\n\n`;
     }
+    return "";
+  }
 
-    // 3. Try to cut at the last word boundary (space).
-    const wordEnd = text.lastIndexOf(" ", maxLen);
-    if (wordEnd > maxLen * 0.5) {
-      return text.slice(0, wordEnd).trimEnd() + " …";
+  /** Build the footer string. */
+  private buildFooter(sourceUrl: string, emoji: string): string {
+    return this.buildFooterParts(sourceUrl, emoji).join("\n");
+  }
+
+  /** Build the footer parts array. */
+  private buildFooterParts(sourceUrl: string, emoji: string): string[] {
+    const parts: string[] = [];
+    if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
+      parts.push("");
+      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
     }
-
-    // 4. Last resort: hard cut.
-    return text.slice(0, maxLen).trimEnd() + "…";
+    parts.push("");
+    parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
+    return parts;
   }
 
   /** Convert AI markdown to Telegram HTML.
@@ -268,7 +245,7 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble a shorter caption for image posts.
-   *  v7.4.5: Uses the same pre-truncation pattern as assembleFullText. */
+   *  v8.0.0: Pre-truncates the body to fit within maxLen. */
   private assembleCaption(
     hook: string,
     body: string,
@@ -276,35 +253,77 @@ export class UXLayerImpl implements UXLayer {
     emoji: string,
     maxLen: number,
   ): string {
-    const hasHook = hook && body && !body.startsWith(hook);
-    const hasSource = sourceUrl && this.isLinkableUrl(sourceUrl);
-
-    const beforeBody = hasHook ? `<b>${escapeHtml(hook)}</b>\n\n` : "";
-    const afterBody = (hasSource ? `\n\n<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>` : "")
-      + `\n\n<blockquote>🌀 &#64;ILIVIR3</blockquote>`;
-
-    const overheadLen = beforeBody.length + afterBody.length;
-    const bodyBudget = maxLen - overheadLen;
-
-    // For captions, always limit body to 800 chars, but ensure source + footer fit.
-    const captionBodyLimit = Math.min(bodyBudget > 0 ? bodyBudget : 800, 800);
-    let shortBody = body;
-    if (body.length > captionBodyLimit) {
-      const safetyMargin = 200;
-      const rawBudget = Math.max(100, captionBodyLimit - safetyMargin);
-      shortBody = this.summarizeText(body, rawBudget);
+    // First, try the full body — most captions fit within the limit.
+    const fullAttempt = this.buildCaptionParts(hook, body, sourceUrl, emoji);
+    if (fullAttempt.length <= maxLen) {
+      return fullAttempt;
     }
 
-    const bodyHtml = this.formatBody(shortBody);
-    const result = beforeBody + bodyHtml + afterBody;
+    // Need to truncate the body. Reserve space for hook + footer + overhead.
+    const footer = this.buildFooter(sourceUrl, emoji);
+    const hookBlock = this.buildHookBlock(hook, body);
+    const overhead = hookBlock.length + footer.length + 4;
+    const bodyBudget = Math.max(150, maxLen - overhead);
 
-    if (result.length > maxLen) {
-      const bodyMax = maxLen - beforeBody.length - afterBody.length;
-      const safeBody = this.safeTruncate(bodyHtml, bodyMax > 100 ? bodyMax : 100);
-      return beforeBody + safeBody + afterBody;
+    const truncatedBody = this.summarizeText(body, bodyBudget);
+    return this.buildCaptionParts(hook, truncatedBody, sourceUrl, emoji);
+  }
+
+  /** Build caption parts (helper). */
+  private buildCaptionParts(hook: string, body: string, sourceUrl: string, emoji: string): string {
+    const parts: string[] = [];
+    if (hook && body && !body.startsWith(hook)) {
+      parts.push(`<b>${escapeHtml(hook)}</b>`);
+      parts.push("");
+    }
+    parts.push(this.formatBody(body));
+    parts.push(...this.buildFooterParts(sourceUrl, emoji));
+    return parts.join("\n");
+  }
+
+  /** Summarize text to fit within maxLen.
+   *  Truncates at paragraph boundary first, then sentence, then word.
+   *  Appends "…" marker if truncated. */
+  private summarizeText(text: string, maxLen: number): string {
+    if (text.length <= maxLen) return text;
+
+    const MARKER = "…";
+    const target = Math.max(20, maxLen - MARKER.length);
+
+    // Try paragraph boundary first (double newline).
+    const paragraphs = text.split(/\n\n+/);
+    if (paragraphs.length > 1) {
+      let result = "";
+      for (const para of paragraphs) {
+        const candidate = result ? `${result}\n\n${para}` : para;
+        if (candidate.length <= target) {
+          result = candidate;
+        } else {
+          break;
+        }
+      }
+      if (result.length > 0 && result.length < text.length) {
+        return result + MARKER;
+      }
     }
 
-    return result;
+    // Try sentence boundary (period, exclamation, question mark followed by space).
+    const sentenceEnd = text.lastIndexOf(". ", target);
+    const exclEnd = text.lastIndexOf("! ", target);
+    const questEnd = text.lastIndexOf("? ", target);
+    const bestSentence = Math.max(sentenceEnd, exclEnd, questEnd);
+    if (bestSentence > target * 0.5) {
+      return text.slice(0, bestSentence + 1) + MARKER;
+    }
+
+    // Fall back to word boundary.
+    const wordEnd = text.lastIndexOf(" ", target);
+    if (wordEnd > target * 0.5) {
+      return text.slice(0, wordEnd) + MARKER;
+    }
+
+    // Last resort: hard cut.
+    return text.slice(0, target) + MARKER;
   }
 
   /** Check if a URL has a meaningful path (not just "/"). */
@@ -317,39 +336,6 @@ export class UXLayerImpl implements UXLayer {
     } catch { /* non-fatal */
       return false;
     }
-  }
-
-
-  /** Truncate HTML text safely — closes any open tags. */
-  private safeTruncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text;
-    let truncated = text.slice(0, maxLen);
-    // Find last complete tag boundary.
-    const lastTagStart = truncated.lastIndexOf("<");
-    const lastTagEnd = truncated.lastIndexOf(">");
-    if (lastTagStart > lastTagEnd) {
-      // We're inside a tag — cut back to before it.
-      truncated = truncated.slice(0, lastTagStart);
-    }
-    // Close any open tags.
-    const openTags: string[] = [];
-    const tagRegex = /<(\/?)(b|i|u|s|code|pre|blockquote|a)\b[^>]*>/gi;
-    let match;
-    while ((match = tagRegex.exec(truncated)) !== null) {
-      const isClosing = match[1] === "/";
-      const tag = (match[2] ?? "").toLowerCase();
-      if (isClosing) {
-        const idx = openTags.lastIndexOf(tag);
-        if (idx >= 0) openTags.splice(idx, 1);
-      } else {
-        openTags.push(tag);
-      }
-    }
-    // Close remaining open tags in reverse order.
-    for (let i = openTags.length - 1; i >= 0; i--) {
-      truncated += `</${openTags[i]}>`;
-    }
-    return truncated;
   }
 
   // escapeHtml is imported from primitives/strings.ts — single source of truth.

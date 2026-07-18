@@ -70,79 +70,67 @@ export class ContentQueue {
   }
 
   /** Dequeue the oldest item for a category.
-   *  v8.0.0: Now wrapped in a per-category KV lock to prevent the race
-   *  condition where two concurrent callers (e.g. Force Publish + auto tick)
-   *  both read the same queue, both take the same item, and both publish it.
-   *  The lock is short-lived (5s) since this operation is fast. */
+   *  v8.0.0: Wrapped in a per-category lock to prevent concurrent dequeues
+   *  racing on the same KV key. */
   async dequeue(category: Category): Promise<QueuedContent | null> {
-    const lockKey = `fredy:queue:lock:${category}`;
-    const lock = await this.acquireQueueLock(lockKey, 5);
-    if (!lock.acquired) {
-      this.deps.logger.warn("quality.reject", {
-        category,
-        reason: "queue_lock_held",
-        message: "Queue lock held — another dequeue in progress",
-      });
-      return null;
-    }
+    const release = await this.acquireQueueLock(category);
     try {
-      const queue = await this.getQueue(category);
-      if (queue.length === 0) return null;
-
-      const item = queue.shift();
-      if (!item) return null;
-
-      // Check if expired.
-      if (Date.now() > item.expiresAt) {
-        this.deps.logger.warn("quality.reject", {
-          contentId: item.id,
-          category: item.category,
-          reason: "expired",
-        });
-        await this.saveQueue(category, queue);
-        // Try the next one (still holding the lock).
-        return this.dequeueLocked(category);
-      }
-
-      await this.saveQueue(category, queue);
-      return item;
+      return await this.dequeueLocked(category);
     } finally {
-      await lock.release();
+      await release();
     }
   }
 
-  /** Internal dequeue without lock — called while holding the lock. */
+  /** Internal: dequeue without re-acquiring the lock (caller holds the lock). */
   private async dequeueLocked(category: Category): Promise<QueuedContent | null> {
     const queue = await this.getQueue(category);
     if (queue.length === 0) return null;
+
     const item = queue.shift();
     if (!item) return null;
+
+    // Check if expired.
     if (Date.now() > item.expiresAt) {
+      this.deps.logger.warn("quality.reject", {
+        contentId: item.id,
+        category: item.category,
+        reason: "expired",
+      });
       await this.saveQueue(category, queue);
-      return this.dequeueLocked(category);
+      return this.dequeueLocked(category); // Try the next one.
     }
+
     await this.saveQueue(category, queue);
     return item;
   }
 
-  /** Acquire a short-lived KV lock for a queue category. */
-  private async acquireQueueLock(lockKey: string, timeoutSec: number): Promise<{ acquired: boolean; release: () => Promise<void> }> {
-    try {
-      const existing = await this.deps.kv.get(lockKey);
-      if (existing) {
-        return { acquired: false, release: async () => {} };
+  /** Acquire a per-category queue lock. Returns a release function. */
+  private async acquireQueueLock(category: Category): Promise<() => Promise<void>> {
+    const key = `fredy:queue:lock:${category}`;
+    const maxAttempts = 30;
+    const delayMs = 100;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const existing = await this.deps.kv.get(key);
+        if (!existing) {
+          await this.deps.kv.set(key, String(Date.now()), 10);
+          return async () => {
+            try { await this.deps.kv.delete(key); } catch { /* non-fatal */ }
+          };
+        }
+      } catch {
+        // On KV error, allow execution (no-op release).
+        return async () => {};
       }
-      await this.deps.kv.set(lockKey, String(Date.now()), timeoutSec);
-      return {
-        acquired: true,
-        release: async () => {
-          try { await this.deps.kv.delete(lockKey); } catch { /* non-fatal */ }
-        },
-      };
-    } catch {
-      // On KV error, allow execution (don't permanently block the queue).
-      return { acquired: true, release: async () => {} };
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+    // Timed out waiting for lock — proceed anyway with no-op release.
+    this.deps.logger.warn("pipeline.warn", {
+      category,
+      reason: "queue_lock_timeout",
+      message: "Queue lock acquisition timed out — proceeding without lock",
+    });
+    return async () => {};
   }
 
   /** Peek at the oldest item without removing it. */
