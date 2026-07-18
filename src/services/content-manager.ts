@@ -197,7 +197,46 @@ export class ContentManager {
       message: "Candidate ranked",
     });
 
-    // ── Stage 10: AI Generate ──────────────────────────────
+    // ── Stage 10: AI Generate (or format-only for NASA) ───
+    // v8.1.3: NASA posts bypass AI entirely — just use the title as the
+    // topic line. The user wants NASA posts to be simple: one English
+    // line + source + footer + beautiful image. No AI rewriting needed.
+    if (resolvedItem.pluginId === "nasa") {
+      try {
+        const readyContent = await this.deps.formatter.buildReadyContent(
+          resolvedItem,
+          {
+            text: resolvedItem.title, // Just the title as the body
+            aiConfidence: 100,
+            generatedLanguage: "en",
+            headline: resolvedItem.title,
+            notes: "nasa-format-only (no AI)",
+          },
+          {
+            passed: true,
+            overallScore: 95, // High score — NASA content is always good
+            dimensionScores: [],
+            hardReject: false,
+            minScore: settings.ai.qualityThreshold,
+          } as never,
+          "nasa-direct",
+          "none",
+          0,
+          0,
+        );
+        if (!skipDedup) await this.deps.duplicateDetector.record(item);
+        if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
+        return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
+          error: "NASA direct (no AI needed)",
+          attempts: [],
+          usedFallback: true,
+          fallbackReason: "NASA direct (no AI needed)",
+        } };
+      } catch (error) {
+        return this.reject("format", "ai_failed", `NASA format failed: ${this.errMsg(error)}`, item);
+      }
+    }
+
     const soul = await this.deps.soul.load();
     const aiResult = await this.deps.ai.generate({
       category: resolvedItem.category,

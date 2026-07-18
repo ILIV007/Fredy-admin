@@ -270,6 +270,17 @@ export class SchedulerService {
           message: "No content available — skipping slot",
         });
 
+        // v8.1.3: Send failure report to admin PM.
+        // When a scheduled post fails (duplicate, low score, pipeline error),
+        // send a report to the admin so they know what happened.
+        const failItem = pipelineResult.item ? {
+          id: pipelineResult.item.id,
+          title: pipelineResult.item.title,
+          url: pipelineResult.item.url,
+          source: pipelineResult.item.pluginId,
+        } : null;
+        await this.notifyAdminOfFailure(slot, pipelineResult.error ?? "Pipeline failed", failItem).catch(() => {});
+
         // Mark slot as fired (to avoid retrying with no content).
         await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
 
@@ -458,6 +469,52 @@ export class SchedulerService {
         ? `<b>Channel Msg ID:</b> ${pubResult.telegramMessageId}`
         : `<b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}`,
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+  }
+
+  /**
+   * v8.1.3: Notify admin when a scheduled post FAILS to publish.
+   * Sends a report with the failure reason + the source item info (if available)
+   * so the admin can see what would have been published and decide whether
+   * to manually trigger it.
+   */
+  private async notifyAdminOfFailure(
+    slot: SlotTime,
+    error: string,
+    item?: { id?: string; title?: string; url?: string; source?: string } | null,
+  ): Promise<void> {
+    const adminId = this.deps.adminId?.() ?? 0;
+    if (adminId <= 0 || !this.deps.tg) return;
+
+    const statusBanner = `╔══════════════════════════╗\n   ⚠️ SCHEDULED POST FAILED\n╚══════════════════════════╝`;
+
+    const lines = [
+      statusBanner,
+      ``,
+      `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
+      `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+      `<blockquote>❌ <b>Error:</b> ${escapeHtml(error)}</blockquote>`,
+    ];
+
+    if (item) {
+      lines.push(``);
+      lines.push(`<blockquote>📰 <b>Title:</b> ${escapeHtml(item.title ?? "(none)")}</blockquote>`);
+      if (item.source) {
+        lines.push(`<blockquote>🔌 <b>Source:</b> ${escapeHtml(item.source)}</blockquote>`);
+      }
+      if (item.url) {
+        lines.push(`<blockquote>🔗 <b>URL:</b> ${escapeHtml(item.url)}</blockquote>`);
+      }
+      if (item.id) {
+        lines.push(`<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(item.id)}</code></blockquote>`);
+      }
+    }
+
+    lines.push(``);
+    lines.push(`<blockquote>💡 <i>The admin can manually trigger a post from the bot if desired.</i></blockquote>`);
+
+    await this.deps.tg.sendMessage(adminId, lines.join("\n"), {
+      parse_mode: "HTML",
+    }).catch(() => {});
   }
 
   /**
