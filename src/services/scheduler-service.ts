@@ -209,26 +209,48 @@ export class SchedulerService {
     };
   }
 
-  /** Find a due, unfired slot. */
+  /** Find a due, unfired slot.
+   *  v8.5.1: When using strategyEngine plan, check the post's `status` field
+   *  directly (not dailyPlanner.isSlotFired). This ensures the Daily Plan
+   *  status is the single source of truth — if a post is "published" or
+   *  "failed" in the strategy plan, it's skipped. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
     const GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
+
+    // v8.5.1: If using strategyEngine, get the plan to check post statuses.
+    let stratPlan: import("../types/strategy").DailyPublishPlan | null = null;
+    if (this.deps.strategyEngine) {
+      try {
+        stratPlan = await this.deps.strategyEngine.getOrGeneratePlan();
+      } catch { /* non-fatal */ }
+    }
+
     for (const slot of plan.slots) {
       // Check if slot is due (epochMs <= now).
       if (slot.epochMs > now) continue;
 
-      // Check if already fired.
-      const fired = await this.deps.dailyPlanner.isSlotFired(slot);
-      if (fired) continue;
+      // v8.5.1: Check if already fired — use strategy plan status if available,
+      // otherwise fall back to dailyPlanner.isSlotFired().
+      let alreadyFired = false;
+      if (stratPlan) {
+        const post = stratPlan.posts.find(p => p.index === slot.index);
+        if (post && (post.status === "published" || post.status === "failed")) {
+          alreadyFired = true;
+        }
+      } else {
+        alreadyFired = await this.deps.dailyPlanner.isSlotFired(slot);
+      }
+      if (alreadyFired) continue;
 
       // v8.0.0: 30-minute grace period — if slot is >30min overdue, mark
       // as "passed" instead of firing (avoids burst-publishing missed slots
       // after a long scheduler outage).
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
-        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
-        // v8.2.1: Mark strategy plan post as failed (passed) too.
+        // v8.5.1: Mark as failed in strategy plan (not dailyPlanner).
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
         }
+        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
           date: slot.date,
