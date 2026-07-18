@@ -1302,7 +1302,7 @@ async function postToChannel(pluginId){
     let contentHtml="";
     if(d.content){
       contentHtml='<div class="card" style="margin-top:8px"><h4 style="margin-bottom:6px">📝 Content Published</h4>'+
-        '<div style="font-size:12px;color:var(--text2);margin-bottom:4px"><b>Plugin:</b> '+d.content.pluginId+' · <b>Category:</b> '+d.content.category+' · <b>AI:</b> '+d.content.aiProvider+'/'+d.content.aiModel+' · <b>Score:</b> '+d.content.qualityScore+' · <b>Tokens:</b> '+d.content.tokensUsed+'</div>'+
+        '<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🔌 <b>Plugin:</b> '+d.content.pluginId+' · 🏷️ <b>Category:</b> '+d.content.category+' · 🤖 <b>AI:</b> '+d.content.aiProvider+'/'+d.content.aiModel+' · '+(d.content.qualityScore>=80?'🟢':d.content.qualityScore>=60?'🟡':'🔴')+' <b>Score:</b> '+d.content.qualityScore+'/100 · 📊 <b>Tokens:</b> '+d.content.tokensUsed+'</div>'+
         '<div style="background:var(--surface2);padding:8px;border-radius:4px;font-size:12px;max-height:200px;overflow-y:auto">'+escapeHtml(d.content.textPreview||'')+'</div></div>';
     }
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ Posted Successfully':'❌ Post Failed')+'</h3><span class="badge '+(ok?'badge-green':'badge-red')+'">'+pluginId+'</span></div>'+
