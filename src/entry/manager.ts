@@ -768,12 +768,10 @@ export async function managerHandler(
       };
 
       // ── Duplicate fallback: send to admin PM with a "duplicate" label ──
-      // The user wants: if a manually-triggered post would be a duplicate,
-      // do NOT publish to channel. Instead, send the FORMATTED POST itself
-      // to admin PM (so the admin can just forward it) followed by a
-      // duplicate notice. The previous approach only sent a notice with
-      // a /force_url command that never actually worked.
-      if (!result && firstDuplicate) {
+      // v9.0.2: Only send duplicate formatted post if ALL items were genuine duplicates.
+      // If some failed due to KV quota, don't send the duplicate formatted post.
+      const allDupsForFallback = attempts.length > 0 && attempts.every(a => a.isDuplicate);
+      if (!result && firstDuplicate && allDupsForFallback) {
         const adminId = Number(env.ADMIN_ID ?? "0");
         const dupItem = firstDuplicate.item;
         report["ok"] = false;
@@ -829,11 +827,22 @@ export async function managerHandler(
 
       if (!result || !result.content) {
         report["ok"] = false;
-        report["error"] = `All ${attempts.length} items were rejected (quality or processing failed)`;
 
-        // v8.10.2: Check if any item failed due to KV quota — notify admin.
-        const kvError = attempts.find(a => a.error?.includes("KV put() limit") || a.error?.includes("quota"));
-        if (kvError) {
+        // v9.0.2: Fix false "duplicate" report.
+        // Check if ALL items were duplicates, or if some failed for other reasons (KV quota, etc.).
+        const allDuplicates = attempts.length > 0 && attempts.every(a => a.isDuplicate);
+        const hasKvError = attempts.some(a => a.error?.includes("KV put() limit") || a.error?.includes("quota"));
+
+        if (allDuplicates && firstDuplicate) {
+          // All items were genuinely duplicates.
+          report["duplicate"] = true;
+          report["error"] = `All ${attempts.length} items were duplicates of previously-published content`;
+          report["duplicateOf"] = firstDuplicate;
+        } else if (hasKvError) {
+          // Some items failed due to KV quota.
+          report["error"] = `Processing failed: KV daily write limit exceeded. ${attempts.filter(a => a.isDuplicate).length} duplicates, ${attempts.filter(a => !a.isDuplicate).length} KV errors.`;
+
+          // Notify admin about KV quota.
           const adminId = Number(env.ADMIN_ID ?? "0");
           if (adminId > 0) {
             await container.tg.sendMessage(adminId, [
@@ -841,11 +850,19 @@ export async function managerHandler(
               `<b>━━━ ⚠️ KV QUOTA EXCEEDED ━━━</b>`,
               ``,
               ``,
-              `<blockquote>❌ <b>Error:</b> ${escapeHtml(kvError.error ?? "KV quota exceeded")}</blockquote>`,
+              `<blockquote>❌ <b>Error:</b> KV daily write limit exceeded</blockquote>`,
               `<blockquote>📅 <b>Time:</b> ${new Date().toISOString()}</blockquote>`,
-              `<blockquote>💡 <b>Action:</b> KV daily write limit (1000) exceeded. Publishing will resume after midnight UTC reset.</blockquote>`,
+              `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
+              `<blockquote>💡 <b>Action:</b> Publishing will resume after midnight UTC reset.</blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
           }
+        } else if (firstDuplicate) {
+          // Mixed: some duplicates, some other errors.
+          report["duplicate"] = true;
+          report["error"] = `Processing failed: ${attempts.filter(a => a.isDuplicate).length} duplicates, ${attempts.filter(a => !a.isDuplicate).length} other errors`;
+          report["duplicateOf"] = firstDuplicate;
+        } else {
+          report["error"] = `All ${attempts.length} items were rejected (quality or processing failed)`;
         }
 
         return json(report);
