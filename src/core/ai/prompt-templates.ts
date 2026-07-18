@@ -48,7 +48,7 @@ FORMATTING RULES (use these to make posts readable):
 CODE FORMATTING (IMPORTANT — Telegram renders these as code blocks):
 - Wrap code in triple backticks for multi-line code blocks:
   \`\`\`
-  npm install foo
+  npm install foo-bar
   \`\`\`
 - Wrap inline code/identifiers in single backticks:
   \`Result<T, Uninhabited>\`  \`dead_code_pub_in_binary\`  \`src/index.ts\`
@@ -63,6 +63,20 @@ CODE FORMATTING (IMPORTANT — Telegram renders these as code blocks):
 - This makes technical posts scannable and visually clean.
 - Do NOT use markdown headings (#, ##). Telegram doesn't render them.
 - Do NOT use markdown links [text](url). The system adds source links separately.
+
+COMMAND COMPLETENESS (CRITICAL):
+- NEVER write a bare command like "npm install" without the package name.
+- If the source mentions "npm install", find the package name from context and include it.
+  BAD: "Run \`npm install\` to install dependencies."
+  GOOD: "Run \`npm install express\` to add Express to your project."
+- If the package name is not available in the source, write a descriptive sentence instead:
+  BAD: "Install with \`npm install\`."
+  GOOD: "Install the package using npm or your preferred package manager."
+- For GitHub repos, include the repo name in install commands:
+  BAD: "Clone and \`npm install\`."
+  GOOD: "Clone the repo and run \`npm install\` to install dependencies from package.json."
+- ALWAYS preserve the FULL command from the source exactly as written.
+  If the source says "pip install fastapi", write \`pip install fastapi\` — never \`pip install\`.
 
 GENERAL:
 - Use line breaks between paragraphs for readability.
