@@ -1314,7 +1314,7 @@ async function loadScheduler(){
     st.today.slots.map((sl,i)=>'<tr><td>'+i+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+(sl.fired?'<span class="badge badge-green">✅ Published</span>':'<span class="badge badge-yellow">⏳ Pending</span>')+'</td></tr>').join("")+
     '</tbody></table></div>';
   }else{
-    scheduleHtml='<div class="card"><p style="color:var(--red)">⚠️ Could not generate today\'s plan. Check scheduler settings.</p></div>';
+    scheduleHtml='<div class="card"><p style="color:var(--red)">⚠️ Could not generate today'+ "'" +'s plan. Check scheduler settings.</p></div>';
   }
   // Also fetch recent history for post history table
   let historyHtml='';

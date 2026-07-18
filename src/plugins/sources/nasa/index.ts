@@ -2,11 +2,9 @@
  * src/plugins/sources/nasa/index.ts
  * NASA APOD content source plugin.
  *
- * Fetches Astronomy Picture of the Day from NASA.
- * Category C (science / astronomy / inspiration).
- *
- * GET https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY
- * Free tier: 1000 req/day, 30 req/min (DEMO_KEY), or 1000/hr with personal key.
+ * v8.1.2: Simplified — fetches ONLY today's APOD (1 item, not 3).
+ * Always English. The post should be just one line of English text
+ * + source + footer. No extra content needed.
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -32,9 +30,9 @@ interface APODResponse {
   date?: string;
   title?: string;
   explanation?: string;
-  url?: string;          // low-res image or video thumbnail
-  hdurl?: string;        // high-res image
-  media_type?: string;   // "image" or "video"
+  url?: string;
+  hdurl?: string;
+  media_type?: string;
   service_version?: string;
   copyright?: string;
 }
@@ -58,93 +56,75 @@ export class NasaPlugin implements Plugin {
       return cached;
     }
 
-    // Use personal API key if available, else DEMO_KEY
     const apiKey = this.deps.env.NASA_API_KEY || "DEMO_KEY";
 
-    // Try today + previous 2 days as fallback (in case today's APOD
-    // fails or is unavailable). We keep BOTH image AND video APODs —
-    // the user said beautiful videos are OK. The post will be sent
-    // as a link post for videos (no photo), and as a photo post for
-    // images. The AI caption is short either way.
-    const items: SourceItem[] = [];
-    for (let i = 0; i < 3; i++) {
-      const date = new Date(Date.now() - i * 24 * 3600 * 1000).toISOString().split("T")[0]!;
-      try {
-        const params = new URLSearchParams({ api_key: apiKey, date });
-        const url = `${NASA_API}?${params.toString()}`;
+    // v8.1.2: Only fetch TODAY's APOD — one item, always English.
+    const date = new Date().toISOString().split("T")[0]!;
+    try {
+      const params = new URLSearchParams({ api_key: apiKey, date });
+      const url = `${NASA_API}?${params.toString()}`;
 
-        const res = await fetch(url, {
-          headers: { "User-Agent": "FredyBot/1.0 (Cloudflare Workers)" },
-        });
+      const res = await fetch(url, {
+        headers: { "User-Agent": "FredyBot/1.0 (Cloudflare Workers)" },
+      });
 
-        if (!res.ok) {
-          this.deps.logger.warn("source.fetch_error", {
-            plugin: "nasa", date, status: res.status,
-          });
-          continue;
-        }
-
-        const apod = await res.json() as APODResponse;
-
-        // Require a URL (either image url/hdurl or video url).
-        if (!apod.url) {
-          this.deps.logger.warn("source.fetch_error", {
-            plugin: "nasa", date, reason: "missing url",
-          });
-          continue;
-        }
-
-        items.push(this.normalize(apod));
-
-        // Stop early once we have 2 APODs (enough variety).
-        if (items.length >= 2) break;
-      } catch (error) {
+      if (!res.ok) {
         this.deps.logger.warn("source.fetch_error", {
-          plugin: "nasa", date,
-          error: error instanceof Error ? error.message : String(error),
+          plugin: "nasa", date, status: res.status,
         });
+        return [];
       }
-    }
 
-    if (items.length === 0) {
+      const apod = await res.json() as APODResponse;
+
+      if (!apod.url) {
+        this.deps.logger.warn("source.fetch_error", {
+          plugin: "nasa", date, reason: "missing url",
+        });
+        return [];
+      }
+
+      const items = [this.normalize(apod)];
+
+      // Cache the result
+      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "nasa",
+        itemCount: items.length,
+        title: items[0]?.title,
+        mediaType: (items[0]?.metadata as Record<string, unknown>)?.mediaType,
+      });
+
+      return items;
+    } catch (error) {
       this.deps.logger.warn("source.fetch_error", {
-        plugin: "nasa", reason: "No APODs found in the last 3 days",
+        plugin: "nasa", date,
+        error: error instanceof Error ? error.message : String(error),
       });
       return [];
     }
-
-    // Cache the result
-    await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
-
-    this.deps.logger.info("source.fetch_success", {
-      plugin: "nasa",
-      itemCount: items.length,
-      titles: items.map((i) => i.title),
-      mediaTypes: items.map((i) => (i.metadata as Record<string, unknown>)?.mediaType),
-    });
-
-    return items;
   }
 
   normalize(raw: unknown): SourceItem {
     const apod = raw as APODResponse;
     const mediaType = apod.media_type ?? "image";
-    // For images: use the STANDARD resolution url (not hdurl).
-    // HD images from NASA can be 5-10MB which Telegram's sendPhoto
-    // rejects (5MB limit for URL-based photos). The standard url is
-    // typically ~1024px which is perfect for Telegram.
-    // For videos: use the video URL (YouTube link) — the post will be
-    // a text/link post, not a photo post.
     const imageUrl = mediaType === "image" ? (apod.url ?? apod.hdurl) : apod.url;
+
+    // v8.1.2: Keep the body concise — just the explanation, trimmed.
+    // The AI pipeline will still process it, but the content is simple
+    // and always in English.
+    const explanation = String(apod.explanation ?? "").trim();
+
     return {
       id: `nasa-${apod.date ?? ""}`,
       source: this.metadata.id,
       category: this.metadata.category,
       title: String(apod.title ?? "NASA APOD"),
-      body: String(apod.explanation ?? ""),
+      body: explanation,
       url: String(apod.url ?? "https://apod.nasa.gov/"),
       imageUrl: imageUrl ?? undefined,
-      language: "en",
+      language: "en", // v8.1.2: Always English
       publishedAt: apod.date ? Date.parse(apod.date) || undefined : undefined,
       media: (mediaType === "image" && imageUrl) ? {
         type: "image",
@@ -168,10 +148,9 @@ export class NasaPlugin implements Plugin {
   }
 
   async health(): Promise<PluginStatus> {
-    // hasKey was unused — removed.
     return {
       pluginId: this.metadata.id,
-      healthy: true, // DEMO_KEY works without a key
+      healthy: true,
       enabled: this.metadata.enabled,
       lastFetchAt: null,
       lastSuccessAt: null,
