@@ -516,17 +516,24 @@ export async function managerHandler(
     const patch: Record<string, unknown> = { strategy: { ...cur.strategy, ...body } };
     const result = await container.config.updateSettings(adminId, patch);
 
-    // v8.2.0: When strategy mode changes, clear today's plan + all fired markers
-    // so the new strategy takes effect immediately. Also mark unfired slots as "pass".
+    // v11.2.0: When strategy mode changes, clear BOTH plans + fired markers
+    // (same as /strategy/regenerate). Previously only deleted the legacy
+    // fredy:sched:slots key, leaving fredy:strategy:plan and fired markers
+    // intact — causing the new plan's already-passed slots to re-fire.
     if (body.mode && body.mode !== oldMode) {
       try {
         const { formatDateInZone } = await import("../primitives/time");
         const { slotsKey } = await import("../core/storage/keys");
         const settings = await container.config.getSettings(adminId);
         const today = formatDateInZone(Date.now(), settings.scheduler.timezone);
-        // Delete today's plan.
+        // v11.2.0: Clear BOTH plans (daily planner + strategy).
         await container.kv.delete(slotsKey(today));
-        // Don't delete fired markers (already published posts stay published).
+        await container.kv.delete(`fredy:strategy:plan:${today}`);
+        // v11.2.0: Clear all fired markers for today.
+        const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
+        for (const k of firedKeys) {
+          await container.kv.delete(k).catch(() => {});
+        }
         // Generate a new plan with the new strategy.
         await container.strategyEngine.generatePlan();
 
@@ -540,8 +547,7 @@ export async function managerHandler(
             `<blockquote>📊 <b>Old:</b> ${oldMode}</blockquote>`,
             `<blockquote>📊 <b>New:</b> ${body.mode}</blockquote>`,
             `<blockquote>📅 <b>Date:</b> ${today}</blockquote>`,
-            `<blockquote>🔄 <b>Plan regenerated with new strategy.</b></blockquote>`,
-            `<blockquote>⏭️ <b>Unfired slots marked as "pass".</b></blockquote>`,
+            `<blockquote>🔄 <b>Plan + fired markers cleared. New plan generated.</b></blockquote>`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
       } catch (e) {
@@ -607,11 +613,153 @@ export async function managerHandler(
     });
   }
 
+  // ── v11.2.0: Scheduler Debug endpoint ──
+  // Provides a complete real-time snapshot of the scheduler state for debugging
+  // publishing issues without reading logs.
+  if (apiPath === "scheduler/debug" && request.method === "GET") {
+    try {
+      const now = Date.now();
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      const tz = settings.scheduler.timezone || "UTC";
+
+      // Current time in configured timezone
+      const { formatDateInZone } = await import("../primitives/time");
+      const today = formatDateInZone(now, tz);
+      const localTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }).format(new Date(now));
+
+      // Strategy plan (the one the scheduler actually uses)
+      const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
+
+      // Slot analysis
+      const slots = plan?.posts ?? [];
+      const completed = slots.filter((s) => s.status === "published" || s.status === "backup");
+      const pending = slots.filter((s) => s.status === "pending" && s.epochMs > now);
+      const dueNow = slots.filter((s) => s.status === "pending" && s.epochMs <= now);
+      const failed = slots.filter((s) => s.status === "failed");
+      const publishing = slots.filter((s) => s.status === "publishing");
+
+      // Next slot
+      const nextSlot = pending.length > 0 ? pending[0] : null;
+
+      // Last tick
+      const lastTickStr = await container.kv.get("fredy:tick:lastTick").catch(() => null);
+      const lastTick = lastTickStr ? Number(lastTickStr) : null;
+
+      // Lock status
+      const lockValue = await container.kv.get("fredy:tick:lock").catch(() => null);
+      const lockHeld = !!lockValue;
+
+      // Queue depths
+      const queueDepths = await container.queue.depth().catch(() => []);
+
+      // Last publish from history
+      const todayHistory = await container.history.getToday().catch(() => ({ entries: [] }));
+      const lastPublished = todayHistory.entries.find((e) => e.telegramMessageId > 0);
+
+      // Provider engine summary
+      const engineSummary = container.providerEngine?.getSummary?.() ?? null;
+
+      // Quiet hours check
+      const isQuiet = container.quietHoursChecker?.isQuietHours(now, settings.scheduler) ?? false;
+
+      return json({
+        ok: true,
+        currentTime: {
+          epoch: now,
+          iso: new Date(now).toISOString(),
+          localTime,
+          timezone: tz,
+          date: today,
+        },
+        scheduler: {
+          enabled: settings.scheduler.enabled,
+          botEnabled: settings.general.botEnabled,
+          maintenanceMode: settings.general.maintenanceMode,
+          approveMode: settings.approveMode ?? false,
+          isQuietHours: isQuiet,
+          quietHours: settings.scheduler.quietHours,
+          postingWindows: settings.scheduler.postingWindows,
+          postsPerDay: settings.content.postsPerDay,
+        },
+        plan: plan ? {
+          date: plan.date,
+          strategy: plan.strategy,
+          generatedAt: plan.generatedAt,
+          totalSlots: slots.length,
+          completed: completed.length,
+          pending: pending.length,
+          dueNow: dueNow.length,
+          failed: failed.length,
+          publishing: publishing.length,
+          slots: slots.map((s) => ({
+            index: s.index,
+            time: s.time,
+            epochMs: s.epochMs,
+            category: s.category,
+            status: s.status,
+            provider: s.provider,
+            overdueMinutes: s.epochMs <= now ? Math.round((now - s.epochMs) / 60000) : 0,
+            error: s.error ?? null,
+          })),
+        } : null,
+        nextSlot: nextSlot ? {
+          index: nextSlot.index,
+          time: nextSlot.time,
+          epochMs: nextSlot.epochMs,
+          category: nextSlot.category,
+          inMinutes: Math.round((nextSlot.epochMs - now) / 60000),
+        } : null,
+        dueSlots: dueNow.map((s) => ({
+          index: s.index,
+          time: s.time,
+          overdueMinutes: Math.round((now - s.epochMs) / 60000),
+          category: s.category,
+        })),
+        lock: {
+          held: lockHeld,
+          value: lockValue,
+        },
+        lastTick: lastTick ? {
+          epoch: lastTick,
+          iso: new Date(lastTick).toISOString(),
+          agoMinutes: Math.round((now - lastTick) / 60000),
+        } : null,
+        lastPublish: lastPublished ? {
+          publishedAt: lastPublished.publishedAt,
+          agoMinutes: Math.round((now - lastPublished.publishedAt) / 60000),
+          category: lastPublished.category,
+        } : null,
+        queueDepths,
+        providerEngine: engineSummary,
+        gracePeriodHours: 4, // v11.2.0
+        staleTickThresholdHours: 3, // v11.2.0
+      });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
   // ── Scheduler: force publish ──
+  // v11.2.0: Now acquires the tick lock to prevent concurrent execution
+  // with a cron tick. Previously, force-publish bypassed the lock entirely,
+  // which could cause lost-update races on the strategy plan.
   if (apiPath === "scheduler/force-publish" && request.method === "POST") {
     try {
-      const result = await container.scheduler.tick();
-      return json({ ok: result.fired, result, message: result.fired ? "Publish triggered" : (result.skipReason ?? "No due slots") });
+      const { acquireTickLock } = await import("../services/tick-lock");
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
+      const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
+      if (!tickLock.acquired) {
+        return json({ ok: false, error: "Another tick is running. Wait ~90s and retry.", message: "Lock held" }, 409);
+      }
+      try {
+        const result = await container.scheduler.tick();
+        return json({ ok: result.fired, result, message: result.fired ? "Publish triggered" : (result.skipReason ?? "No due slots") });
+      } finally {
+        await tickLock.release();
+      }
     } catch (error) {
       return json({ ok: false, error: errMsg(error) }, 500);
     }
@@ -1248,7 +1396,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
 <script>
 const TOKEN="${token}";const API="/Manager/api/";
-const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"strategy",icon:"🎯",label:"Strategy"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"debug",icon:"🐞",label:"Debug"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"settings",icon:"🔧",label:"Settings"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
+const navItems=[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"strategy",icon:"🎯",label:"Strategy"},{id:"post",icon:"📤",label:"Post to Channel"},{id:"backtest",icon:"🧪",label:"Back-Test"},{id:"plugins",icon:"🔌",label:"Plugins"},{id:"queue",icon:"📥",label:"Queue"},{id:"ai",icon:"🤖",label:"AI"},{id:"scheduler",icon:"📅",label:"Scheduler"},{id:"schedulerdebug",icon:"🔬",label:"Scheduler Debug"},{id:"statistics",icon:"📈",label:"Statistics"},{id:"logs",icon:"📜",label:"Logs"},{id:"debug",icon:"🐞",label:"Debug"},{id:"config",icon:"⚙️",label:"Configuration"},{id:"settings",icon:"🔧",label:"Settings"},{id:"system",icon:"🖥️",label:"System"},{id:"about",icon:"ℹ️",label:"About"}];
 let currentPage="dashboard";
 function buildNav(){document.getElementById("nav").innerHTML=navItems.map(i=>'<div class="nav-item" onclick="navigate('+ "'" +i.id+ "'" +')" id="nav-'+i.id+'"><span class="nav-icon">'+i.icon+'</span>'+i.label+'</div>').join("");}
 function navigate(id){currentPage=id;document.querySelectorAll(".nav-item").forEach(e=>e.classList.remove("active"));const el=document.getElementById("nav-"+id);if(el)el.classList.add("active");const item=navItems.find(i=>i.id===id);document.getElementById("page-title").textContent=item?item.label:"";loadPage(id);}
@@ -1262,7 +1410,7 @@ function card(l,v){return '<div class="card"><div class="card-label">'+l+'</div>
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast("📋 Copied!")).catch(()=>toast("❌ Copy failed"));}
 function copyElement(id){const el=document.getElementById(id);if(el)copyText(el.textContent);}
 function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +id+ "'" +')" style="margin-top:4px">📋 Copy</button>';}
-function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
+function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,schedulerdebug:loadSchedulerDebug,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
 
 async function loadDashboard(){
   const d=await api("health");const c=document.getElementById("content");
@@ -1527,6 +1675,118 @@ async function testAI(){
   const jsonStr=JSON.stringify(d,null,2);
   w.innerHTML='<pre id="ai-pre">'+jsonStr+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'ai-pre'+ "'" +')">📋 Copy Result</button>';
   toast(d.ok?"✅ AI OK":"❌ AI failed");
+}
+
+async function loadSchedulerDebug(){
+  const d=await api("scheduler/debug");const c=document.getElementById("content");
+  if(!d.ok){c.innerHTML='<div class="card">Error: '+(d.error||"unknown")+'</div>';return;}
+  const t=d.currentTime;
+  const s=d.scheduler;
+  const p=d.plan;
+  const statusBadge=function(st){const m={"published":"badge-green","failed":"badge-red","backup":"badge-yellow","pending":"badge-blue","publishing":"badge-yellow","skipped":"badge-gray","due":"badge-blue"};return '<span class="badge '+(m[st]||"badge-gray")+'">'+st+'</span>';};
+  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🔬 Scheduler Debug (v11.2.0)</h3><button class="btn btn-ghost btn-sm" onclick="loadSchedulerDebug()">🔄 Refresh</button></div><p style="color:var(--text2);margin-top:8px">Real-time scheduler state. Use this to diagnose missed/late posts.</p></div>';
+
+  // Current Time section
+  html+='<div class="card"><h3 style="margin-bottom:8px">🕐 Current Time</h3><div class="card-grid">'+
+    card("UTC ISO",new Date(t.epoch).toISOString().slice(11,19))+
+    card("Local Time",t.localTime)+
+    card("Timezone",t.timezone)+
+    card("Date",t.date)+
+    '</div></div>';
+
+  // Scheduler State section
+  html+='<div class="card"><h3 style="margin-bottom:8px">⚙️ Scheduler State</h3><div class="card-grid">'+
+    card("Scheduler",s.enabled?'<span class="badge badge-green">ON</span>':'<span class="badge badge-red">OFF</span>')+
+    card("Bot",s.botEnabled?'<span class="badge badge-green">ON</span>':'<span class="badge badge-red">OFF</span>')+
+    card("Maintenance",s.maintenanceMode?'<span class="badge badge-red">ON</span>':'<span class="badge badge-green">OFF</span>')+
+    card("Approve Mode",s.approveMode?'<span class="badge badge-yellow">ON</span>':'<span class="badge badge-green">OFF</span>')+
+    card("Quiet Hours",s.isQuietHours?'<span class="badge badge-red">ACTIVE</span>':'<span class="badge badge-green">No</span>')+
+    card("Posts/Day",s.postsPerDay)+
+    '</div>'+
+    '<div style="margin-top:8px;color:var(--text2);font-size:13px"><b>Posting Windows:</b> '+(s.postingWindows?s.postingWindows.join(", "):"—")+'</div>'+
+    '<div style="color:var(--text2);font-size:13px"><b>Quiet Hours:</b> '+(s.quietHours?s.quietHours.start+"–"+s.quietHours.end:"—")+'</div>'+
+    '</div>';
+
+  // Grace & Threshold section
+  html+='<div class="card"><h3 style="margin-bottom:8px">⏰ Grace & Thresholds (v11.2.0)</h3><div class="card-grid">'+
+    card("Grace Period",d.gracePeriodHours+"h")+
+    card("Stale Tick Alert",d.staleTickThresholdHours+"h")+
+    '</div><div style="margin-top:8px;color:var(--text2);font-size:12px">Grace: slots overdue &lt; '+d.gracePeriodHours+'h still fire. Stale: admin alert if tick gap &gt; '+d.staleTickThresholdHours+'h.</div></div>';
+
+  // Plan Summary section
+  if(p){
+    html+='<div class="card"><h3 style="margin-bottom:8px">📋 Daily Plan</h3><div class="card-grid">'+
+      card("Date",p.date)+
+      card("Strategy",p.strategy)+
+      card("Total Slots",p.totalSlots)+
+      card("Completed",'<span style="color:var(--green)">'+p.completed+'</span>')+
+      card("Pending",'<span style="color:var(--blue)">'+p.pending+'</span>')+
+      card("Due NOW",p.dueNow>0?'<span style="color:var(--red);font-weight:bold">'+p.dueNow+'</span>':p.dueNow)+
+      card("Publishing",p.publishing>0?'<span style="color:var(--yellow)">'+p.publishing+'</span>':p.publishing)+
+      card("Failed",'<span style="color:var(--red)">'+p.failed+'</span>')+
+      '</div></div>';
+  }
+
+  // Next Slot
+  if(d.nextSlot){
+    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Slot</h3><div class="card-grid">'+
+      card("Index","#"+d.nextSlot.index)+
+      card("Time",d.nextSlot.time)+
+      card("Category",d.nextSlot.category)+
+      card("In",d.nextSlot.inMinutes+"min")+
+      '</div></div>';
+  } else {
+    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Slot</h3><p style="color:var(--text2)">No pending slots remaining today.</p></div>';
+  }
+
+  // Due Slots (CRITICAL — these should fire on next tick)
+  if(d.dueSlots&&d.dueSlots.length>0){
+    html+='<div class="card" style="border:1px solid var(--red)"><h3 style="margin-bottom:8px;color:var(--red)">⚠️ Due Slots (will fire on next tick)</h3><table><thead><tr><th>#</th><th>Time</th><th>Overdue</th><th>Category</th></tr></thead><tbody>';
+    for(const sl of d.dueSlots){
+      html+='<tr><td>#'+sl.index+'</td><td>'+sl.time+'</td><td style="color:'+(sl.overdueMinutes>180?'var(--red)':'var(--yellow)')+';font-weight:bold">'+sl.overdueMinutes+'min</td><td>'+sl.category+'</td></tr>';
+    }
+    html+='</tbody></table></div>';
+  }
+
+  // Lock & Tick
+  html+='<div class="card"><h3 style="margin-bottom:8px">🔒 Lock & Tick</h3><div class="card-grid">'+
+    card("Lock",d.lock.held?'<span class="badge badge-red">HELD</span>':'<span class="badge badge-green">Free</span>')+
+    card("Last Tick",d.lastTick?d.lastTick.agoMinutes+"min ago":"—")+
+    card("Last Publish",d.lastPublish?d.lastPublish.agoMinutes+"min ago":"—")+
+    '</div></div>';
+
+  // Full Slot Table
+  if(p&&p.slots){
+    html+='<div class="card"><h3 style="margin-bottom:8px">📅 All Slots</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Status</th><th>Overdue</th><th>Provider</th><th>Error</th></tr></thead><tbody>';
+    for(const sl of p.slots){
+      const od=sl.overdueMinutes>0?'<span style="color:'+(sl.overdueMinutes>180?'var(--red)':'var(--yellow)')+'">'+sl.overdueMinutes+'m</span>':'—';
+      html+='<tr><td>#'+sl.index+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+statusBadge(sl.status)+'</td><td>'+od+'</td><td>'+(sl.provider||"—")+'</td><td style="color:var(--red);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">'+(sl.error||"")+'</td></tr>';
+    }
+    html+='</tbody></table></div>';
+  }
+
+  // Queue depths
+  if(d.queueDepths){
+    html+='<div class="card"><h3 style="margin-bottom:8px">📥 Queue Depths</h3><div class="card-grid">'+
+      d.queueDepths.map(function(q){return card("Cat "+q.category,q.depth+" items");}).join("")+
+      '</div></div>';
+  }
+
+  // Provider Engine summary
+  if(d.providerEngine){
+    const e=d.providerEngine;
+    html+='<div class="card"><h3 style="margin-bottom:8px">🔌 Provider Engine</h3><div class="card-grid">'+
+      card("Total Providers",e.totalProviders)+
+      card("Enabled",e.enabledProviders)+
+      card("Healthy",e.healthyProviders)+
+      card("Due for Refresh",e.dueForRefresh)+
+      card("Est. API/day",e.estimatedDailyApiUsage)+
+      '</div>'+
+      '<div style="margin-top:8px;color:var(--text2);font-size:13px"><b>Top:</b> '+(e.topPerforming||"—")+' | <b>Worst:</b> '+(e.worstPerforming||"—")+'</div>'+
+      '</div>';
+  }
+
+  c.innerHTML=html;
 }
 
 async function loadScheduler(){

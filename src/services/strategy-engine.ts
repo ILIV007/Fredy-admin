@@ -188,15 +188,41 @@ export class StrategyEngine {
     return plan;
   }
 
-  /** Load today's plan from KV (or generate if missing). */
+  /** Load today's plan from KV (or generate if missing).
+   *  v11.2.0: Added defensive date check — if the loaded plan's date doesn't
+   *  match the target date (clock skew, KV corruption), regenerate. */
   async getOrGeneratePlan(date?: string): Promise<DailyPublishPlan> {
     const schedulerConfig = await this.deps.schedulerConfig();
     const targetDate = date ?? formatDateInZone(Date.now(), schedulerConfig.timezone);
 
     const existing = await this.deps.kv.getJson<DailyPublishPlan>(PLAN_KEY(targetDate));
-    if (existing) return existing;
+    // v11.2.0: Defensive date check — protects against clock skew / KV corruption.
+    if (existing && existing.date === targetDate) return existing;
 
     return this.generatePlan(targetDate);
+  }
+
+  /**
+   * v11.2.0: Mark a planned post as "publishing" BEFORE the actual publish call.
+   *
+   * This prevents duplicate posts when the Worker crashes between publish()
+   * returning and markPostPublished() writing. The next tick sees "publishing"
+   * status and skips the slot (treating it as already in progress).
+   *
+   * If a slot stays "publishing" for too long (crash mid-publish), the admin
+   * can manually reset it from the dashboard.
+   */
+  async markPostPublishing(date: string, postIndex: number): Promise<void> {
+    const plan = await this.getOrGeneratePlan(date);
+    const updatedPosts = plan.posts.map((p) =>
+      p.index === postIndex
+        ? { ...p, status: "publishing" as PlannedPostStatus, failedAt: Date.now() }
+        : p,
+    );
+    const updatedPlan = { ...plan, posts: updatedPosts };
+    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
+      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostPublishing setJson failed" });
+    });
   }
 
   /** Mark a planned post as published.

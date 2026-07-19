@@ -2,6 +2,111 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.2.0] — 2026-07-20 — CRITICAL: Scheduler Missed-Slot Recovery + Dashboard Debug
+
+### 🔴 CRITICAL Fixes (Scheduler Publishing Bugs)
+
+This release fixes the root causes of "posts sometimes skipped, published at incorrect times, or not published at all."
+
+- **FIX 1 (CRITICAL): tick() now fires ALL due slots, not just the first.**
+  Previously, `tick()` called `findDueSlot()` which returned ONE slot. If multiple
+  slots fell between two 2h ticks, only the first fired. The rest waited another
+  2h and could exceed the grace period → permanently lost. Now `findDueSlots()`
+  returns ALL due-within-grace slots and `tick()` loops through them.
+
+- **FIX 2 (CRITICAL): Grace period extended 3h → 4h.**
+  The 3h grace was borderline: 2h tick gap + 30min jitter = 2h30m, leaving only
+  30min margin. Now 4h covers one missed cron cycle safely.
+
+- **FIX 3 (CRITICAL): Fired marker written BEFORE publish ("publishing" status).**
+  Previously, `markPostPublished()` was called AFTER `publish()` returned. A
+  crash between publish and marker caused duplicate posts. Now
+  `markPostPublishing()` writes a "publishing" status before the publish call.
+  The next tick sees "publishing" and skips the slot (treating it as in-progress).
+  Added "publishing" to `PlannedPostStatus` type.
+
+- **FIX 4 (HIGH): force-publish now acquires the tick lock.**
+  Previously, `POST /Manager/api/scheduler/force-publish` bypassed the lock
+  entirely, which could cause concurrent execution with a cron tick → lost-update
+  race on the strategy plan. Now acquires `fredy:tick:lock` and returns 409 if held.
+
+- **FIX 5 (HIGH): Strategy-mode change now clears BOTH plans + fired markers.**
+  Previously, `POST /Manager/api/strategy` only deleted the legacy
+  `fredy:sched:slots:<today>` key, leaving `fredy:strategy:plan:<today>` and
+  fired markers intact. The new plan's already-passed slots would re-fire →
+  duplicate posts. Now clears both keys + all `fredy:sched:sent:<today>:*` markers.
+
+- **FIX 6 (MEDIUM): Defensive date check on plan load.**
+  `getOrGeneratePlan()` now verifies `plan.date === targetDate` before returning
+  the cached plan. Protects against clock skew / KV corruption.
+
+- **FIX 7 (MEDIUM): Dashboard "Next slot" now reads from strategy plan.**
+  Previously, `scheduler.status()` used `dailyPlanner.getNextSlot()` (legacy plan)
+  while the scheduler fired from `strategyEngine.getOrGeneratePlan()`. The
+  dashboard could show a different "next slot" than what would actually fire.
+  Now reads from the strategy plan.
+
+- **FIX 8 (MEDIUM): Stale-tick threshold lowered 5h → 3h.**
+  Previously, the admin alert for missed ticks fired after 5h — but the grace
+  period was 3h, so slots could be permanently lost before the alert. Now the
+  alert fires at 3h (before grace expires at 4h).
+
+- **FIX 9: Admin PM on grace failure.**
+  Previously, when a slot exceeded the grace period and was marked "failed",
+  no notification was sent — the admin had no idea a post was missed. Now
+  `notifyAdminOfGraceFailure()` sends a PM with slot details and overdue time.
+
+### New Features
+
+- **Scheduler Debug Dashboard** (`/Manager` → "Scheduler Debug" nav item):
+  - Current time (UTC + local + timezone + date)
+  - Scheduler state (enabled, bot, maintenance, approve, quiet hours)
+  - Grace period & stale-tick thresholds (v11.2.0 values shown)
+  - Daily plan summary (total/completed/pending/due/failed/publishing)
+  - Next slot (index, time, category, minutes until)
+  - **Due Slots table** (CRITICAL — highlights slots that will fire on next tick,
+    color-coded by overdue severity)
+  - Lock status (held/free)
+  - Last tick & last publish (minutes ago)
+  - Full slot table with status badges, overdue, provider, error
+  - Queue depths per category
+  - Provider Engine summary (total/enabled/healthy/due/API usage/top/worst)
+- New API endpoint: `GET /Manager/api/scheduler/debug` — returns complete
+  real-time scheduler state as JSON.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.1.0 → 11.2.0 |
+| `package.json` | version 11.2.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.2.0" |
+| `src/services/scheduler-service.ts` | **CRITICAL**: findDueSlot→findDueSlots (returns ALL due slots), tick() loops, grace 3h→4h, markPostPublishing before publish, notifyAdminOfGraceFailure, dashboard nextSlot fix |
+| `src/services/strategy-engine.ts` | markPostPublishing() added, plan.date defensive check |
+| `src/types/strategy.ts` | "publishing" added to PlannedPostStatus |
+| `src/entry/tick.ts` | STALE_TICK_GAP_HOURS 5→3 |
+| `src/entry/manager.ts` | force-publish acquires lock, strategy-change clears both plans + markers, new /scheduler/debug endpoint, new loadSchedulerDebug() dashboard page |
+
+### Audit Reports
+
+Two parallel read-only audits were performed before fixes:
+1. **Timezone & Slot Persistence Audit** — confirmed timezone math is correct
+   (v8.0.0 fix works), identified 13 issues in KV state management.
+2. **Scheduler findDueSlot & Grace Period Audit** — confirmed the 2h tick gap
+   problem, identified that tick() fires only one slot and failed slots are
+   never retried.
+
+### Root Cause Summary
+
+The user's hypothesis was confirmed: the #1 cause was **Tick Logic / Missed Slot
+Recovery**. `tick()` fired only ONE slot per call. When multiple slots fell
+between two 2h ticks, only the first fired; the rest waited 2h more and could
+exceed the 3h grace → permanently marked "failed" with no retry and no admin
+notification. Combined with the fired-marker-after-publish race (causing
+duplicates on crash), this explains the "inconsistent publishing" symptom.
+
+---
+
 ## [11.1.0] — 2026-07-20 — Refactor: ProviderEngine wired, Central Config, Rotation, Breaking Content
 
 ### 🔴 Critical Fixes (from Full Debug Prompt)

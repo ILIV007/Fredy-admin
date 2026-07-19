@@ -115,12 +115,13 @@ export interface PlannedPost {
 
 /** Status of a planned post. */
 export type PlannedPostStatus =
-  | "pending"    // not yet due
-  | "due"        // time has arrived, waiting for publish
-  | "published"  // successfully published
-  | "failed"     // publish failed, no backup succeeded
-  | "backup"     // original failed but a backup plugin succeeded
-  | "skipped";   // skipped (quiet hours, no content, etc.)
+  | "pending"     // not yet due
+  | "due"         // time has arrived, waiting for publish
+  | "publishing"  // v11.2.0: marker written BEFORE publish (crash recovery)
+  | "published"   // successfully published
+  | "failed"      // publish failed, no backup succeeded
+  | "backup"      // original failed but a backup plugin succeeded
+  | "skipped";    // skipped (quiet hours, no content, etc.)
 
 // ────────────────────────────────────────────────────────────
 // Daily Publish Plan

@@ -52,10 +52,15 @@ export interface TickHandlerDeps {
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
 
-/** v9.2.2: Stale-tick threshold. The external cron fires every ~2h, so a
- *  gap >5h means at least 2 cycles were missed — strong signal something
- *  is wrong (cron-job.org down, network partition, deploy misconfig). */
-const STALE_TICK_GAP_HOURS = 5;
+/** v11.2.0: Stale-tick threshold lowered from 5h to 3h.
+ *  The external cron fires every ~2h. A gap >3h means at least 1 cycle was
+ *  missed — strong signal something is wrong (cron-job.org down, network
+ *  partition, deploy misconfig). Previous 5h threshold was too wide: slots
+ *  could be permanently lost (grace=4h) before the alert fired.
+ *
+ *  v9.2.2: originally 5h.
+ *  v11.2.0: lowered to 3h so the alert fires BEFORE grace expires (4h). */
+const STALE_TICK_GAP_HOURS = 3;
 /** v9.2.2: Cooldown to avoid repeating the alert on every tick after a gap.
  *  Once alerted, subsequent ticks within this window are silent. */
 const STALE_TICK_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
