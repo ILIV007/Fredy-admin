@@ -47,9 +47,10 @@ export async function managerHandler(
     const state = await container.config.getState(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     const schedStatus = await container.scheduler.status().catch(() => null);
     const queueDepths = await container.queue.depth().catch(() => []);
-    const lastRefresh = await container.kv.get("fredy:tick:lastRefresh").catch(() => null);
+    // v9.2.1: lastRefresh removed — refreshSources() was a no-op stub whose
+    // KV write was deleted. lastTick still tracks the most recent tick time.
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: APP_VERSION, bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastRefresh: lastRefresh ? Number(lastRefresh) : null, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: APP_VERSION, bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
   }
 
   // ── Plugins ──
@@ -162,23 +163,33 @@ export async function managerHandler(
     const depths = await container.queue.depth().catch(() => []);
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     // Also fetch actual queued items for display.
+    // v9.2.1: Sort by enqueuedAt DESC so newest items appear first.
     const items: Record<string, unknown[]> = {};
     for (const cat of ["A", "B", "C"] as const) {
       try {
         const queued = await container.queue.listItems(cat);
-        items[cat] = queued.map(q => ({
+        const mapped = queued.map(q => ({
           id: q.content.id,
           headline: q.content.headline ?? "(no headline)",
           pluginId: q.content.pluginId,
           language: q.content.language,
           qualityScore: q.content.quality.overallScore,
+          qualityPassed: q.content.quality.passed,
+          qualityDimensions: q.content.quality.dimensionScores.map(d => ({ dimension: d.dimension, score: d.score })),
           enqueuedAt: q.enqueuedAt,
+          expiresAt: q.expiresAt,
+          fetchedAt: q.content.fetchedAt,
+          sourceUrl: q.content.sourceUrl,
           aiProvider: q.content.aiProvider,
           aiModel: q.content.aiModel,
+          hasMedia: !!q.content.media,
         }));
+        // Sort by enqueuedAt descending (newest first).
+        mapped.sort((a, b) => (b.enqueuedAt as number) - (a.enqueuedAt as number));
+        items[cat] = mapped;
       } catch { items[cat] = []; }
     }
-    return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items });
+    return json({ ok: true, depths, limits: settings ? { A: { min: settings.content.queueMinA, target: settings.content.queueTargetA }, B: { min: settings.content.queueMinB, target: settings.content.queueTargetB }, C: { min: settings.content.queueMinC, target: settings.content.queueTargetC } } : null, items, serverTime: Date.now() });
   }
 
   // ── Queue: delete item ──
@@ -1243,7 +1254,7 @@ async function loadDashboard(){
     '<button class="btn '+(apprOn?'btn-danger':'')+'" onclick="toggleApprove()">'+(apprOn?'🔓 Approve: OFF':'🔐 Approve: ON')+'</button>'+
     '<button class="btn btn-ghost" onclick="refresh()">🔄 Refresh</button>'+
   '</div></div>'+
-  '<div class="card-grid">'+card("Version",d.version)+card("Bot",botOn?badge(1):badge(0))+card("Scheduler",d.scheduler?.enabled?badge(1):badge(0))+card("Approve",apprOn?badge(1):badge(0))+card("AI",d.aiProvider??"—")+card("Language",d.language??"—")+card("Plugins",d.plugins?.enabled+"/"+d.plugins?.total)+card("Posts Today",d.scheduler?.postsToday??0)+card("Next Slot",d.scheduler?.nextSlot?.time??"—")+card("Last Refresh",fmtAgo(d.lastRefresh))+card("Last Tick",d.lastTick?fmtAgo(d.lastTick):"—")+'</div>'+
+  '<div class="card-grid">'+card("Version",d.version)+card("Bot",botOn?badge(1):badge(0))+card("Scheduler",d.scheduler?.enabled?badge(1):badge(0))+card("Approve",apprOn?badge(1):badge(0))+card("AI",d.aiProvider??"—")+card("Language",d.language??"—")+card("Plugins",d.plugins?.enabled+"/"+d.plugins?.total)+card("Posts Today",d.scheduler?.postsToday??0)+card("Next Slot",d.scheduler?.nextSlot?.time??"—")+card("Last Tick",d.lastTick?fmtAgo(d.lastTick):"—")+'</div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Global Stats</h3><div class="card-grid">'+card("Processed",d.stats?.processed??0)+card("Published",d.stats?.published??0)+card("Rejected",d.stats?.rejected??0)+card("Failed",d.stats?.failed??0)+'</div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Secrets</h3>'+Object.entries(d.hasSecrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
 }
@@ -1409,25 +1420,42 @@ async function loadQueue(){
     if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
     const l=d.limits||{};
     const items=d.items||{};
-    let html='';
+    const now=d.serverTime||Date.now();
+    let html='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div><h3 style="margin:0">📥 Ready Queue</h3><p style="margin:4px 0 0;color:var(--text2);font-size:12px">Newest items shown first. Items expire after 24h.</p></div><button class="btn btn-ghost" onclick="loadQueue()">🔄 Refresh</button></div>';
+    let totalItems=0;
     for(const cat of["A","B","C"]){
       const q=(d.depths||[]).find(x=>x.category===cat)||{depth:0};
       const lim=l[cat]||{min:0,target:0};
       const pct=lim.target>0?Math.min(100,q.depth/lim.target*100):0;
       const catItems=items[cat]||[];
-      html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="badge badge-blue">Category '+cat+'</span><span>'+q.depth+" / "+lim.target+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
+      totalItems+=catItems.length;
+      const oldestAge=q.oldestItemAge?fmtAgeMs(q.oldestItemAge):"—";
+      html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px;align-items:center"><span class="badge badge-blue">Category '+cat+'</span><span style="font-size:12px;color:var(--text2)">'+q.depth+" / "+lim.target+' (min '+lim.min+') • oldest: '+oldestAge+'</span></div><div class="progress"><div class="progress-bar" style="width:'+pct+'%"></div></div>';
       if(catItems.length>0){
-        html+='<table style="margin-top:8px;font-size:12px"><thead><tr><th>Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>AI</th><th>Actions</th></tr></thead><tbody>'+
-        catItems.map(it=>'<tr><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(it.headline||"(no headline)")+'</td><td>'+it.pluginId+'</td><td>'+it.language+'</td><td>'+it.qualityScore+'</td><td>'+(it.aiProvider||"—")+"/"+(it.aiModel||"—")+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">📤 Send Now</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">🗑️ Delete</button></td></tr>').join("")+
-        '</tbody></table>';
+        html+='<table style="margin-top:8px;font-size:12px;width:100%"><thead><tr><th style="text-align:left">Headline</th><th>Provider</th><th>Lang</th><th>Score</th><th>Enqueued</th><th>Age</th><th>AI</th><th>Source</th><th>Actions</th></tr></thead><tbody>';
+        html+=catItems.map(function(it){
+          const score=it.qualityScore||0;
+          const scoreBadge = score>=80?'<span class="badge badge-green">'+score+'</span>':score>=60?'<span class="badge badge-yellow">'+score+'</span>':'<span class="badge badge-red">'+score+'</span>';
+          const enqTime=fmtShortTime(it.enqueuedAt,now);
+          const age=fmtAgo(it.enqueuedAt);
+          const src=it.sourceUrl?'<a href="'+escapeHtml(it.sourceUrl)+'" target="_blank" rel="noopener" style="color:var(--accent)">link'+(it.hasMedia?' 🖼️':'')+'</a>':'—';
+          const ai=(it.aiProvider||"—")+"/"+(it.aiModel||"—");
+          const headline=escapeHtml(it.headline||"(no headline)");
+          const headlineShort=headline.length>80?headline.slice(0,80)+'…':headline;
+          return '<tr><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+headline+'">'+headlineShort+'</td><td>'+escapeHtml(it.pluginId||"")+'</td><td>'+escapeHtml(it.language||"")+'</td><td style="text-align:center">'+scoreBadge+'</td><td style="white-space:nowrap">'+enqTime+'</td><td style="white-space:nowrap;color:var(--text2)">'+age+'</td><td style="white-space:nowrap;font-size:11px">'+escapeHtml(ai)+'</td><td style="text-align:center">'+src+'</td><td style="white-space:nowrap"><button class="btn btn-sm" onclick="sendQueueNow('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">📤 Send</button> <button class="btn btn-sm btn-danger" onclick="deleteQueueItem('+ "'" +cat+ "'" +','+ "'" +it.id+ "'" +')">🗑️</button></td></tr>';
+        }).join("");
+        html+='</tbody></table>';
       }else{
-        html+='<p style="color:var(--text2);margin-top:8px">No items in queue.</p>';
+        html+='<p style="color:var(--text2);margin-top:8px;font-size:12px">No items in queue. Queue will refill on next tick if below minimum.</p>';
       }
       html+='</div>';
     }
+    html='<div class="card-grid" style="margin-bottom:12px">'+card("Total Items",totalItems)+card("Categories","A / B / C")+'</div>'+html;
     c.innerHTML=html;
   }catch(e){c.innerHTML='<div class="card">Failed to load queue: '+e+'</div>';}
 }
+function fmtAgeMs(ms){if(ms==null)return"—";const s=Math.floor(ms/1000);if(s<60)return s+"s";if(s<3600)return Math.floor(s/60)+"m";return Math.floor(s/3600)+"h";}
+function fmtShortTime(ts,serverNow){if(!ts)return"—";const d=new Date(typeof ts==="number"?ts:parseInt(ts));const hh=String(d.getHours()).padStart(2,"0");const mm=String(d.getMinutes()).padStart(2,"0");const ss=String(d.getSeconds()).padStart(2,"0");return hh+":"+mm+":"+ss;}
 async function deleteQueueItem(cat,id){
   if(!confirm("Delete this item from queue?"))return;
   const d=await api("queue/"+cat+"/delete","POST",{contentId:id});

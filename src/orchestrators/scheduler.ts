@@ -1,7 +1,12 @@
 /**
  * src/orchestrators/scheduler.ts
- * Scheduler orchestrator. Wraps SchedulerService.tick() and the source-refresh
- * background job. Called by the cron entry point.
+ * Scheduler orchestrator. Thin wrapper around SchedulerService.tick().
+ *
+ * v9.2.1: refreshSources() removed — it was a no-op stub (TODO never
+ * implemented) whose caller in tick.ts still paid a KV write every ~2h
+ * for the "fredy:tick:lastRefresh" timestamp. Source fetching already
+ * happens via content.processForCategory() during maintainQueue(), so
+ * this pathway was dead weight. Removed alongside the REFRESH_KEY write.
  *
  * See ARCHITECTURE_RULES.md §10.6 and FREDY_GUIDELINES.md §1.
  */
@@ -15,12 +20,5 @@ export class SchedulerOrchestrator {
   /** Cron tick — fire one slot if due. Returns whether anything happened. */
   async tick(): Promise<SchedulerTickResult> {
     return this.container.scheduler.tick();
-  }
-
-  /** Refresh source caches (called every 15 min by the second cron). */
-  async refreshSources(): Promise<void> {
-    // TODO: implement in Phase 3 — for each enabled source, if cache older
-    // than intervalMin, fetch fresh items and update the content queue.
-    await Promise.resolve();
   }
 }

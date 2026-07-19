@@ -51,13 +51,18 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # ============================================================
 # Cron Triggers
 # ============================================================
-# Backup cron: runs once every 24 hours as a fallback in case
-# the external cron-job.org stops working.
-# The external cron (cron-job.org) calls /internal/tick every 2 hours.
-# This internal cron is a safety net only — runs at midnight UTC daily.
+# Two internal Cloudflare cron triggers:
+#   1. "0 0 * * *"     — 24-hour backup tick. Runs the full scheduler
+#                        pipeline as a safety net in case cron-job.org
+#                        stops working. (Main driver: external cron-job.org
+#                        calls /internal/tick every 2 hours.)
+#   2. "*/30 * * * *"  — 30-minute stale-tick watchdog. Performs 1 KV
+#                        read; sends a single admin PM if the external
+#                        cron hasn't registered a tick in 4 hours.
+#                        Cheap by design (no writes when fresh).
 
 [triggers]
-crons = ["0 0 * * *"]
+crons = ["0 0 * * *", "*/30 * * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

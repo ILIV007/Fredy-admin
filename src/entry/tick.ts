@@ -13,8 +13,12 @@
  *   3. Return 200 OK immediately with "tick started" log
  *   4. [background] Publish due posts
  *   5. [background] Maintain queue (refill if below minimum)
- *   6. [background] Refresh sources (if interval elapsed)
- *   7. [background] Cleanup + release lock
+ *   6. [background] Cleanup + release lock
+ *
+ * v9.2.1: refreshSources() / refreshSourcesIfNeeded() removed — the stub
+ * paid a KV write every ~2h for `fredy:tick:lastRefresh` while doing zero
+ * work. Source fetching is already covered by content.processForCategory()
+ * inside maintainQueue().
  */
 
 import type { Env, Container } from "../types/env";
@@ -30,7 +34,6 @@ export interface TickHandlerDeps {
   readonly ctx?: ExecutionContext;
 }
 
-const REFRESH_KEY = "fredy:tick:lastRefresh";
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
 
@@ -131,13 +134,6 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
       log.push(`queue maintenance error: ${errMsg(error)}`);
     }
 
-    // ── Refresh sources (if interval elapsed) ─────────
-    try {
-      await refreshSourcesIfNeeded(container, settings, log);
-    } catch (error) {
-      log.push(`refresh error: ${errMsg(error)}`);
-    }
-
     // ── Cleanup ────────────────────────────────────────
     await container.kv.flushAllStats().catch(() => {});
     log.push("cleanup done");
@@ -211,45 +207,6 @@ async function maintainQueue(
       log.push(`queue ${cat}: ${depth}/${min} OK`);
     }
   }
-}
-
-// ────────────────────────────────────────────────────────────
-// Source Refresh (interval-based)
-// ────────────────────────────────────────────────────────────
-
-async function refreshSourcesIfNeeded(
-  container: Container,
-  settings: FredySettings,
-  log: string[],
-): Promise<void> {
-  const intervalMs = settings.scheduler.refreshIntervalMinutes * 60 * 1000;
-  const lastRefreshStr = await container.kv.get(REFRESH_KEY);
-  const lastRefresh = lastRefreshStr ? Number(lastRefreshStr) : 0;
-  const now = Date.now();
-
-  if (now - lastRefresh < intervalMs) {
-    const remaining = Math.ceil((intervalMs - (now - lastRefresh)) / 60000);
-    log.push(`source refresh: skipped (${remaining}min until next)`);
-    return;
-  }
-
-  // v8.1.1: Reuse the depths from maintainQueue if available (passed via log),
-  // otherwise fetch. This avoids a duplicate depth() KV read.
-  // Since maintainQueue already fetched depths, we pass them in to avoid
-  // re-reading. But for simplicity (and since depth() is cached by ConfigCache
-  // for 5s), we just fetch again here — it's a single KV read.
-  const depths = await container.queue.depth();
-  const totalDepth = depths.reduce((sum, d) => sum + d.depth, 0);
-  if (totalDepth > 20) {
-    log.push(`source refresh: skipped (queue full: ${totalDepth})`);
-    return;
-  }
-
-  // Refresh.
-  const scheduler = new SchedulerOrchestrator(container);
-  await scheduler.refreshSources();
-  await container.kv.set(REFRESH_KEY, String(now));
-  log.push(`refresh: done`);
 }
 
 // ────────────────────────────────────────────────────────────

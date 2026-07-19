@@ -2,6 +2,350 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [9.2.1] — 2026-07-19 — Stale-tick watchdog cron, refreshSources() cleanup, dedup comments, Queue page refactor
+
+### Critical Fixes
+
+- **Stale-tick detection latency reduced from "next midnight" to ~30 minutes.**
+  Added a dedicated lightweight Cloudflare cron `*/30 * * * *` that performs a
+  single KV read of `fredy:tick:lastTick`. If the external cron hasn't registered
+  a tick in 4 hours, it sends a single admin PM and records a cooldown timestamp
+  (`fredy:tick:lastStaleAlert`, 2h TTL) so subsequent stale fires within that
+  window are suppressed — no PM spam. Cheap by design: zero writes when fresh,
+  one KV write + one Telegram send only when stale AND outside the cooldown
+  window. The 24h backup cron (`0 0 * * *`) also runs this check as belt-and-
+  braces. `wrangler.toml` `crons` array updated to `["0 0 * * *", "*/30 * * * *"]`.
+  `src/entry/cron.ts` `cronHandler` now branches on `event.cron` for the two
+  expressions and warns on unknown expressions instead of silently returning.
+
+- **Removed dead `refreshSources()` pathway and its pointless KV write.**
+  `SchedulerOrchestrator.refreshSources()` was a no-op stub (TODO never
+  implemented) whose caller in `tick.ts` (`refreshSourcesIfNeeded()`) still
+  paid a KV write every ~2 hours for `fredy:tick:lastRefresh` — a real write
+  for a feature that did nothing. Source fetching is already covered by
+  `content.processForCategory()` inside `maintainQueue()`, so the entire
+  pathway was dead weight. Removed: `refreshSources()` method,
+  `refreshSourcesIfNeeded()` function, `REFRESH_KEY` constant, the
+  `await scheduler.refreshSources()` call inside the 24h cron branch, the
+  `lastRefresh` card on the dashboard, and the `lastRefresh` field in the
+  `/Manager/api/health` response.
+
+- **Deleted contradictory comment block in `duplicate-detector.ts`.** The
+  v8.10.0 comment that described "URL dedup skipped, hash is sufficient,
+  TODO: store a separate URL→hash index" was left in place after v9.2.0
+  restored URL dedup — directly contradicting the code a few lines above it.
+  Removed the misleading comment block entirely. Also cleaned up the
+  "Removed isGenericApiUrl..." stale comment that referenced functions which
+  now exist again.
+
+### Queue Page Refactor (Manager UI)
+
+- **`loadQueue()` now shows newest items first.** Items are sorted by
+  `enqueuedAt` DESC, so freshly enqueued content appears at the top of each
+  category table instead of the bottom (root cause of the "recent posts
+  aren't shown" report — they were at the bottom of a 50-row table).
+- **Added enqueued time + age column.** Each row now shows absolute time
+  (`HH:MM:SS`) and relative age (`5m ago`, `2h ago`).
+- **Added source URL column** (clickable link, opens in new tab).
+- **Added per-category Refresh button** so the admin can pull fresh queue
+  state without reloading the whole page.
+- **Score is now color-coded** — green ≥80, yellow 60-79, red <60 — same
+  convention as the Strategy page.
+- **Server-side `listItems()` already filters expired items** (kept that
+  behaviour); the API response was extended to include `enqueuedAt`,
+  `sourceUrl`, `qualityScore`, `aiProvider`, `aiModel`. Backward compatible
+  (existing fields kept).
+
+### Tests
+
+- **New `scripts/test-dedup.ts`** — covers the dedup check/record pair that
+  was reworked twice in two versions. Tests: URL match wins over hash,
+  hash match catches body-identical items with different URLs, no false
+  positives on first-seen items, recording twice is idempotent at the KV
+  layer (record is overwritten), URL-with-empty-body falls back to URL+title
+  hash so two HackerNews-style items with no body aren't falsely flagged.
+  Run with `npx tsx scripts/test-dedup.ts`.
+
+### Housekeeping
+
+- `core/constants.ts`: `APP_VERSION = "9.2.1"`.
+- `package.json`: `version: "9.2.1"`.
+- `VERSION` file: `9.2.1`.
+- `wrangler.toml`: cron section expanded and documented.
+
+---
+
+## [9.2.0] — 2026-07-18 — KV double-write elimination, queue lock no-op release, URL dedup restoration
+
+### Critical Fixes
+
+- **Eliminated KV double-write in `SchedulerService.markSlotFired`.**
+  Previously `markSlotFired` was called for every fired slot, but when the
+  strategy engine is wired in, the slot's status is already tracked in the
+  strategy plan — so the dailyPlanner write was redundant. Now
+  `markSlotFired` only fires when `!strategyEngine` (5 call sites updated).
+  Saves 1 KV write per published slot — meaningful on the 1000 writes/day
+  free tier.
+- **Queue lock release is now a no-op.** `ContentQueue.acquireQueueLock()`
+  returned a release function that did a `kv.delete()` — but the lock key
+  has a 10s TTL and ticks are <<10s apart, so the delete was almost always
+  wasted. Release is now `async () => {}`; the lock expires naturally.
+  Saves 1 KV delete per dequeue.
+- **Restored URL-based dedup.** v8.10.0 had removed URL dedup entirely,
+  citing KV write cost. But cross-plugin duplicates (same URL, different
+  body text) were getting through. Restored 2-write dedup: `record()` writes
+  both `dedupKey(hash)` and `fredy:dedup:url:<sha1(url)>`; `check()` reads
+  both. Title-fuzzy dedup stays removed (was the most expensive, least
+  valuable of the three). Net: 2 reads + 2 writes per item, down from 3/3
+  pre-v8.10.0 but with cross-plugin protection restored.
+- **Stale-tick alert** (initial implementation, ran only on the 24h cron —
+  superseded by v9.2.1's 30-min watchdog).
+- **`CHANGELOG.md` backfill started** (8.2.0 → 9.1.0 still missing —
+  completed in v9.2.1).
+
+---
+
+## [9.1.0] — 2026-07-17 — Strategy engine as single source of truth, markPostBackup state, fallback plugins
+
+### Critical Fixes
+
+- **Strategy plan is now the single source of truth for slot status.**
+  `SchedulerService.findDueSlot()` checks `p.status` from
+  `strategyEngine.getOrGeneratePlan()` directly, not `dailyPlanner.isSlotFired()`.
+  Both the Strategy page and the Scheduler page in the Manager UI read
+  `p.status` so they always agree. Eliminates the "shows published in table
+  but not sent to channel" class of bugs.
+- **4-state status badges.** Posts in the strategy plan carry one of:
+  `published`, `failed`, `backup`, `pending`. (Previous 3-state model
+  conflated backup with failed, hiding real failures.)
+- **Fallback plugins: try one at a time, stop on first success.**
+  `fireSlot()` previously tried all fallback plugins for a category in
+  parallel — wasteful and racy. Now iterates sequentially, stops on first
+  success. Each fallback gets a clean retry budget.
+- **Grace period enforced.** Slots more than 30 minutes overdue are marked
+  `failed`, not fired — prevents burst-publishing after a scheduler outage.
+- **`markPostBackup` introduced.** When the primary publish fails (quality
+  gate, sendPhoto error, etc.) the slot is marked `backup` rather than
+  `failed`, so it isn't double-counted in failure stats.
+
+---
+
+## [9.0.3] — 2026-07-16 — Strategy plan marks past slots as failed (not pending)
+
+### Critical Fix
+
+- **`StrategyEngine.generatePlan()` now marks past slots as `failed`** at
+  generation time, not `pending`. Previous behaviour: if the bot missed
+  several slots due to an outage, generating a new plan mid-day would mark
+  the missed slots as `pending` — they'd then be picked up by `findDueSlot()`
+  and burst-fire. New behaviour: past slots = `failed`, future slots =
+  `pending`. This stops burst-publishing after outages and matches what the
+  admin already sees in the UI.
+
+---
+
+## [9.0.0] — 2026-07-16 — Strategy Engine introduced
+
+### Architecture
+
+- **`src/services/strategy-engine.ts`** — new service. Generates a daily
+  plan keyed `fredy:strategy:plan:<date>` with one entry per scheduled slot.
+  Each entry has: `slot`, `category`, `provider`, `priority`, `status`,
+  `postId`. The plan is the single source of truth for both scheduling
+  decisions and UI rendering.
+- **`getOrGeneratePlan()`** reads from KV; if missing or stale, generates
+  fresh and persists. Used by both `scheduler.tick()` and the Manager UI's
+  Strategy + Scheduler pages.
+- **`markPostPublished / markPostFailed / markPostBackup`** update a post's
+  status in the persisted plan. Called by `SchedulerService.fireSlot()`.
+- **`Container` wiring:** `strategyEngine` added to the container and
+  passed as a dep to `SchedulerService`. Existing `dailyPlanner` kept for
+  backward compatibility (still used when `strategyEngine` is absent).
+
+---
+
+## [8.10.3] — 2026-07-15 — Cron string fix, every-minute cron removed
+
+### Critical Fix
+
+- **Cron string `0 */24 * * *` is invalid on Cloudflare.** Replaced with
+  `0 0 * * *` (midnight UTC daily). The invalid expression was causing
+  the 24h backup cron to never fire, leaving only the external cron-job.org
+  as the scheduler — a single point of failure.
+
+### Cleanup
+
+- **Removed the every-minute Cloudflare cron branch.** It was unused since
+  the external cron took over the 2-hourly tick. Reduces Cloudflare cron
+  slot count from 3 to 1 (now 2 again after v9.2.1 added the watchdog).
+
+---
+
+## [8.10.0] — 2026-07-15 — Dedup optimization (single-write), admin PM on KV quota
+
+### KV Optimization
+
+- **Dedup reduced from 3 KV writes per item to 1.** v8.x wrote `dedupKey(hash)`,
+  `dedup:url:<urlHash>`, `dedup:title:<titleHash>` for every recorded item.
+  This was the #1 consumer of the 1000 writes/day free tier. Consolidated
+  to a single record under `dedupKey(hash)` containing `url` + `titleHash`
+  fields for matching.
+- **Title-fuzzy dedup removed.** Was the most expensive (1 KV read per
+  check) and least valuable (similar but not identical posts often got
+  falsely flagged). Hash dedup catches the real duplicates.
+- **NOTE (v9.2.0):** URL dedup was restored in v9.2.0 — the consolidation
+  above let cross-plugin duplicates through. Net is 2 writes per item, not 1.
+
+### Critical Fix
+
+- **Admin PM on KV quota exceeded.** When `content.process()` catches a
+  KV quota error, it now sends an immediate admin PM rather than failing
+  silently. Previously the bot would just stop publishing with no signal.
+- **False "duplicate" report fixed.** When ALL items were genuine
+  duplicates, the manager UI's "process duplicated item" path was still
+  reporting a false duplicate. Now the report distinguishes all-duplicate
+  vs KV-quota vs mixed.
+
+---
+
+## [8.8.0] — 2026-07-14 — Backup status, soul-loader cache, schedule page unification
+
+### Critical Fixes
+
+- **Backup status introduced (initial version).** When publish fails, the
+  slot is marked `backup` (not `failed`) so it isn't double-counted.
+  Refined in v9.1.0.
+- **`soul-loader.ts` is now a module-level cache singleton.** Previously
+  each `buildContainer()` call created a new `SoulLoader` instance, which
+  re-read `soul.md` from KV on every request — burning reads for a file
+  that rarely changes. Now `_cachedSoul` / `_cachedSoulAt` persist across
+  `buildContainer()` calls within the same isolate.
+- **Schedule page reads strategy plan directly.** `admin/screens/schedule.ts`
+  was building the Daily Plan table from `dailyPlanner.getFiredSlots()`,
+  causing visible drift vs the Strategy page. Now both pages read
+  `strategyEngine.getOrGeneratePlan()`.
+- **Schedule page uses real 3-state status from strategy plan.** No longer
+  overrides with `scheduler.isSlotFired()`.
+
+---
+
+## [8.7.0] — 2026-07-13 — Real 3-state status, regenerate clears both plans
+
+### Critical Fixes
+
+- **Real 3-state status from strategy plan.** Slot rows in the Manager UI
+  Daily Plan table now show `published` / `failed` / `pending` from the
+  strategy plan's `p.status` field — not the binary `fired` flag.
+- **Regenerate button clears BOTH plans.** Previously clicking Regenerate
+  cleared `fredy:sched:slots` but left `fredy:strategy:plan:<date>` intact,
+  so the old plan would reappear on next page load. Now both keys are
+  deleted atomically before regeneration.
+
+---
+
+## [8.5.0] — 2026-07-12 — Fallback plugin iteration, status() uses strategy plan
+
+### Improvements
+
+- **`status()` uses strategy engine plan when available.** The plan has
+  `provider`, `priority`, and `status` fields that the dailyPlanner doesn't
+  carry — gives the dashboard richer data.
+- **Fallback plugins: try the NEXT plugin, not all at once.** Was wasteful
+  (4 parallel pipeline runs on every fallback). Now sequential, stop on
+  first success. Refined further in v9.1.0.
+
+### Bug Fix
+
+- **`findDueSlot()` checks strategy plan status directly.** Previously
+  checked `dailyPlanner.isSlotFired()` which could disagree with the
+  strategy plan, causing slots to be double-fired or skipped.
+
+---
+
+## [8.4.0] — 2026-07-12 — Schedule page strategy plan, fallback plugin helper
+
+### Features
+
+- **Schedule page fetches strategy plan for the Daily Plan table.** Lays
+  the groundwork for unifying the Strategy and Scheduler pages.
+- **`getFallbackPlugins(category)` helper** in `SchedulerService` — returns
+  plugins for a category other than the primary. Used by `fireSlot()` when
+  the primary plugin fails or returns no candidates.
+
+---
+
+## [8.3.0] — 2026-07-12 — /start welcome message, bot UI language, CSP
+
+### Features
+
+- **`/start` shows a separate welcome message.** Distinguishes first-run
+  onboarding from the main menu. Persists bot UI language at
+  `fredy:botui:<adminId>`.
+- **Bot UI language flow.** New `botui:open` / `botui:set:<lang>` /
+  `botui:back` callback routes in `AdminOrchestrator`.
+- **CSP header on /Manager.** Allows inline scripts and eval — the dashboard
+  uses template literals and inline `<script>` tags.
+
+---
+
+## [8.2.1] — 2026-07-11 — Strategy engine wiring into scheduler, markPostFailed for strategy plan
+
+### Improvements
+
+- **`strategyEngine` wired into `SchedulerService`.** New optional dep —
+  when present, `fireSlot()` calls `markPostPublished` / `markPostFailed`
+  on the strategy plan in addition to (not instead of) the dailyPlanner.
+- **Failure path marks strategy plan post as failed.** Previously only
+  `dailyPlanner.markFailed` was called, leaving the strategy plan showing
+  `pending` indefinitely.
+
+---
+
+## [8.2.0] — 2026-07-11 — Strategy mode switch clears plan, scheduler page reads strategy
+
+### Critical Fix
+
+- **When strategy mode changes, clear today's plan + all fired markers.**
+  Previously switching from "balanced" to "burst" left the old plan in
+  place, causing the new mode to be ignored until the next day. Now the
+  /Manager strategy-mode-change handler deletes both `fredy:sched:slots`
+  and `fredy:strategy:plan:<date>` and triggers a fresh
+  `getOrGeneratePlan()`.
+
+### Features
+
+- **Scheduler page fetches strategy plan too** — unifies with the Strategy
+  page's Daily Plan rendering. Both pages now show the same provider,
+  priority, and status columns.
+
+---
+
+## [8.1.3] — 2026-07-11 — Admin PM on publish failure, NASA direct mode
+
+### Features
+
+- **Admin PM when a scheduled post fails to publish.** Includes the slot
+  time, category, plugin, and error message. Stops the admin having to
+  watch the dashboard for failures.
+- **NASA direct mode.** `content-manager.process()` bypasses AI entirely
+  for `pluginId === "nasa"` — uses the title as the post text, assigns
+  score 95, always English. Saves AI calls for content that's already
+  editorial-quality.
+
+---
+
+## [8.1.1] — 2026-07-11 — ConfigCache module singleton, batched depth checks
+
+### Performance
+
+- **`ConfigCache` is now a module-level singleton** (`sharedConfigCache`).
+  `container.ts` uses the singleton so write-invalidation propagates
+  correctly across all `ConfigService` instances within the same isolate.
+- **Batched depth checks.** `maintainQueue()` uses `queue.depth()` once
+  instead of `depthFor(cat)` per category. Reduces 3 KV reads to 1.
+
+---
+
 ## [8.1.0] — v8.1.0 — Re-applied v8 fixes (timezone, locks, dedup, admin screens, Manager onclick escaping)
 
 ### Overview
