@@ -1640,7 +1640,7 @@ function showPostError(idx){
   if(p.failedPlugin){lines.push("Plugin attempted: "+p.failedPlugin);}
   if(p.failedAt){lines.push("Failed at: "+new Date(p.failedAt).toISOString());}
   if(!p.error&&!p.failedStage){lines.push("");lines.push("(No error details recorded. This can happen if the failure occurred before v9.2.3 or if the slot was marked failed without an error message.)");}
-  alert(title+"\n\n"+lines.join("\n"));
+  alert(title+"\\n\\n"+lines.join("\\n"));
 }
 async function switchStrategy(mode){const d=await api("strategy","POST",{mode});toast(d.ok?"✅ Strategy: "+mode:"❌ Failed");loadStrategy();}
 async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C}});toast(d.ok?"✅ Custom distribution saved":"❌ Failed");loadStrategy();}
