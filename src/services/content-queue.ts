@@ -104,7 +104,9 @@ export class ContentQueue {
     return item;
   }
 
-  /** Acquire a per-category queue lock. Returns a release function. */
+  /** Acquire a per-category queue lock. Returns a release function.
+   *  v9.1.0: Release is now a no-op — the lock's TTL (10s) expires naturally,
+   *  saving 1 KV delete write per dequeue. */
   private async acquireQueueLock(category: Category): Promise<() => Promise<void>> {
     const key = `fredy:queue:lock:${category}`;
     const maxAttempts = 30;
@@ -114,12 +116,10 @@ export class ContentQueue {
         const existing = await this.deps.kv.get(key);
         if (!existing) {
           await this.deps.kv.set(key, String(Date.now()), 10);
-          return async () => {
-            try { await this.deps.kv.delete(key); } catch { /* non-fatal */ }
-          };
+          // v9.1.0: No-op release — let TTL expire naturally.
+          return async () => {};
         }
       } catch {
-        // On KV error, allow execution (no-op release).
         return async () => {};
       }
       await new Promise((resolve) => setTimeout(resolve, delayMs));

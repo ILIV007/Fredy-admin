@@ -46,6 +46,29 @@ export async function cronHandler(
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
+        // v9.1.0: Stale-tick alert — check if the external cron has stopped.
+        // If LAST_TICK_KEY is older than 4 hours, the external cron is likely down.
+        const LAST_TICK_KEY = "fredy:tick:lastTick";
+        const lastTickStr = await container.kv.get(LAST_TICK_KEY).catch(() => null);
+        if (lastTickStr) {
+          const lastTick = Number(lastTickStr);
+          const hoursSinceLastTick = (Date.now() - lastTick) / (60 * 60 * 1000);
+          if (hoursSinceLastTick > 4) {
+            const adminId = Number(env.ADMIN_ID ?? "0");
+            if (adminId > 0) {
+              await container.tg.sendMessage(adminId, [
+                ``,
+                `<b>━━━ ⚠️ STALE TICK ALERT ━━━</b>`,
+                ``,
+                ``,
+                `<blockquote>⏰ <b>Last tick:</b> ${hoursSinceLastTick.toFixed(1)} hours ago</blockquote>`,
+                `<blockquote>💡 <b>External cron (cron-job.org) may be down.</b></blockquote>`,
+                `<blockquote>📅 <b>Time:</b> ${new Date().toISOString()}</blockquote>`,
+              ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+            }
+          }
+        }
+
         const lock = await acquireTickLock(container.kv, 90);
         if (!lock.acquired) {
           console.log("[cron] tick lock held — skipping");

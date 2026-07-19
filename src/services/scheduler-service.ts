@@ -249,8 +249,9 @@ export class SchedulerService {
         // v8.5.1: Mark as failed in strategy plan (not dailyPlanner).
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+        } else {
+          await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
         }
-        await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
           date: slot.date,
@@ -375,8 +376,10 @@ export class SchedulerService {
             await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
           }
 
-          // Mark slot as fired (to avoid retrying with no content).
-          await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+          // v9.1.0: Only use dailyPlanner when strategyEngine is not available.
+          if (!this.deps.strategyEngine) {
+            await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+          }
 
           return {
             ok: false,
@@ -399,7 +402,12 @@ export class SchedulerService {
       const result = await this.deps.publishingService.publish(content);
 
       // 4. Mark slot as fired (success or failure — prevents infinite retry).
-      await this.deps.dailyPlanner.markSlotFired(slot, content.id);
+      // v9.1.0: Only call dailyPlanner.markSlotFired when strategyEngine is NOT available.
+      // When strategyEngine is available, markPostPublished/markPostFailed is the
+      // single source of truth — calling both was doubling KV writes.
+      if (!this.deps.strategyEngine) {
+        await this.deps.dailyPlanner.markSlotFired(slot, content.id);
+      }
 
       // v8.8.0: If publish failed (quality gate, sendPhoto error, etc.),
       // try a fallback plugin from the same category before giving up.
@@ -447,7 +455,10 @@ export class SchedulerService {
                   ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
                 }
                 // Return the backup result.
-                await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
+                // v9.1.0: Skip dailyPlanner when strategyEngine is available.
+                if (!this.deps.strategyEngine) {
+                  await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
+                }
                 return {
                   ok: true,
                   contentId: fbResult.content.id,
@@ -547,8 +558,10 @@ export class SchedulerService {
         error: message,
         message: "Publish failed",
       });
-      // Mark slot as fired to prevent infinite retry loop.
-      await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
+      // v9.1.0: Only use dailyPlanner when strategyEngine is not available.
+      if (!this.deps.strategyEngine) {
+        await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
+      }
 
       // v8.10.0: If KV quota exceeded, notify admin immediately.
       if (message.includes("KV put() limit") || message.includes("quota")) {
