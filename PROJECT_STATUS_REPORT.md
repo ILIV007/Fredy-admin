@@ -1,23 +1,25 @@
 # Fredy — Project Status Report
 
-> **Document type:** Pre-refactor analysis & context initialization
-> **Target version:** Fredy v11
+> **Document type:** Living status document (updated per release)
+> **Current version:** Fredy v11.1.0
 > **Source baseline:** Fredy-admin v9.3.2 (uploaded 2026-07-19)
-> **Report date:** 2026-07-19
-> **Status:** Analysis complete. Awaiting explicit implementation instructions.
+> **Last updated:** 2026-07-20 (v11.1.0 refactor)
+> **Status:** v11.1.0 complete. ProviderEngine wired, central config, rotation, breaking content.
 > **Author:** Z.ai Code (continuation agent)
 
 ---
 
 ## 0. Executive Summary
 
-Fredy is a production-grade, autonomous Telegram content publishing platform running on **Cloudflare Workers** (free tier). The uploaded codebase (v9.3.2) is mature: **~150 TypeScript files**, **54 services**, **12 content-source plugins**, **2 AI providers** (Gemini + OpenRouter), **13 admin screens**, **7 bot commands**, a **1700-line HTML dashboard** embedded in `manager.ts`, and **137 passing tests**.
+Fredy is a production-grade, autonomous Telegram content publishing platform running on **Cloudflare Workers** (free tier). As of v11.1.0, the codebase has: **~160 TypeScript files**, **57 services**, **20 content-source plugins** (8 new + 12 existing), **2 AI providers** (Gemini + OpenRouter), **13 admin screens**, **7 bot commands**, a **1700-line HTML dashboard** embedded in `manager.ts`, and **202 passing tests** (137 existing + 65 new registry tests).
 
-The architecture is clean and disciplined: a strict **4-layer** model (Entry → Orchestrators → Services → Primitives), a hand-rolled **DI container** rebuilt per request, a **registry-based** admin panel (no if/else cascades), a **section-registry** config system with **15 versioned sections**, and a single **KV namespace** with prefix-namespaced keys optimized for the free-tier write budget.
+The architecture is clean and disciplined: a strict **4-layer** model (Entry → Orchestrators → Services → Primitives), a hand-rolled **DI container** rebuilt per request, a **registry-based** admin panel (no if/else cascades), a **section-registry** config system with **16 versioned sections** (added `tiers`), and a single **KV namespace** with prefix-namespaced keys optimized for the free-tier write budget.
 
-For v11, the highest-leverage refactor is to **extract the 1700-line `manager.ts` HTML-in-string dashboard into a proper Next.js 16 web application** (the "Mission Control" dashboard), while preserving the Cloudflare Workers backend (bot, scheduler, pipeline) as-is. This aligns with the bootstrap directive: *"Dashboard is the Mission Control… Dashboard controls the system."*
+### v11.1.0 Decision: Next.js Dashboard — DEFERRED
 
-No code changes have been made to the Fredy backend. This report is analysis-only.
+The proposal to extract `manager.ts` into a separate Next.js 16 web app (§13.1 below) is **deferred**. The Worker-embedded `manager.ts` dashboard remains the primary UI. Rationale: the user's focus is on the Telegram bot and backend architecture, not a frontend rewrite. The `manager.ts` dashboard will be **extended** (not replaced) with new Tier/Weight/Quality/Breaking/Rotation sections in a future release. This document no longer claims the Next.js dashboard is "the primary deliverable."
+
+**No code changes have been made to the Fredy backend beyond the v11.1.0 refactor described in CHANGELOG.md.**
 
 ---
 

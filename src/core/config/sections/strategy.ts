@@ -106,13 +106,15 @@ export const BUILTIN_STRATEGIES: Readonly<Record<string, StrategyDefinition>> = 
 import type { WeeklyThemes } from "../../../types/strategy";
 
 export const DEFAULT_WEEKLY_THEMES: WeeklyThemes = [
-  { day: 1, dayName: "Monday",    topics: ["AI", "Open Source", "GitHub"] },
-  { day: 2, dayName: "Tuesday",   topics: ["Frameworks", "Libraries", "Developer Tools"] },
-  { day: 3, dayName: "Wednesday", topics: ["Cloud", "Backend", "DevOps"] },
-  { day: 4, dayName: "Thursday",  topics: ["Security", "Networking", "Infrastructure"] },
-  { day: 5, dayName: "Friday",    topics: ["Machine Learning", "Research", "NASA"] },
-  { day: 6, dayName: "Saturday",  topics: ["Open Source", "Community", "Projects"] },
-  { day: 0, dayName: "Sunday",    topics: ["Light Content", "Quotes", "XKCD", "Developer Facts"] },
+  // v11.1.0: Updated weekly themes per refactor spec.
+  // Day 0 = Sunday (JS getDay()), 1 = Monday, ... 6 = Saturday.
+  { day: 6, dayName: "Saturday",  topics: ["AI", "Open Source", "Hugging Face", "GitHub"] },
+  { day: 0, dayName: "Sunday",    topics: ["Cloud", "Backend", "Cloudflare", "DevOps"] },
+  { day: 1, dayName: "Monday",    topics: ["Web Development", "Frameworks", "React", "Next.js"] },
+  { day: 2, dayName: "Tuesday",   topics: ["Open Source", "GitHub", "Community"] },
+  { day: 3, dayName: "Wednesday", topics: ["Security", "Advisories", "GitHub Security"] },
+  { day: 4, dayName: "Thursday",  topics: ["Developer Tools", "Product Hunt", "Dev.to"] },
+  { day: 5, dayName: "Friday",    topics: ["Community", "Space", "NASA", "XKCD"] },
 ];
 
 // ────────────────────────────────────────────────────────────
@@ -120,20 +122,33 @@ export const DEFAULT_WEEKLY_THEMES: WeeklyThemes = [
 // ────────────────────────────────────────────────────────────
 
 export const CATEGORY_PROVIDERS: Readonly<Record<string, readonly string[]>> = {
+  // v11.1.0: Updated with all 20 providers (active + legacy).
   A: [
     "github",
     "github-trending",
     "github-releases",
+    "github-events",
+    "github-security",
     "devto",
     "stackexchange",
+    "huggingface-blog",
+    "reddit-v2",
+    // Legacy:
+    "reddit",
   ],
   B: [
+    "hackernews-algolia",
+    "cloudflare-blog",
+    "producthunt",
+    "openai-news",
+    // Legacy:
     "news",
     "hackernews",
   ],
   C: [
     "nasa",
     "xkcd",
+    // Legacy:
     "wikimedia",
     "joke",
   ],

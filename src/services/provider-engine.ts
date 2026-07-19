@@ -25,15 +25,14 @@ import type { KVStore } from "./kv-store";
 import type { Logger } from "./logger";
 import type { PluginManager } from "./plugin-manager";
 import {
-  ADAPTIVE_REFRESH_BACKOFF_MULTIPLIER,
   ADAPTIVE_REFRESH_EMPTY_THRESHOLD,
   ADAPTIVE_REFRESH_MAX_BACKOFF,
-  PROVIDER_REPUTATION_DEFAULTS,
   TIER_S_REFRESH_HOURS,
   TIER_A_REFRESH_HOURS,
   TIER_B_REFRESH_HOURS,
   TIER_LEGACY_REFRESH_HOURS,
 } from "../core/constants";
+import { getReputationScore, getRefreshInterval as getConfigRefreshInterval } from "../core/providers.config";
 
 export interface ProviderEngineDeps {
   readonly kv: KVStore;
@@ -88,6 +87,7 @@ export class ProviderEngine {
   /**
    * Determine which providers are due for refresh.
    * Only returns providers whose refresh interval (adjusted by backoff) has expired.
+   * v11.1.0: Uses provider-specific refresh interval from providers.config.ts.
    */
   getDueProviders(now: number = Date.now()): readonly DueProvider[] {
     const plugins = this.deps.pluginManager.listEnabledByTier();
@@ -96,7 +96,8 @@ export class ProviderEngine {
     for (const plugin of plugins) {
       const status = this.deps.pluginManager.getStatus(plugin.metadata.id);
       const tier = plugin.getTier();
-      const baseInterval = this.getRefreshInterval(tier);
+      // v11.1.0: Use provider-specific interval from central config, fall back to tier default.
+      const baseInterval = this.getProviderRefreshInterval(plugin.metadata.id, tier);
       const backoff = status.currentBackoffMultiplier || 1;
       const effectiveInterval = baseInterval * backoff;
       const intervalMs = effectiveInterval * MS_PER_HOUR;
@@ -137,10 +138,24 @@ export class ProviderEngine {
   }
 
   /**
+   * Get the provider-specific refresh interval (from providers.config.ts).
+   * Falls back to the tier default if not configured.
+   * v11.1.0: reads from central config.
+   */
+  private getProviderRefreshInterval(pluginId: string, tier: Tier): number {
+    const configInterval = getConfigRefreshInterval(pluginId);
+    return configInterval > 0 ? configInterval : this.getRefreshInterval(tier);
+  }
+
+  /**
    * v11 Phase 3: Adaptive Refresh.
    * If a provider returns no useful content for N consecutive fetches,
    * increase its backoff multiplier (up to MAX_BACKOFF).
    * When quality improves, reset backoff to 1.
+   *
+   * v11.1.0: Updated progression per spec — 2h → 4h → 6h (3 steps, not exponential).
+   * Backoff steps: 1x (normal) → 2x → 3x → 3x (capped).
+   * On quality content: immediately restore to 1x.
    */
   applyAdaptiveBackoff(pluginId: string, hadUsefulContent: boolean): void {
     const status = this.deps.pluginManager.getStatus(pluginId);
@@ -150,7 +165,8 @@ export class ProviderEngine {
       // Increment consecutive empty fetches
       const emptyCount = status.consecutiveEmptyFetches + 1;
       if (emptyCount >= ADAPTIVE_REFRESH_EMPTY_THRESHOLD) {
-        newBackoff = Math.min(newBackoff * ADAPTIVE_REFRESH_BACKOFF_MULTIPLIER, ADAPTIVE_REFRESH_MAX_BACKOFF);
+        // v11.1.0: Linear progression 1→2→3 (maps to 2h→4h→6h for Tier S)
+        newBackoff = Math.min(newBackoff + 1, ADAPTIVE_REFRESH_MAX_BACKOFF);
         this.deps.logger.warn("provider.adaptive_backoff", {
           pluginId,
           emptyCount,
@@ -175,9 +191,9 @@ export class ProviderEngine {
     });
   }
 
-  /** Get the reputation score for a provider. */
+  /** Get the reputation score for a provider. v11.1.0: reads from providers.config.ts */
   getReputation(pluginId: string): number {
-    return PROVIDER_REPUTATION_DEFAULTS[pluginId] ?? 60;
+    return getReputationScore(pluginId);
   }
 
   /** Compute analytics for a single provider. */

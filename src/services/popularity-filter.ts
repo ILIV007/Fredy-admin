@@ -15,6 +15,11 @@
  */
 
 import type { SourceItem } from "../types/api";
+import {
+  getMinStars,
+  getMinScore as getConfigMinScore,
+  isPopularityExempt,
+} from "../core/providers.config";
 
 export interface PopularityFilterDeps {
   /** Minimum popularity score (0–100). Items below this are rejected.
@@ -25,24 +30,9 @@ export interface PopularityFilterDeps {
 /** Default minimum popularity score (0–100). */
 const DEFAULT_MIN_SCORE = 30;
 
-/** Per-plugin minimum star counts — used when the plugin exposes
- *  `metadata.stars` directly (GitHub, GitHub Trending, GitHub Releases).
- *  v9.2.0: Raised minimums — only genuinely popular repos get through. */
-const PLUGIN_MIN_STARS: Readonly<Record<string, number>> = {
-  github: 100,            // v9.2.0: raised from 50 — only repos with 100+ stars
-  "github-trending": 100, // trending should be genuinely trending
-  "github-releases": 0,   // releases are pre-curated (we picked the repos)
-  // Other plugins don't have stars — they're exempt.
-};
-
-/** Per-plugin minimum score/points/reactions thresholds for HN/SE/Dev.to.
- *  These are HARD floors applied on top of the log-based popularity score. */
-const PLUGIN_MIN_SCORE: Readonly<Record<string, number>> = {
-  hackernews: 50,        // HN: min 50 points (was already filtered, now enforced)
-  stackexchange: 5,      // StackExchange: min 5 score (was 1, now stricter)
-  devto: 50,             // Dev.to: min 50 reactions
-  // news, nasa, joke, xkcd, wikimedia, reddit — no score metric, exempt.
-};
+// v11.1.0: PLUGIN_MIN_STARS and PLUGIN_MIN_SCORE moved to src/core/providers.config.ts.
+// These local maps are removed — values now come from the central config.
+// Keeping them empty caused unused-variable warnings, so they're fully removed.
 
 export class PopularityFilter {
   private readonly minScore: number;
@@ -126,30 +116,36 @@ export class PopularityFilter {
    * Some plugins don't expose popularity metrics because they don't
    * apply (e.g., XKCD comics, jokes, NASA APOD). Items from these
    * plugins are always allowed through.
+   * v11.1.0: reads from providers.config.ts isPopularityExempt().
    */
   private isExempt(item: SourceItem): boolean {
-    return EXEMPT_PLUGINS.has(item.source);
+    return isPopularityExempt(item.source);
   }
 
   /**
    * Hard minimum-score/reactions gate for plugins that expose these
    * metrics (HN, StackExchange, Dev.to). Applied on top of the log-based
    * popularity score.
+   * v11.1.0: thresholds read from providers.config.ts getMinScore().
    */
   meetsMinScore(item: SourceItem): boolean {
     const meta = (item.metadata ?? {}) as Record<string, unknown>;
     const pluginId = item.source;
-    const min = PLUGIN_MIN_SCORE[pluginId] ?? 0;
+    const min = getConfigMinScore(pluginId);
     if (min === 0) return true; // no hard floor for this plugin
 
     // Check the appropriate metric based on plugin.
-    if (pluginId === "hackernews" || pluginId === "stackexchange") {
-      const score = typeof meta.score === "number" ? meta.score : 0;
+    if (pluginId === "hackernews" || pluginId === "hackernews-algolia" || pluginId === "stackexchange") {
+      const score = typeof meta.score === "number" ? meta.score : (typeof meta.points === "number" ? meta.points : 0);
       return score >= min;
     }
     if (pluginId === "devto") {
       const reactions = typeof meta.reactions === "number" ? meta.reactions : 0;
       return reactions >= min;
+    }
+    if (pluginId === "reddit-v2") {
+      const score = typeof meta.score === "number" ? meta.score : 0;
+      return score >= min;
     }
     return true;
   }
@@ -157,24 +153,15 @@ export class PopularityFilter {
   /**
    * Hard minimum-star gate for GitHub plugins. Even if the popularity
    * score threshold is met, repos below this absolute floor are rejected.
-   * This catches the case where the API query returns mixed-quality
-   * results and the log-based score still lets low-star repos through.
+   * v11.1.0: thresholds read from providers.config.ts getMinStars().
    */
   meetsMinStars(item: SourceItem): boolean {
     const meta = (item.metadata ?? {}) as Record<string, unknown>;
     const stars = typeof meta.stars === "number" ? meta.stars : null;
     if (stars === null) return true; // no stars metadata — allow
-    const min = PLUGIN_MIN_STARS[item.source] ?? 0;
+    const min = getMinStars(item.source);
     return stars >= min;
   }
 }
 
-/** Plugins that don't have popularity metrics and bypass the filter. */
-const EXEMPT_PLUGINS = new Set<string>([
-  "nasa",
-  "joke",
-  "xkcd",
-  "wikimedia",
-  "reddit",
-  "news",
-]);
+// v11.1.0: EXEMPT_PLUGINS set removed — now derived from providers.config.ts isPopularityExempt().

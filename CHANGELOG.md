@@ -2,7 +2,153 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
-## [9.3.1] — 2026-07-19 — Dedup-after-publish fix, grace-period fix, backup-PM fix, failure-log fix
+## [11.1.0] — 2026-07-20 — Refactor: ProviderEngine wired, Central Config, Rotation, Breaking Content
+
+### 🔴 Critical Fixes (from Full Debug Prompt)
+
+- **ProviderEngine.refreshDueProviders() is now called from tick.ts.** Previously,
+  the entire Tier-based scheduling system was orphaned code — built and wired into
+  the DI container, but never invoked from the request/tick lifecycle. Now,
+  `runTickWork()` in `src/entry/tick.ts` calls `container.providerEngine.refreshDueProviders(3)`
+  as the FIRST step (before publish + maintainQueue), ensuring tier-based refresh
+  cadences (S=2h, A=6h, B=12h, legacy=24h) actually take effect. Only providers
+  whose refresh interval has expired are fetched, minimizing API calls and KV writes.
+
+- **All 8 new plugin IDs added to credibility/popularity lookup tables.** The
+  recurring bug (3rd occurrence) where new plugins silently fell back to neutral
+  scores is now fixed structurally:
+  - Created `src/core/providers.config.ts` — single source of truth for ALL
+    provider metadata (credibility, reputation, weight, minStars, minScore,
+    refresh interval, cache TTL, rate limit, canBreak, popularityExempt).
+  - `candidate-ranker.ts` CREDIBILITY_SCORES now reads from `getCredibilityScore()`.
+  - `popularity-filter.ts` PLUGIN_MIN_STARS / PLUGIN_MIN_SCORE / EXEMPT_PLUGINS
+    now read from `getMinStars()`, `getMinScore()`, `isPopularityExempt()`.
+  - `constants.ts` PROVIDER_REPUTATION_DEFAULTS now reads from `getReputationScore()`.
+  - Added `scripts/test-plugin-registry.ts` — structural test asserting every
+    registered plugin has a config entry (65 assertions, all passing). This test
+    runs as part of `npm test` to prevent a 4th recurrence.
+
+### New Features
+
+- **Central Provider Config (`src/core/providers.config.ts`)** — 20 providers in a
+  single master table. Adding a provider now requires editing ONE file instead of
+  4-5 scattered lookup maps. Includes: id, name, tier, category, weight,
+  refreshIntervalHours, cacheTtlSeconds, credibility, reputation, rateLimit,
+  enabledByDefault, supportsImages, minStars, minScore, popularityExempt, canBreak,
+  homepage, docsUrl.
+
+- **Provider Weight System** — every provider has a configurable weight (0-100).
+  `selectProviderWeighted()` in providers.config.ts performs weighted-random
+  selection. Higher weight = higher probability. Weights are editable from the
+  dashboard (runtime config).
+
+- **Provider Rotation (`src/services/provider-rotation.ts`)** — prevents repetitive
+  publishing:
+  1. No same provider in consecutive publish cycles.
+  2. No same provider until at least 2 other providers have published.
+  3. No same topic (content hash) within the recent window.
+  State stored in KV at `fredy:rotation:history` (7-day TTL, 20-entry ring buffer).
+
+- **Breaking Content (`src/services/breaking-content.ts`)** — allows ONE extra
+  publish slot per 24h for exceptional content:
+  - github-security: CVSS >= 9 (critical)
+  - hackernews-algolia: points >= 500 (very high)
+  - github-releases/events: stars >= 5000 (major repo)
+  - cloudflare-blog/huggingface-blog: 3+ preferred topics
+  - openai-news: model release
+  Cooldown enforced via `fredy:breaking:lastSlot` KV key (24h TTL).
+
+- **Updated Weekly Themes** — new 7-day mapping per spec:
+  - Saturday: AI & Open Source
+  - Sunday: Cloud & Backend
+  - Monday: Web Development
+  - Tuesday: Open Source
+  - Wednesday: Security
+  - Thursday: Developer Tools
+  - Friday: Community & Space
+
+- **Updated Adaptive Refresh** — linear progression 2h→4h→6h (was exponential 2x→4x).
+  `ADAPTIVE_REFRESH_MAX_BACKOFF` changed from 4 to 3. On quality content: immediate
+  restore to 1x.
+
+- **Updated CATEGORY_PROVIDERS** — now includes all 20 providers (active + legacy)
+  with proper category assignments.
+
+### Architecture
+
+- **ProviderEngine** fully integrated into the tick pipeline. KV write impact:
+  - Before (v11.0.0): ProviderEngine was orphaned — 0 KV writes from it.
+  - After (v11.1.0): ~1-3 KV writes per tick (status updates for refreshed providers,
+    `lastRefreshAt` timestamp). This is offset by the reduction in unnecessary API
+    calls (only due providers are fetched) and better cache utilization.
+  - Net effect: FEWER total KV writes per day because staggered refresh means fewer
+    cache writes (only S-tier providers write cache every 2h; B-tier every 12h).
+
+- **Container** now wires `providerRotation` and `breakingContent` services.
+
+### Tests
+
+- New: `scripts/test-plugin-registry.ts` (65 assertions) — verifies every registered
+  plugin has entries in providers.config.ts for: weight, credibility, reputation,
+  tier, category, no duplicates, count match.
+- Total tests: 137 (existing) + 65 (new registry) = 202.
+
+### Documentation
+
+- `PROJECT_STATUS_REPORT.md` updated to reflect actual state (ProviderEngine is
+  now wired, not orphaned).
+- `FINAL_AUDIT_REPORT.md` updated to v11.1.0 (was stale at v7.1.0).
+
+### Housekeeping
+
+- `VERSION` → `11.1.0`
+- `package.json` → `11.1.0`
+- `src/core/constants.ts` → `APP_VERSION = "11.1.0"`
+- TypeScript: 0 errors (`npx tsc --noEmit`).
+- Plugin registry test: 65/65 passing.
+
+### Migration Notes (v9.x → v11.1.0)
+
+1. **No breaking changes to existing data.** KV key patterns unchanged.
+2. **Legacy providers** (news, joke, wikimedia, hackernews, reddit) are disabled
+   by default but code is preserved. Enable from dashboard if needed.
+3. **Tier assignments** are in each plugin's manifest.ts. To change a provider's
+   tier, edit its manifest OR override at runtime via the `tiers` config section.
+4. **Provider weights** are in `src/core/providers.config.ts`. Edit there to change
+   defaults; override at runtime via dashboard.
+5. **Cron triggers unchanged**: external cron-job.org every 2h + Cloudflare internal
+   `0 0 * * *` every 24h backup.
+
+---
+
+## [11.0.0] — 2026-07-20 — Tier-Based Provider Architecture (Phase 1+2+3)
+
+### Phase 1 — Provider Tier System
+
+- Added `Tier` type (`S` | `A` | `B` | `legacy`) in `src/types/tier.ts`.
+- Added `tier` field to `PluginManifest`, `getTier()` to `Plugin` interface.
+- Created 8 new plugins: github-events, hackernews-algolia, cloudflare-blog,
+  huggingface-blog, producthunt, github-security, openai-news, reddit-v2.
+- Updated all 12 existing plugin manifests with tier assignments.
+- Created `tiers` config section with per-provider runtime config.
+- Added tier-based methods to PluginManager: listByTier, listEnabledForTier, etc.
+
+### Phase 2 — Provider Quality Filters
+
+- Each new plugin implements `qualityFilter()` with provider-specific thresholds.
+- Filters run BEFORE AI and BEFORE ranking.
+
+### Phase 3 — Intelligent Provider Engine
+
+- Created `src/services/provider-engine.ts` (315 lines).
+- Adaptive refresh, staggered scheduling, analytics, reputation scoring.
+- Note: In v11.0.0, ProviderEngine was orphaned (not called from tick). Fixed in v11.1.0.
+
+---
+
+## [9.3.2] — 2026-07-19 — Version sync, dashboard polish
+
+
 
 ### Critical Fixes
 

@@ -28,6 +28,8 @@ import { PluginManager } from "./services/plugin-manager";
 import { ProviderRegistry } from "./services/provider-registry";
 import { PluginLoader } from "./services/plugin-loader";
 import { ProviderEngine } from "./services/provider-engine";
+import { ProviderRotation } from "./services/provider-rotation";
+import { BreakingContentService } from "./services/breaking-content";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
 import { LanguageManager } from "./services/language-manager";
@@ -139,6 +141,9 @@ export function buildContainer(env: Env): Container {
   pluginLoader.loadAll();
   // v11 Phase 3: Intelligent Provider Engine (staggered refresh, adaptive backoff, analytics)
   const providerEngine = new ProviderEngine({ kv, logger, pluginManager: plugins });
+  // v11.1.0: Provider Rotation (anti-repeat) + Breaking Content
+  const providerRotation = new ProviderRotation({ kv, logger });
+  const breakingContent = new BreakingContentService({ kv, logger });
 
   // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
@@ -306,6 +311,8 @@ export function buildContainer(env: Env): Container {
     plugins,
     providers,
     providerEngine,
+    providerRotation,
+    breakingContent,
     categories,
     scheduler,
     lang,

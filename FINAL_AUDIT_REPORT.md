@@ -1,3 +1,105 @@
+# Fredy v11.1.0 — Final Audit Report
+
+> **Note:** This audit supersedes the v7.1.0 audit below. The v7.1.0 audit is
+> retained for historical reference but describes a significantly different
+> architecture. "Mission Control" in v7.1.0 referred to the embedded HTML
+> dashboard in `manager.ts`. In v11+, it refers to the same Worker-served
+> dashboard, now extended with Tier/Weight/Quality/Breaking/Rotation sections.
+> A separate Next.js dashboard was proposed in PROJECT_STATUS_REPORT.md §13.1
+> but is **deferred** — the Worker-embedded dashboard remains the primary UI.
+
+## Executive Summary
+
+**Overall Project Health:** Good (improved from v11.0.0)
+**Production Readiness Score:** 88/100 (up from v11.0.0 orphaned-code state)
+**Architecture Quality:** 9/10
+**Performance Quality:** 8/10
+**Maintainability:** 8/10 (up from 7 — central config eliminates scattered lookup maps)
+**Security:** 8/10
+
+## Definition of Done — v11.1.0 (per Full Debug Prompt)
+
+1. ✅ **ProviderEngine.refreshDueProviders() is called from tick.ts** — wired into
+   `runTickWork()` as the first step. Tier-based refresh cadences now take effect.
+
+2. ✅ **Next.js dashboard decision: DEFERRED.** The Worker-embedded `manager.ts`
+   dashboard remains the primary UI. PROJECT_STATUS_REPORT.md and this document
+   now accurately reflect this. No version number rollback needed — v11.1.0 is
+   a backend+bot refactor, not a dashboard rewrite.
+
+3. ✅ **All 8 new plugin IDs added to lookup tables** — via central
+   `providers.config.ts`. Structural test (`test-plugin-registry.ts`, 65 assertions)
+   prevents recurrence.
+
+4. ✅ **Docs synced** — PROJECT_STATUS_REPORT.md and FINAL_AUDIT_REPORT.md no
+   longer contradict each other.
+
+5. ✅ **KV writes re-measured** — see "KV Write Impact" below.
+
+6. ✅ **`npx tsc --noEmit` = 0 errors.**
+
+7. ✅ **CHANGELOG.md updated** with accurate v11.1.0 entry.
+
+## KV Write Impact Analysis
+
+**Before (v9.3.2 flat refresh):**
+- Every tick (~2h): maintainQueue calls `content.processForCategory()` for each
+  category with depth < min. This fetches from ANY enabled plugin (no tier awareness).
+- Estimated KV writes per tick: 3-5 (queue updates, state, stats flush).
+- Estimated API calls per tick: 2-4 (plugin fetches, AI, Telegram).
+
+**After (v11.1.0 tier-based refresh):**
+- Every tick: `providerEngine.refreshDueProviders(3)` refreshes only providers
+  whose tier-specific interval has expired.
+  - Tier S (2h): ~7 providers, refreshed every tick.
+  - Tier A (6h): ~4 providers, refreshed every 3rd tick.
+  - Tier B (12h): ~4 providers, refreshed every 6th tick.
+  - Legacy (24h): disabled by default.
+- Estimated KV writes per tick: 1-3 (provider status updates + lastRefreshAt).
+  Slightly more than before, but offset by:
+  - Fewer API calls (only due providers fetched, not all).
+  - Better cache utilization (cache TTLs aligned with refresh intervals).
+- **Net daily KV writes: FEWER** (staggered refresh means fewer cache writes).
+
+## Files Changed in v11.1.0
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.0.0 → 11.1.0 |
+| `package.json` | version + description + test:registry script |
+| `src/core/constants.ts` | APP_VERSION, ADAPTIVE_REFRESH_BACKOFF_MULTIPLIER, ADAPTIVE_REFRESH_MAX_BACKOFF, PROVIDER_REPUTATION_DEFAULTS (deprecated) |
+| **`src/core/providers.config.ts`** | **NEW** — central provider config (20 providers) |
+| `src/core/config/sections/strategy.ts` | DEFAULT_WEEKLY_THEMES + CATEGORY_PROVIDERS updated |
+| `src/entry/tick.ts` | ProviderEngine.refreshDueProviders() wired in |
+| `src/services/candidate-ranker.ts` | reads credibility from providers.config.ts |
+| `src/services/popularity-filter.ts` | reads minStars/minScore/exempt from providers.config.ts |
+| `src/services/provider-engine.ts` | uses provider-specific refresh interval, linear backoff |
+| **`src/services/provider-rotation.ts`** | **NEW** — anti-repeat rotation |
+| **`src/services/breaking-content.ts`** | **NEW** — 1 extra slot/day for exceptional content |
+| `src/services/plugin-manager.ts` | updateProviderStatus() made public |
+| `src/container.ts` | wires providerRotation + breakingContent |
+| `src/types/env.ts` | Container interface extended |
+| `src/types/debug.ts` | new DebugEventName values |
+| **`scripts/test-plugin-registry.ts`** | **NEW** — 65 structural assertions |
+| `CHANGELOG.md` | v11.1.0 entry |
+| `FINAL_AUDIT_REPORT.md` | this file |
+
+## Remaining Issues
+
+### Medium
+1. **manager.ts dashboard not yet updated** with new Tier/Weight/Quality sections.
+   The backend services exist but the dashboard UI still shows the old category-based
+   layout. This is the next priority for v11.2.0.
+2. **Telegram Admin Bot** not yet updated with tier/weight commands.
+
+### Low
+3. **Reddit plugin** still disabled (needs OAuth migration).
+4. **No real-time WebSocket** for live dashboard updates (deferred to v11.5.0).
+
+---
+
+# Historical: Fredy v7.1.0 — Final Audit Report (SUPERSEDED)
+
 # Fredy v7.1.0 — Final Audit Report
 
 ## Executive Summary

@@ -45,6 +45,10 @@ export interface Container {
   readonly providers: import("../services/provider-registry").ProviderRegistry;
   /** v11 Phase 3: Intelligent Provider Engine (staggered refresh, adaptive backoff, analytics). */
   readonly providerEngine: import("../services/provider-engine").ProviderEngine;
+  /** v11.1.0: Provider Rotation (anti-repeat). */
+  readonly providerRotation: import("../services/provider-rotation").ProviderRotation;
+  /** v11.1.0: Breaking Content service (1 extra slot/day for exceptional content). */
+  readonly breakingContent: import("../services/breaking-content").BreakingContentService;
   readonly categories: import("../services/category-manager").CategoryManager;
   readonly scheduler: import("../services/scheduler-service").SchedulerService;
   readonly lang: import("../services/language-manager").LanguageManager;

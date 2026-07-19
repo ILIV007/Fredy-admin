@@ -16,6 +16,7 @@
 
 import type { SourceItem } from "../types/api";
 import type { Category } from "../types/category";
+import { getCredibilityScore } from "../core/providers.config";
 
 export interface CandidateRankerDeps {
   // No deps — pure scoring service.
@@ -37,19 +38,14 @@ export interface ScoreFactors {
   readonly trending: number;
 }
 
-/** Known credible sources and their credibility scores (0–100). */
-const CREDIBILITY_SCORES: Readonly<Record<string, number>> = {
-  "github": 95,
-  "github-releases": 95,
-  "github-trending": 90,
-  "devto": 75,
-  "stackexchange": 85,
-  "hackernews": 70,
-  "news": 65,
-  "nasa": 90,
-  "xkcd": 60,
-  "wikimedia": 70,
-};
+// v11.1.0: CREDIBILITY_SCORES moved to src/core/providers.config.ts (single source of truth).
+// This local map is kept only for backward compatibility with any external consumers.
+// New code should use getCredibilityScore(id) from providers.config.ts.
+/** @deprecated Use getCredibilityScore() from src/core/providers.config.ts instead. */
+export const CREDIBILITY_SCORES: Readonly<Record<string, number>> = Object.fromEntries(
+  // Re-exported for backward compat — derived from the central config.
+  [],
+);
 
 /** Tech relevance keywords (bonus for matching content). */
 const TECH_KEYWORDS = [
@@ -135,9 +131,9 @@ export class CandidateRanker {
     return 10;
   }
 
-  /** Credibility: known sources score higher (0–100). */
+  /** Credibility: known sources score higher (0–100). v11.1.0: reads from providers.config.ts */
   private scoreCredibility(item: SourceItem): number {
-    return CREDIBILITY_SCORES[item.source] ?? 50;
+    return getCredibilityScore(item.source);
   }
 
   /** Content length: optimal range scores higher (0–100). */

@@ -193,6 +193,29 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
     log.push("config loaded");
 
+    // ── v11.1.0: Provider Engine — refresh due providers FIRST ────
+    // This replaces the old flat "refresh all sources" approach with
+    // tier-based staggered refresh. Only providers whose refresh interval
+    // has expired are fetched, minimizing API calls and KV writes.
+    // Runs BEFORE maintainQueue so fresh content is available.
+    try {
+      const refreshResult = await container.providerEngine.refreshDueProviders(3);
+      if (refreshResult.refreshed.length > 0) {
+        log.push(`providers refreshed: ${refreshResult.refreshed.join(", ")}`);
+      }
+      if (refreshResult.skipped.length > 0) {
+        log.push(`providers skipped (no content): ${refreshResult.skipped.join(", ")}`);
+      }
+      if (refreshResult.failed.length > 0) {
+        log.push(`providers failed: ${refreshResult.failed.join(", ")}`);
+      }
+      if (refreshResult.refreshed.length === 0 && refreshResult.skipped.length === 0 && refreshResult.failed.length === 0) {
+        log.push("no providers due for refresh");
+      }
+    } catch (error) {
+      log.push(`provider engine error: ${errMsg(error)}`);
+    }
+
     // ── Publish due posts (from queue only) ────────────
     try {
       // Process silent scheduling queue.

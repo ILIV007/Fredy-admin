@@ -1,7 +1,7 @@
 {
   "name": "fredy-admin",
-  "version": "11.0.0",
-  "description": "Fredy v11 — AI-powered Content Operating System with Tier-Based Provider Architecture. Cloudflare Workers, serverless, plugin-architected.",
+  "version": "11.1.0",
+  "description": "Fredy v11.1 — Editorial Engine with Tier-Based Providers, Adaptive Refresh, Rotation, Breaking Content. Cloudflare Workers, serverless.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
@@ -9,11 +9,12 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx scripts/test-scheduler.ts && npx tsx scripts/test-strategy.ts && npx tsx scripts/test-pipeline.ts && npx tsx scripts/test-dedup.ts",
+    "test": "npx tsx scripts/test-scheduler.ts && npx tsx scripts/test-strategy.ts && npx tsx scripts/test-pipeline.ts && npx tsx scripts/test-dedup.ts && npx tsx scripts/test-plugin-registry.ts",
     "test:scheduler": "npx tsx scripts/test-scheduler.ts",
     "test:strategy": "npx tsx scripts/test-strategy.ts",
     "test:pipeline": "npx tsx scripts/test-pipeline.ts",
-    "test:dedup": "npx tsx scripts/test-dedup.ts"
+    "test:dedup": "npx tsx scripts/test-dedup.ts",
+    "test:registry": "npx tsx scripts/test-plugin-registry.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
