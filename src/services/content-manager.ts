@@ -224,7 +224,9 @@ export class ContentManager {
           0,
           0,
         );
-        if (!skipDedup) await this.deps.duplicateDetector.record(item);
+        // v9.3.1: record() removed — was recording BEFORE publish, causing
+        // unpublished posts to be falsely detected as duplicates later.
+        // recordPublished() is now called by the caller after successful publish.
         if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
         return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
           error: "NASA direct (no AI needed)",
@@ -281,7 +283,9 @@ export class ContentManager {
           0,
           0,
         );
-        if (!skipDedup) await this.deps.duplicateDetector.record(item);
+        // v9.3.1: record() removed — was recording BEFORE publish, causing
+        // unpublished posts to be falsely detected as duplicates later.
+        // recordPublished() is now called by the caller after successful publish.
         if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
         return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
           error: aiResult.error ?? "AI failed",

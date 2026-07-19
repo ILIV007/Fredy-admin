@@ -221,13 +221,11 @@ export class SchedulerService {
    *  "failed" in the strategy plan, it's skipped. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
     // v9.3.1: Increased from 30min to 125min (2h5min).
-    // The external cron (cron-job.org) fires every 2 hours. Slot times are
-    // randomized within posting windows. If a slot is at 08:17 and the cron
-    // fires at 08:00 (slot not yet due) and 10:00 (1h43 overdue), the old
-    // 30-min grace would mark it as failed. With 125-min grace, the slot
-    // still fires on the next cron tick as long as it's within ~2h of the
-    // scheduled time. This matches the cron interval + a small buffer.
-    const GRACE_PERIOD_MS = 125 * 60 * 1000; // 2 hours 5 minutes
+    // v9.3.2: Increased to 180min (3h) — even more forgiving for the 2-hourly
+    // cron. If cron-job.org fires at 18:00 and 20:00, a slot at 17:12 would
+    // be 2h48 overdue by 20:00 — still within 3h grace. This ensures slots
+    // are never missed due to cron timing gaps.
+    const GRACE_PERIOD_MS = 180 * 60 * 1000; // 3 hours
 
     // v8.5.1: If using strategyEngine, get the plan to check post statuses.
     let stratPlan: import("../types/strategy").DailyPublishPlan | null = null;
@@ -239,7 +237,17 @@ export class SchedulerService {
 
     for (const slot of plan.slots) {
       // Check if slot is due (epochMs <= now).
-      if (slot.epochMs > now) continue;
+      if (slot.epochMs > now) {
+        this.deps.logger.info("scheduler.skip", {
+          slotIndex: slot.index,
+          time: slot.time,
+          reason: "not_yet_due",
+          epochMs: slot.epochMs,
+          now,
+          message: `Slot ${slot.index} not yet due (scheduled ${slot.time}, now ${new Date(now).toISOString()})`,
+        });
+        continue;
+      }
 
       // v8.5.1: Check if already fired — use strategy plan status if available,
       // otherwise fall back to dailyPlanner.isSlotFired().
@@ -248,21 +256,24 @@ export class SchedulerService {
         const post = stratPlan.posts.find(p => p.index === slot.index);
         if (post && (post.status === "published" || post.status === "failed" || post.status === "backup")) {
           alreadyFired = true;
+          this.deps.logger.info("scheduler.skip", {
+            slotIndex: slot.index,
+            time: slot.time,
+            reason: "already_fired",
+            status: post.status,
+            message: `Slot ${slot.index} already ${post.status}`,
+          });
         }
       } else {
         alreadyFired = await this.deps.dailyPlanner.isSlotFired(slot);
       }
       if (alreadyFired) continue;
 
-      // v8.0.0: 30-minute grace period — if slot is >30min overdue, mark
-      // as "passed" instead of firing (avoids burst-publishing missed slots
-      // after a long scheduler outage).
+      // v9.3.2: Grace period — if slot is too far overdue, mark as failed.
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
-        // v9.2.0: Only use one write method — strategyEngine or dailyPlanner.
-        // v9.2.3: Pass the reason so admin can see it was a missed-grace, not a real failure.
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: `Slot >30min overdue — marked as passed (grace period). Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
+            error: `Slot >3h overdue — marked as passed (grace period). Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
             stage: "grace",
             plugin: null,
           }).catch(() => {});
@@ -274,11 +285,19 @@ export class SchedulerService {
           date: slot.date,
           time: slot.time,
           reason: "slot_overdue_grace",
-          message: "Slot >30min overdue — marking as passed",
+          message: "Slot >3h overdue — marking as passed",
         });
         continue;
       }
 
+      // Slot is due, not fired, within grace — fire it!
+      this.deps.logger.info("scheduler.slot_fired", {
+        slotIndex: slot.index,
+        time: slot.time,
+        category: slot.category,
+        overdue: Math.round((now - slot.epochMs) / 60000) + "min",
+        message: `Firing slot ${slot.index} (${slot.time}, ${Math.round((now - slot.epochMs) / 60000)}min overdue)`,
+      });
       return slot;
     }
     return null;

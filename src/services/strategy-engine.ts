@@ -128,8 +128,11 @@ export class StrategyEngine {
     );
 
     // 5. Assign categories + providers + priorities.
-    // v9.0.3: Mark any slots that are already in the past as "failed".
-    const now = Date.now();
+    // v9.3.2: Do NOT mark past slots as "failed" on generation — let the
+    // scheduler's findDueSlot() handle them with the grace period. Marking
+    // them as "failed" here prevented the scheduler from ever firing them,
+    // causing all past slots to be silently skipped when a plan was
+    // regenerated mid-day.
     const posts: PlannedPost[] = slots.map((slot, index) => {
       const provider = this.selectProvider(slot.category, theme);
       const priority = this.assignPriority(slot.category, strategy.mode);
@@ -145,7 +148,7 @@ export class StrategyEngine {
         language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,
         priority,
         queueTarget: this.getQueueTarget(slot.category),
-        status: (slot.epochMs <= now ? "failed" : "pending") as PlannedPostStatus,
+        status: "pending" as PlannedPostStatus,
         windowIndex: index,
       };
     });
