@@ -98,8 +98,8 @@ export class StackExchangePlugin implements Plugin {
         tagged,
         site: "stackoverflow",
         pagesize: "20",
-        // v11.3.0: Add filter to get body excerpt
-        filter: "!nNPvSNdWme",
+        // v11.4.0: Use default filter (no custom filter param — custom filters
+        // can cause 400 errors if they're invalid or expired).
       });
 
       const url = `${SO_API}/questions?${params.toString()}`;

@@ -742,24 +742,25 @@ export async function managerHandler(
   }
 
   // ── Scheduler: force publish ──
-  // v11.2.0: Now acquires the tick lock to prevent concurrent execution
-  // with a cron tick. Previously, force-publish bypassed the lock entirely,
-  // which could cause lost-update races on the strategy plan.
+  // v11.4.0: CRITICAL FIX — previously called scheduler.tick() which fires ALL
+  // due slots (causing double-publish when manual + scheduled overlap).
+  // Now generates ONE fresh post and publishes it, WITHOUT touching scheduler.
   if (apiPath === "scheduler/force-publish" && request.method === "POST") {
     try {
-      const { acquireTickLock } = await import("../services/tick-lock");
       const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
-      const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
-      const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
-      if (!tickLock.acquired) {
-        return json({ ok: false, error: "Another tick is running. Wait ~90s and retry.", message: "Lock held" }, 409);
+      const lang = settings.language.default;
+      const result = await container.content.processForCategory(
+        "A", null, lang, { skipEnqueue: true },
+      );
+      if (result.ok && result.content) {
+        const pubResult = await container.finalPublisher.publish(result.content);
+        if (pubResult.ok) {
+          await container.duplicateDetector.recordPublished(result.content).catch(() => {});
+          return json({ ok: true, message: "Published (manual, not scheduled)", contentId: result.content.id });
+        }
+        return json({ ok: false, error: pubResult.error ?? "Publish failed" }, 500);
       }
-      try {
-        const result = await container.scheduler.tick();
-        return json({ ok: result.fired, result, message: result.fired ? "Publish triggered" : (result.skipReason ?? "No due slots") });
-      } finally {
-        await tickLock.release();
-      }
+      return json({ ok: false, error: result.error ?? "No content available" }, 500);
     } catch (error) {
       return json({ ok: false, error: errMsg(error) }, 500);
     }

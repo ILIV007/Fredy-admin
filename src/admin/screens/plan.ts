@@ -92,13 +92,24 @@ export const planScreen: Screen = {
     const action = parts[1];
 
     if (action === "firenext") {
+      // v11.4.0: CRITICAL FIX — previously called scheduler.tick() which fires
+      // ALL due slots. Now generates ONE fresh post and publishes it, WITHOUT
+      // touching the scheduler. This prevents the "double publish" bug.
       try {
-        const result = await ctx.container.scheduler.tick();
-        if (result.fired) {
-          return { toast: `⚡ Fired slot #${result.slot?.index ?? "?"}`, redirectTo: "plan" };
-        } else {
-          return { toast: `⚠️ ${result.skipReason ?? "No due slots"}` };
+        const settings = await ctx.container.config.getSettings(Number(ctx.container.env.ADMIN_ID ?? "0"));
+        const lang = settings.language.default;
+        const result = await ctx.container.content.processForCategory(
+          "A", null, lang, { skipEnqueue: true },
+        );
+        if (result.ok && result.content) {
+          const pubResult = await ctx.container.finalPublisher.publish(result.content);
+          if (pubResult.ok) {
+            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
+            return { toast: `⚡ Published! (manual, not scheduled)`, redirectTo: "plan" };
+          }
+          return { alert: `❌ Publish failed: ${pubResult.error}` };
         }
+        return { alert: `❌ No content available` };
       } catch (error) {
         return { alert: `❌ ${error instanceof Error ? error.message : String(error)}` };
       }

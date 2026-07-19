@@ -48,6 +48,10 @@ export const startCommand: Command = {
     const { container, adminId, chatId } = ctx;
     const curLang = await getBotUiLanguage(adminId, container.kv);
 
+    // v11.4.0: Register command menu with Telegram (so commands appear in "/" autocomplete).
+    // This is idempotent — safe to call on every /start.
+    void container.tg.registerCommands().catch(() => {});
+
     const lines = buildWelcomeMessage(curLang);
 
     // Single Language button + Open Dashboard button.
@@ -78,31 +82,43 @@ export function buildWelcomeMessage(lang: BotUiLanguage): string {
     return [
       `👋 <b>به فردی خوش آمدید!</b>`,
       ``,
-      `<blockquote>🤖 <b>فردی</b> — موتور محتوای هوش مصنوعی برای کانال تلگرام ILIVIR3</blockquote>`,
-      `<blockquote>📡 ۱۲ پلاگین منبع: GitHub، Dev.to، HackerNews، NASA، NewsAPI و غیره</blockquote>`,
+      `<blockquote>🤖 <b>فردی v11.4</b> — موتور محتوای هوشمند برای کانال ILIVIR3</blockquote>`,
+      `<blockquote>📡 ۲۰ پلاگین منبع در ۴ Tier (S/A/B/Legacy)</blockquote>`,
       `<blockquote>🧠 بازنویسی با Gemini/OpenRouter AI</blockquote>`,
-      `<blockquote>📅 زمان‌بندی قابل تنظیم با کنترل کیفیت</blockquote>`,
+      `<blockquote>📅 زمان‌بندی هوشمند با کنترل کیفیت</blockquote>`,
+      `<blockquote>🔬 سیستم Debug کامل Scheduler</blockquote>`,
       ``,
-      `<b>📋 دستورات:</b>`,
+      `<b>📋 دستورات (در منوی /):</b>`,
       `  • <code>/menu</code> — داشبورد مدیریت`,
-      `  • <code>/help</code> — راهنما`,
+      `  • <code>/tiers</code> — مشاهده پلاگین‌ها بر اساس Tier`,
+      `  • <code>/plan</code> — برنامه انتشار امروز`,
+      `  • <code>/debug</code> — Debug Scheduler`,
+      `  • <code>/providers</code> — سلامت پلاگین‌ها`,
+      `  • <code>/force</code> — انتشار فوری یک پست`,
       `  • <code>/stats</code> — آمار`,
       `  • <code>/health</code> — سلامت سیستم`,
+      `  • <code>/help</code> — راهنمای کامل`,
     ].join("\n");
   }
   return [
     `👋 <b>Welcome to Fredy!</b>`,
     ``,
-    `<blockquote>🤖 <b>Fredy</b> — AI-powered content engine for the ILIVIR3 Telegram channel</blockquote>`,
-    `<blockquote>📡 12 source plugins: GitHub, Dev.to, HackerNews, NASA, NewsAPI, and more</blockquote>`,
+    `<blockquote>🤖 <b>Fredy v11.4</b> — AI-powered content engine for ILIVIR3</blockquote>`,
+    `<blockquote>📡 20 source plugins across 4 tiers (S/A/B/Legacy)</blockquote>`,
     `<blockquote>🧠 AI rewriting via Gemini/OpenRouter</blockquote>`,
-    `<blockquote>📅 Configurable schedule with quality control</blockquote>`,
+    `<blockquote>📅 Smart scheduling with quality control</blockquote>`,
+    `<blockquote>🔬 Full scheduler debug system</blockquote>`,
     ``,
-    `<b>📋 Commands:</b>`,
+    `<b>📋 Commands (in / menu):</b>`,
     `  • <code>/menu</code> — Admin dashboard`,
-    `  • <code>/help</code> — Help`,
+    `  • <code>/tiers</code> — View providers by tier`,
+    `  • <code>/plan</code> — Today's publishing plan`,
+    `  • <code>/debug</code> — Scheduler debug`,
+    `  • <code>/providers</code> — Provider health`,
+    `  • <code>/force</code> — Force publish one post`,
     `  • <code>/stats</code> — Statistics`,
     `  • <code>/health</code> — System health`,
+    `  • <code>/help</code> — Full help`,
   ].join("\n");
 }
 

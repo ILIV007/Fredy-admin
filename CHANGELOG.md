@@ -2,6 +2,90 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.4.0] — 2026-07-20 — Double-Publish Fix + Image Resolution + JSON Repair + README
+
+### 🔴 Critical Fixes
+
+- **FIX: Double-publish bug** — Previously, `/force` command, `force-publish`
+  dashboard button, `plan:firenext`, and `sdebug:force` all called
+  `scheduler.tick()` which fires ALL due slots. When the admin manually
+  triggered a post, any scheduled slots that were due would ALSO fire,
+  causing two posts back-to-back. Now all manual triggers generate ONE
+  fresh post via `content.processForCategory()` + `finalPublisher.publish()`,
+  completely bypassing the scheduler.
+
+- **FIX: Missing images** — `resolveSourceCoverImage()` improved:
+  - Added Dev.to API cover_image fetch
+  - Added browser User-Agent (was blocked by some sites)
+  - Added twitter:image meta tag fallback
+  - Accept image URLs with /images/, /uploads/, /media/ paths
+  - Timeout increased 6s→8s
+  - Added more image CDN hosts (cdn.jsdelivr.net, camo.githubusercontent.com)
+
+- **FIX: AI JSON parse errors** — Added `repairJson()` function that
+  automatically fixes common AI JSON issues:
+  - Extracts JSON from surrounding text ("Here is the JSON: {...}")
+  - Removes trailing commas ({"a":1,} → {"a":1})
+  - Escapes unescaped newlines in strings
+  - Closes unbalanced braces (truncated JSON)
+  - Tries repair before throwing AIResponseParseError
+
+- **FIX: stackexchange returns 0 items** — Removed custom `filter` param
+  that was causing 400 errors. The default filter works correctly.
+
+- **FIX: producthunt returns 0 items** — Added multiple RSS URL fallbacks
+  (producthunt.com/feed, /feed/category/developer-tools, hnrss.org as
+  last resort). Browser User-Agent for better compatibility.
+
+### 🆕 New Features
+
+- **setMyCommands** — Telegram command menu now registered automatically
+  on `/start`. All 12 commands appear in the "/" autocomplete menu.
+  Added `registerCommands()` and `setMyCommands()` to TelegramService.
+
+- **Manual Post screen refactored** — All 20 providers now organized by
+  tier (S/A/B/Legacy) with 2-column layout. Previously only showed 12
+  old providers.
+
+- **Professional README.md** — Complete rewrite in English with:
+  - Table of contents
+  - Architecture diagram
+  - Provider tier table
+  - Pipeline diagram
+  - Scheduler documentation
+  - API reference
+  - Testing guide
+  - Troubleshooting guide
+  - Full changelog
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.3.0 → 11.4.0 |
+| `package.json` | version 11.4.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.4.0" |
+| `src/admin/commands/force.ts` | **CRITICAL**: No longer calls scheduler.tick() |
+| `src/admin/screens/plan.ts` | **CRITICAL**: firenext no longer calls scheduler.tick() |
+| `src/admin/screens/schedulerdebug.ts` | **CRITICAL**: force no longer calls scheduler.tick() |
+| `src/entry/manager.ts` | force-publish no longer calls scheduler.tick() |
+| `src/services/final-publisher.ts` | Better image resolution (Dev.to API, browser UA, twitter:image) |
+| `src/services/response-parser.ts` | JSON repair function for malformed AI responses |
+| `src/services/telegram.ts` | setMyCommands + registerCommands methods |
+| `src/admin/commands/start.ts` | Calls registerCommands() on /start, updated welcome message |
+| `src/admin/screens/manual.ts` | All 20 providers organized by tier |
+| `src/plugins/sources/stackexchange/index.ts` | Removed custom filter param |
+| `src/plugins/sources/producthunt/index.ts` | Multiple RSS URL fallbacks |
+| `README.md` | Complete professional rewrite |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.4.0
+
+---
+
 ## [11.3.0] — 2026-07-20 — Plugin Fixes + Telegram Bot Full Refactor
 
 ### 🔴 Critical Plugin Fixes (Empty APIs)

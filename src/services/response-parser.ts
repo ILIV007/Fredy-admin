@@ -59,12 +59,26 @@ export class ResponseParser {
     const cleaned = stripCodeFences(rawText);
 
     // Step 4: parse as JSON.
+    // v11.4.0: Added JSON repair attempts before giving up.
+    // Gemini sometimes returns JSON with trailing commas, unescaped quotes,
+    // or truncated content. We try to repair common issues before failing.
     let parsed: unknown;
     try {
       parsed = JSON.parse(cleaned);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new AIResponseParseError(provider, model, rawText, `JSON parse failed: ${message}`);
+      // v11.4.0: Try to repair common JSON issues.
+      const repaired = repairJson(cleaned);
+      if (repaired && repaired !== cleaned) {
+        try {
+          parsed = JSON.parse(repaired);
+        } catch {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new AIResponseParseError(provider, model, rawText, `JSON parse failed: ${message}`);
+        }
+      } else {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new AIResponseParseError(provider, model, rawText, `JSON parse failed: ${message}`);
+      }
     }
 
     // Step 5: validate against schema.
@@ -88,4 +102,68 @@ export class ResponseParser {
 
     return result.data;
   }
+}
+
+/**
+ * v11.4.0: Attempt to repair common JSON issues returned by AI models.
+ *
+ * Common issues:
+ * - Trailing commas: {"a": 1,} → {"a": 1}
+ * - Unescaped newlines in strings: "text\nmore" → "text\\nmore"
+ * - Truncated JSON: missing closing brace → add it
+ * - Extra text after JSON: {...}garbage → {...}
+ * - Wrapped in text: "Here is the JSON: {...}" → {...}
+ *
+ * Returns the repaired JSON string, or null if repair failed.
+ */
+function repairJson(input: string): string | null {
+  let s = input.trim();
+
+  // 1. Extract JSON object/array from surrounding text.
+  // Find the first { or [ and the last } or ].
+  const firstBrace = s.indexOf("{");
+  const firstBracket = s.indexOf("[");
+  let start = -1;
+  let end = -1;
+  let closeChar = "";
+
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    start = firstBrace;
+    closeChar = "}";
+  } else if (firstBracket !== -1) {
+    start = firstBracket;
+    closeChar = "]";
+  } else {
+    return null;
+  }
+
+  end = s.lastIndexOf(closeChar);
+  if (end <= start) return null;
+
+  s = s.slice(start, end + 1);
+
+  // 2. Remove trailing commas before } or ].
+  s = s.replace(/,\s*([}\]])/g, "$1");
+
+  // 3. Escape unescaped newlines/tabs inside string values.
+  // This is tricky — we only want to escape inside strings, not in the JSON structure.
+  // Simple approach: replace literal newlines that are between quotes.
+  s = s.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match) => {
+    return match.replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/\r/g, "\\r");
+  });
+
+  // 4. If the JSON is truncated (unbalanced braces), try to close it.
+  const openCount = (s.match(/{/g) ?? []).length;
+  const closeCount = (s.match(/}/g) ?? []).length;
+  if (openCount > closeCount) {
+    s += "}".repeat(openCount - closeCount);
+  }
+
+  const openBracketCount = (s.match(/\[/g) ?? []).length;
+  const closeBracketCount = (s.match(/\]/g) ?? []).length;
+  if (openBracketCount > closeBracketCount) {
+    s += "]".repeat(openBracketCount - closeBracketCount);
+  }
+
+  return s;
 }

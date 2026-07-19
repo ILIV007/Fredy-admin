@@ -38,23 +38,55 @@ export const manualScreen: Screen = {
 
   keyboard(s: FredySettings): InlineKeyboard {
     void s;
+    // v11.4.0: All 20 providers organized by tier.
     return buildKeyboardWithBack([
       [labelButton("─── By Category ───")],
-      [navButton("🟢 Send Category A", "action:manual:category:A")],
-      [navButton("🟡 Send Category B", "action:manual:category:B")],
-      [navButton("🟣 Send Category C", "action:manual:category:C")],
-      [labelButton("─── By Source ───")],
-      [navButton("📦 GitHub", "action:manual:source:github")],
-      [navButton("🚀 GitHub Trending", "action:manual:source:github-trending")],
-      [navButton("🏷️ GitHub Releases", "action:manual:source:github-releases")],
-      [navButton("🛠️ Dev.to", "action:manual:source:devto")],
-      [navButton("📚 Stack Exchange", "action:manual:source:stackexchange")],
-      [navButton("📰 News", "action:manual:source:news")],
-      [navButton("🔥 Hacker News", "action:manual:source:hackernews")],
-      [navButton("🪐 NASA", "action:manual:source:nasa")],
-      [navButton("😄 Joke", "action:manual:source:joke")],
-      [navButton("🎨 XKCD", "action:manual:source:xkcd")],
-      [navButton("📜 Wikimedia", "action:manual:source:wikimedia")],
+      [
+        navButton("🟢 Cat A", "action:manual:category:A"),
+        navButton("🟡 Cat B", "action:manual:category:B"),
+        navButton("🟣 Cat C", "action:manual:category:C"),
+      ],
+      [labelButton("─── Tier S (Core) ───")],
+      [
+        navButton("📦 GitHub", "action:manual:source:github"),
+        navButton("🏷️ GH Releases", "action:manual:source:github-releases"),
+      ],
+      [
+        navButton("🚀 GH Trending", "action:manual:source:github-trending"),
+        navButton("⚡ GH Events", "action:manual:source:github-events"),
+      ],
+      [
+        navButton("🛠️ Dev.to", "action:manual:source:devto"),
+        navButton("🔥 HN Algolia", "action:manual:source:hackernews-algolia"),
+      ],
+      [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
+      [labelButton("─── Tier A (Important) ───")],
+      [
+        navButton("📚 StackExchange", "action:manual:source:stackexchange"),
+        navButton("☁️ CF Blog", "action:manual:source:cloudflare-blog"),
+      ],
+      [
+        navButton("🤗 HF Blog", "action:manual:source:huggingface-blog"),
+        navButton("🏆 ProductHunt", "action:manual:source:producthunt"),
+      ],
+      [labelButton("─── Tier B (Supporting) ───")],
+      [
+        navButton("🎨 XKCD", "action:manual:source:xkcd"),
+        navButton("🔒 GH Security", "action:manual:source:github-security"),
+      ],
+      [
+        navButton("🤖 OpenAI News", "action:manual:source:openai-news"),
+        navButton("👾 Reddit", "action:manual:source:reddit-v2"),
+      ],
+      [labelButton("─── Legacy ───")],
+      [
+        navButton("📰 News", "action:manual:source:news"),
+        navButton("😄 Joke", "action:manual:source:joke"),
+      ],
+      [
+        navButton("📜 Wikimedia", "action:manual:source:wikimedia"),
+        navButton("🔥 HN (old)", "action:manual:source:hackernews"),
+      ],
       [labelButton("─── Special ───")],
       [navButton("🧪 Simulate (no publish)", "action:manual:simulate")],
     ]);

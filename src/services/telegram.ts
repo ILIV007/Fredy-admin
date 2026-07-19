@@ -233,6 +233,47 @@ export class TelegramService {
     return me.ok && me.result ? me.result.id : null;
   }
 
+  /**
+   * v11.4.0: Set the bot's command menu (shown in Telegram client).
+   * This makes commands visible in the "/" autocomplete menu.
+   * Should be called once on bot setup, then re-called when commands change.
+   */
+  async setMyCommands(
+    commands: readonly { readonly command: string; readonly description: string }[],
+    scope?: { readonly type: string; readonly chat_id?: number },
+  ): Promise<TelegramResult<boolean>> {
+    const params: Record<string, unknown> = {
+      commands: JSON.stringify(commands),
+    };
+    if (scope) {
+      params["scope"] = JSON.stringify(scope);
+    }
+    return this.callApi<boolean>("setMyCommands", params);
+  }
+
+  /**
+   * v11.4.0: Register all Fredy commands with Telegram.
+   * Called from the /start command handler.
+   */
+  async registerCommands(): Promise<boolean> {
+    const commands = [
+      { command: "start", description: "Welcome & language selection" },
+      { command: "menu", description: "Open admin dashboard" },
+      { command: "help", description: "List all commands" },
+      { command: "stats", description: "Quick stats summary" },
+      { command: "health", description: "System health check" },
+      { command: "checkperms", description: "Check bot permissions" },
+      { command: "soul", description: "View soul.md status" },
+      { command: "tiers", description: "View providers by tier" },
+      { command: "plan", description: "View today's publishing plan" },
+      { command: "debug", description: "Scheduler debug summary" },
+      { command: "providers", description: "Provider health overview" },
+      { command: "force", description: "Force publish one post now" },
+    ];
+    const result = await this.setMyCommands(commands, { type: "chat_admins" });
+    return result.ok;
+  }
+
   /** Get a chat by ID or username. */
   async getChat(chatId: number | string): Promise<TelegramResult<TelegramChat>> {
     return this.callApi<TelegramChat>("getChat", { chat_id: chatId });

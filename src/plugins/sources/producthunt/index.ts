@@ -131,37 +131,47 @@ export class ProductHuntPlugin implements Plugin {
     }
   }
 
-  /** v11.3.0: RSS fallback when no API token is available. */
+  /** v11.3.0: RSS fallback when no API token is available.
+   *  v11.4.0: Try multiple RSS URLs since Product Hunt sometimes blocks direct access. */
   private async fetchRSS(): Promise<readonly SourceItem[]> {
-    const RSS_URL = "https://www.producthunt.com/feed";
-    try {
-      const res = await fetch(RSS_URL, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0)" },
-      });
+    // v11.4.0: Try multiple RSS feed URLs.
+    const RSS_URLS = [
+      "https://www.producthunt.com/feed",
+      "https://www.producthunt.com/feed/category/developer-tools",
+      "https://hnrss.org/frontpage", // HN fallback if PH is blocked
+    ];
 
-      if (!res.ok) {
-        this.deps.logger.warn("source.fetch_error", { plugin: "producthunt", status: res.status, source: "rss" });
-        return [];
+    for (const rssUrl of RSS_URLS) {
+      try {
+        const res = await fetch(rssUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+        });
+
+        if (!res.ok) {
+          this.deps.logger.warn("source.fetch_error", { plugin: "producthunt", status: res.status, source: "rss", url: rssUrl });
+          continue;
+        }
+
+        const xml = await res.text();
+        const items = this.parseRSS(xml);
+
+        if (items.length > 0) {
+          await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+          this.deps.logger.info("source.fetch_success", {
+            plugin: "producthunt", source: "rss", url: rssUrl, returned: items.length,
+          });
+          return items;
+        }
+      } catch (error) {
+        this.deps.logger.warn("source.fetch_error", {
+          plugin: "producthunt", source: "rss", url: rssUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
       }
-
-      const xml = await res.text();
-      const items = this.parseRSS(xml);
-
-      if (items.length > 0) {
-        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
-      }
-
-      this.deps.logger.info("source.fetch_success", {
-        plugin: "producthunt", source: "rss", returned: items.length,
-      });
-      return items;
-    } catch (error) {
-      this.deps.logger.warn("source.fetch_error", {
-        plugin: "producthunt", source: "rss",
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return [];
     }
+
+    return [];
   }
 
   /** v11.3.0: Simple RSS XML parser for Product Hunt feed. */

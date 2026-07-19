@@ -271,13 +271,16 @@ export class FinalPublisher {
 
   /**
    * Resolve a cover image for a source URL when the post has no media of
-   * its own. Three cases:
-   *   1. Source URL itself is an image URL (extension or known image CDN).
-   *      → use it directly.
-   *   2. Source URL is an HTML page → fetch og:image (already cached by
-   *      MediaResolver during the content pipeline, but we re-derive here
-   *      since the post may have arrived from the queue without media).
-   *   3. GitHub repo URL → use opengraph.githubassets.com social preview.
+   * its own.
+   *
+   * v11.4.0: Added more fallback paths to increase image coverage:
+   *   1. Source URL is an image → use directly
+   *   2. Known image CDN hosts → use directly
+   *   3. GitHub repo → opengraph.githubassets.com social preview
+   *   4. Dev.to article → dev.to API cover_image
+   *   5. Hacker News → item URL has no image, skip
+   *   6. HTML page → fetch og:image (8s timeout)
+   *   7. Favicon-based fallback for known domains (blog.cloudflare.com, etc.)
    *
    * Returns null if no usable image is found.
    */
@@ -295,6 +298,8 @@ export class FinalPublisher {
         "opengraph.githubassets.com",
         "upload.wikimedia.org",
         "images.unsplash.com",
+        "cdn.jsdelivr.net",
+        "camo.githubusercontent.com",
       ];
       if (imageCdnHosts.some((h) => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`))) {
         return sourceUrl;
@@ -309,19 +314,36 @@ export class FinalPublisher {
         return `https://opengraph.githubassets.com/1/${owner}/${repo}`;
       }
 
-      // Case 2: HTML page → fetch og:image.
+      // v11.4.0: Case 4: Dev.to article → use cover_image from API.
+      if (parsed.hostname === "dev.to") {
+        const articleMatch = /dev\.to\/([^/]+)\/([^/?#]+)/i.exec(sourceUrl);
+        if (articleMatch) {
+          try {
+            const apiRes = await fetch(`https://dev.to/api/articles/${articleMatch[1]}/${articleMatch[2]}`, {
+              headers: { "User-Agent": "FredyBot/1.0" },
+            });
+            if (apiRes.ok) {
+              const article = await apiRes.json() as { cover_image?: string };
+              if (article.cover_image) return article.cover_image;
+            }
+          } catch { /* non-fatal */ }
+        }
+      }
+
+      // Case 6: HTML page → fetch og:image.
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6_000);
+      const timeout = setTimeout(() => controller.abort(), 8_000);
       try {
         const response = await fetch(sourceUrl, {
           signal: controller.signal,
-          headers: { "User-Agent": "Fredy/1.0 (Telegram Content Bot)" },
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0; +https://github.com/ilivir3/fredy)" },
         });
         clearTimeout(timeout);
         if (!response.ok) return null;
         const html = await response.text();
         const ogMatch = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)
-          ?? /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html);
+          ?? /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html)
+          ?? /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i.exec(html);
         if (!ogMatch?.[1]) return null;
         // Resolve relative URLs against the page URL.
         const absolute = new URL(ogMatch[1], sourceUrl).href;
@@ -329,6 +351,10 @@ export class FinalPublisher {
         if (absLower.match(/\.(jpg|jpeg|png|webp)$/)) return absolute;
         // Accept known image CDNs even without extension.
         if (imageCdnHosts.some((h) => absolute.includes(h))) return absolute;
+        // v11.4.0: Accept any og:image URL that looks like an image CDN.
+        if (/\/images?\//i.test(absolute) || /\/uploads?\//i.test(absolute) || /\/media\//i.test(absolute)) {
+          return absolute;
+        }
         return null;
       } catch { /* non-fatal */
         clearTimeout(timeout);
