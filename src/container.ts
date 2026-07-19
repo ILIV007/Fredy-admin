@@ -290,6 +290,8 @@ export function buildContainer(env: Env): Container {
     adminId: () => Number(env.ADMIN_ID ?? "0"),
     // v8.2.1: Strategy engine — for updating Daily Plan status after publish.
     strategyEngine,
+    // v9.2.3: KV store — for the always-on failure ring buffer.
+    kv,
   });
 
   return {

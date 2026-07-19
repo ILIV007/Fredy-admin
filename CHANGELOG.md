@@ -2,6 +2,74 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [9.2.3] — 2026-07-19 — Debuggable scheduled-post failures (clickable Failed badge + always-on failure log + richer admin PM)
+
+### Problem
+
+Scheduled posts were failing silently: the Daily Plan table showed `❌ Failed` badges but gave no indication of *why*. Manual publish from the admin bot worked fine, which meant the issue was somewhere in the scheduled path (queue dequeue, stale-language filter, fallback iteration, publish), but there was no way to see the actual error message without enabling DEBUG_MODE and digging through Cloudflare logs. The admin received no PM for most failure modes, and the Manager Logs tab was empty because the existing error ring buffer only writes when DEBUG_MODE=true.
+
+### Root-cause Analysis (why manual works but scheduled fails)
+
+The scheduled path (`fireSlot`) and the manual path (`/post/channel` from Manager UI) diverge in three key ways:
+
+1. **Stale-language filter** (`fireSlot` lines 297-312): the scheduler computes `expectedLang` from settings (`auto → fa/en`), then dequeues up to 5 items, dropping any whose `queuedLang` doesn't match. If the queue is full of stale-language items, all 5 get dropped and the slot falls through to fresh generation. The manual path has no such filter.
+
+2. **`processForCategory` only tries ONE plugin** — the first enabled one. If every item from that plugin gets rejected (popularity filter, freshness filter, dedup, quality gate), the slot fails. The manual path lets the admin pick the plugin explicitly and try 5 items in random order.
+
+3. **Fallback iteration** (`fireSlot` lines 337-360 and 423-475): when the primary plugin fails, the scheduler tries `getFallbackPlugins(category)`. But each fallback also runs through the full pipeline (popularity + freshness + dedup + AI + quality) — if all fallbacks fail too, the slot is marked failed. The manual path doesn't have this cascade.
+
+Bottom line: there are 5+ distinct failure paths in `fireSlot`, and **none of them captured the actual error message** — they just called `markPostFailed(date, index)` with no error info. v9.2.3 fixes this.
+
+### Critical Fixes
+
+- **`PlannedPost` type now carries failure metadata.** Added four optional fields to `src/types/strategy.ts`:
+  - `error?: string | null` — the actual error message
+  - `failedStage?: string | null` — pipeline stage that failed (normalize/validate/dedup/ai_generate/quality_score/format/publish/queue/grace/pipeline)
+  - `failedPlugin?: string | null` — plugin attempted when the failure occurred (may differ from `provider` if a fallback was being tried)
+  - `failedAt?: number | null` — epoch ms when the failure was recorded
+
+- **`StrategyEngine.markPostFailed()` and `markPostBackup()` now accept error info.** New optional third parameter `{ error, stage, plugin }` is persisted onto the `PlannedPost` and stored in KV. Backward compatible — existing call sites without the parameter still work.
+
+- **`SchedulerService.fireSlot()` captures real error messages at every failure path.** All 5 `markPostFailed` / `markPostBackup` call sites now pass the actual error message, pipeline stage, and plugin attempted:
+  1. **No-content path**: captures `pipelineResult.error`, `pipelineResult.stage`, `pipelineResult.item.pluginId`.
+  2. **Backup-succeeded path**: captures the original publish error so admin can see why primary failed even though backup saved the slot.
+  3. **All-fallbacks-failed path**: captures `result.error` plus the fact that all fallbacks also failed.
+  4. **KV quota exceeded path**: captures the quota error message.
+  5. **Generic publish-failed path**: captures `result.error`.
+  6. **Slot-overdue grace path**: captures "Slot >30min overdue — marked as passed (grace period)" with timestamps so admin can distinguish a real failure from a missed-grace.
+
+- **Always-on failure ring buffer (independent of DEBUG_MODE).** New `fredy:debug:failures` KV key holds the last 30 publish failures with full error + stage + plugin + slot info. 7-day TTL. Writes happen on every failure path via the new `SchedulerService.recordFailure()` method. This is separate from the existing `fredy:debug:errors` ring buffer (which only writes when DEBUG_MODE=true) so it works in production by default. Read via `container.scheduler.getRecentFailures()`, cleared via `container.scheduler.clearFailures()`.
+
+- **Manager UI — ❌ Failed badge is now clickable.** On the Strategy page Daily Plan table, clicking a `❌ Failed` or `🔄 Failed/Backup` badge opens an alert with the full error details: status, scheduled time, category, provider, error message, failed stage, plugin attempted, and failure timestamp. The plan is cached in `window._lastPlan` when `loadStrategy()` runs so the click handler can read it synchronously.
+
+- **Manager UI — Logs tab now shows a Publish Failures section.** A red-bordered card at the top of the Logs tab displays the always-on failure ring buffer as a table (Time, Slot, Cat, Stage, Plugin, Error) plus a collapsible raw JSON view. A "Clear" button lets the admin wipe the buffer. The existing Errors and Updates sections remain, with a note explaining they only populate when DEBUG_MODE=true.
+
+- **Manager API — new endpoints:**
+  - `GET /Manager/api/logs` now returns `failures` field alongside `updates` and `errors`.
+  - `POST /Manager/api/clear/failures` clears the failure ring buffer.
+
+- **Admin PM notifications strengthened.** `notifyAdminOfFailure()` now accepts an optional `errorInfo` parameter and includes `🩺 Failed stage:` and `🔌 Plugin attempted:` blockquote rows in the PM when known. The `❌ POST FAILED` notice (when all fallbacks fail) now also includes the original plugin and content ID for triage.
+
+- **Container wiring.** `SchedulerServiceDeps` has a new optional `kv` field, wired in `src/container.ts`. Used only for the failure ring buffer. Backward compatible — tests that don't pass `kv` simply skip the failure buffer.
+
+### How to debug a failed scheduled post (v9.2.3 workflow)
+
+1. Open `/Manager` → Strategy tab.
+2. Find the row with `❌ Failed` badge.
+3. Click the badge — an alert shows the exact error message, pipeline stage, plugin attempted, and timestamp.
+4. For a fuller history, open the Logs tab — the `❌ Publish Failures` card lists the last 30 failures with the same info in table form.
+5. The admin PM should also have arrived with the same error details (check Telegram).
+6. Compare with manual publish (admin bot → manual trigger for the same plugin) — if manual works but scheduled fails, the issue is in the queue dequeue / stale-language / fallback path, not the publish itself.
+
+### Housekeeping
+
+- `core/constants.ts`: `APP_VERSION = "9.2.3"`, `APP_BUILD_DATE = "2026-07-19"`.
+- `package.json`: `version: "9.2.3"`.
+- `VERSION` file: `9.2.3`.
+- All 134 existing tests pass (41 scheduler + 34 strategy + 41 pipeline + 18 dedup). TypeScript 0 errors.
+
+---
+
 ## [9.2.2] — 2026-07-19 — Revert extra cron, move stale-tick into tick.ts (minimal-trigger design)
 
 ### Critical Fix — Reverts v9.2.1's `*/30 * * * *` cron

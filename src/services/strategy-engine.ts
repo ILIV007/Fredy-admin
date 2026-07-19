@@ -210,11 +210,29 @@ export class StrategyEngine {
     });
   }
 
-  /** Mark a planned post as failed. */
-  async markPostFailed(date: string, postIndex: number): Promise<void> {
+  /** Mark a planned post as failed.
+   *  v9.2.3: Now accepts an optional `errorInfo` object that captures the
+   *  failure reason, pipeline stage, and plugin attempted. This is surfaced
+   *  by the Manager UI when the admin clicks the ❌ Failed badge, and is
+   *  always sent to the admin PM. Backward compatible — callers without
+   *  the parameter still work (error info stays null). */
+  async markPostFailed(
+    date: string,
+    postIndex: number,
+    errorInfo?: { error?: string; stage?: string; plugin?: string | null } | null,
+  ): Promise<void> {
     const plan = await this.getOrGeneratePlan(date);
     const updatedPosts = plan.posts.map((p) =>
-      p.index === postIndex ? { ...p, status: "failed" as PlannedPostStatus } : p,
+      p.index === postIndex
+        ? {
+            ...p,
+            status: "failed" as PlannedPostStatus,
+            error: errorInfo?.error ?? p.error ?? null,
+            failedStage: errorInfo?.stage ?? p.failedStage ?? null,
+            failedPlugin: errorInfo?.plugin ?? p.failedPlugin ?? null,
+            failedAt: Date.now(),
+          }
+        : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
     await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
@@ -222,11 +240,26 @@ export class StrategyEngine {
     });
   }
 
-  /** v8.8.0: Mark a planned post as backup (original failed, backup succeeded). */
-  async markPostBackup(date: string, postIndex: number): Promise<void> {
+  /** v8.8.0: Mark a planned post as backup (original failed, backup succeeded).
+   *  v9.2.3: Now accepts the original failure reason so the admin can see
+   *  WHY the primary plugin failed even though the backup saved the slot. */
+  async markPostBackup(
+    date: string,
+    postIndex: number,
+    errorInfo?: { error?: string; stage?: string; plugin?: string | null } | null,
+  ): Promise<void> {
     const plan = await this.getOrGeneratePlan(date);
     const updatedPosts = plan.posts.map((p) =>
-      p.index === postIndex ? { ...p, status: "backup" as PlannedPostStatus } : p,
+      p.index === postIndex
+        ? {
+            ...p,
+            status: "backup" as PlannedPostStatus,
+            error: errorInfo?.error ?? p.error ?? null,
+            failedStage: errorInfo?.stage ?? p.failedStage ?? null,
+            failedPlugin: errorInfo?.plugin ?? p.failedPlugin ?? null,
+            failedAt: Date.now(),
+          }
+        : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
     await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {

@@ -97,6 +97,20 @@ export interface PlannedPost {
   readonly status: PlannedPostStatus;
   /** Posting window this post was assigned to. */
   readonly windowIndex: number;
+  /** v9.2.3: Failure reason — populated when status is "failed" or "backup".
+   *  Contains the actual error message (e.g., "AI generation failed: timeout"
+   *  or "Telegram sendMessage failed: 400 Bad Request: message text is empty").
+   *  Surfaced by the Manager UI when the admin clicks the ❌ Failed badge. */
+  readonly error?: string | null;
+  /** v9.2.3: Pipeline stage that failed (normalize/validate/dedup/ai_generate/
+   *  quality_score/format/publish/queue/grace/pipeline). Useful for triaging
+   *  recurring failures. */
+  readonly failedStage?: string | null;
+  /** v9.2.3: Epoch ms when the failure was recorded. */
+  readonly failedAt?: number | null;
+  /** v9.2.3: Plugin that was attempted when the failure occurred (may differ
+   *  from `provider` if a fallback plugin was being tried). */
+  readonly failedPlugin?: string | null;
 }
 
 /** Status of a planned post. */

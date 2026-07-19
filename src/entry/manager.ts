@@ -326,7 +326,16 @@ export async function managerHandler(
   if (apiPath === "logs" && request.method === "GET") {
     const updates = await container.debug.getRecentUpdates().catch(() => []);
     const errors = await container.debug.getRecentErrors().catch(() => []);
-    return json({ ok: true, updates, errors });
+    // v9.2.3: Always-on failure ring buffer (independent of DEBUG_MODE).
+    // Captures every scheduled-publish failure with full error + stage + plugin info.
+    const failures = await container.scheduler.getRecentFailures().catch(() => []);
+    return json({ ok: true, updates, errors, failures });
+  }
+
+  // v9.2.3: Clear the failure ring buffer.
+  if (apiPath === "clear/failures" && request.method === "POST") {
+    await container.scheduler.clearFailures().catch(() => {});
+    return json({ ok: true });
   }
 
   // ── Config ──
@@ -1564,11 +1573,21 @@ async function forcePublish(){if(!confirm("Force publish now?"))return;toast("�
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  // v9.2.3: Always-on failures ring buffer (independent of DEBUG_MODE).
+  const failures=d.failures||[];
+  const failJson=JSON.stringify(failures.slice(0,30),null,2);
   const errJson=JSON.stringify(d.errors.slice(0,20),null,2);
   const updJson=JSON.stringify(d.updates.slice(0,20),null,2);
-  c.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'err-pre'+ "'" +')">📋 Copy Errors</button></div>'+
+  c.innerHTML='<div class="card" style="border:1px solid var(--red)"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3 style="color:var(--red)">❌ Publish Failures ('+failures.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearFailures()">Clear</button></div></div><p style="color:var(--text2);font-size:12px;margin-bottom:8px">Always-on ring buffer — captures every scheduled-publish failure with error, stage, and plugin info. Independent of DEBUG_MODE. (Last 30, 7-day TTL.)</p>'+
+    (failures.length===0?'<p style="color:var(--text2)">No failures recorded.</p>':
+      '<table style="font-size:11px;width:100%"><thead><tr><th>Time</th><th>Slot</th><th>Cat</th><th>Stage</th><th>Plugin</th><th>Error</th></tr></thead><tbody>'+
+      failures.map(f=>'<tr><td style="white-space:nowrap">'+(f.time?new Date(f.time).toLocaleString():'—')+'</td><td style="white-space:nowrap">'+escapeHtml(f.date||'')+' '+escapeHtml(f.slotTime||'')+'</td><td>'+escapeHtml(f.category||'')+'</td><td>'+escapeHtml(f.stage||'')+'</td><td>'+escapeHtml(f.plugin||'—')+'</td><td style="max-width:400px;overflow:hidden;text-overflow:ellipsis" title="'+escapeHtml(f.error||'')+'">'+escapeHtml(f.error||'')+'</td></tr>').join("")+
+      '</tbody></table>')+
+    '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--text2);font-size:12px">Raw JSON</summary><pre id="fail-pre" style="margin-top:8px;max-height:400px;overflow:auto">'+failJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'fail-pre'+ "'" +')">📋 Copy Failures JSON</button></details></div>'+
+  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Errors ('+d.errors.length+')</h3><div><button class="btn btn-danger btn-sm" onclick="clearLogs()">Clear</button></div></div><p style="color:var(--text2);font-size:12px">Logger ring buffer — only populated when DEBUG_MODE=true. Use the Publish Failures section above for always-on error tracking.</p><pre id="err-pre">'+errJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'err-pre'+ "'" +')">📋 Copy Errors</button></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Updates ('+d.updates.length+')</h3><pre id="upd-pre">'+updJson+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'upd-pre'+ "'" +')">📋 Copy Updates</button></div>';
 }
+async function clearFailures(){if(!confirm("Clear all recorded publish failures?"))return;const d=await api("clear/failures","POST");toast(d.ok?"✅ Failures cleared":"❌ Failed");loadLogs();}
 
 async function loadConfig(){
   const d=await api("config");const c=document.getElementById("content");
@@ -1597,11 +1616,31 @@ async function loadStrategy(){
   const d=await api("strategy");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.strategy||{};const plan=d.plan||{};
+  // v9.2.3: Cache the plan in window so showPostError() can read it.
+  window._lastPlan=plan;
   const modes=[{id:"minimal",name:"Minimal",desc:"4 posts/day"},{id:"balanced",name:"Balanced",desc:"9 posts/day (default)"},{id:"active",name:"Active",desc:"13 posts/day"},{id:"ai_priority",name:"AI Priority",desc:"8 posts/day, threshold 80"},{id:"news_priority",name:"News Priority",desc:"10 posts/day, B-heavy"},{id:"custom",name:"Custom",desc:"Admin-defined"}];
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+card("Mode",s.mode??"balanced")+card("Language",s.language??"auto")+card("Weekly Themes",s.weeklyThemesEnabled?"✅":"❌")+card("Quality Threshold",s.qualityThreshold??"80")+'</div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
   (s.mode==="custom"?'<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>':'')+
-  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>{const s=p.status||"pending";const badge=s==="published"?'<span class="badge badge-green">✅ Published</span>':s==="failed"?'<span class="badge badge-red">❌ Failed</span>':s==="backup"?'<span class="badge badge-blue">🔄 Failed/Backup</span>':'<span class="badge badge-yellow">⏳ Pending</span>';return "<tr><td>"+p.index+"</td><td>"+p.time+"</td><td>"+p.category+"</td><td>"+(p.provider||"—")+"</td><td>"+p.priority+"</td><td>"+badge+"</td></tr>";}).join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
+  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+')</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>{const s=p.status||"pending";const badge=s==="published"?'<span class="badge badge-green">✅ Published</span>':s==="failed"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>':s==="backup"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Failed/Backup</span></a>':'<span class="badge badge-yellow">⏳ Pending</span>';return "<tr><td>"+p.index+"</td><td>"+p.time+"</td><td>"+p.category+"</td><td>"+(p.provider||"—")+"</td><td>"+p.priority+"</td><td>"+badge+"</td></tr>";}).join("")+'</tbody></table>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
+}
+function showPostError(idx){
+  // Find the post by index in the most recently-loaded plan.
+  if(!window._lastPlan||!window._lastPlan.posts){alert("Plan data not available. Reload the Strategy page and try again.");return;}
+  const p=window._lastPlan.posts.find(x=>x.index===idx);
+  if(!p){alert("Post #"+idx+" not found in plan.");return;}
+  const title="Post #"+idx+" — "+(p.status||"unknown");
+  const lines=[];
+  lines.push("Status: "+(p.status||"unknown"));
+  lines.push("Scheduled: "+p.date+" at "+p.time);
+  lines.push("Category: "+p.category);
+  lines.push("Provider: "+(p.provider||"—"));
+  if(p.error){lines.push("");lines.push("Error:");lines.push(p.error);}
+  if(p.failedStage){lines.push("");lines.push("Failed stage: "+p.failedStage);}
+  if(p.failedPlugin){lines.push("Plugin attempted: "+p.failedPlugin);}
+  if(p.failedAt){lines.push("Failed at: "+new Date(p.failedAt).toISOString());}
+  if(!p.error&&!p.failedStage){lines.push("");lines.push("(No error details recorded. This can happen if the failure occurred before v9.2.3 or if the slot was marked failed without an error message.)");}
+  alert(title+"\n\n"+lines.join("\n"));
 }
 async function switchStrategy(mode){const d=await api("strategy","POST",{mode});toast(d.ok?"✅ Strategy: "+mode:"❌ Failed");loadStrategy();}
 async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C}});toast(d.ok?"✅ Custom distribution saved":"❌ Failed");loadStrategy();}

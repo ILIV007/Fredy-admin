@@ -58,6 +58,10 @@ export interface SchedulerServiceDeps {
   readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
   /** v8.2.1: Strategy engine — used to update Daily Plan status after publish. */
   readonly strategyEngine?: import("./strategy-engine").StrategyEngine;
+  /** v9.2.3: KV store — used for the always-on failure ring buffer.
+   *  Optional for backward compat (tests that don't pass kv will simply
+   *  skip the failure buffer). */
+  readonly kv?: import("./kv-store").KVStore;
 }
 
 export class SchedulerService {
@@ -247,8 +251,13 @@ export class SchedulerService {
       // after a long scheduler outage).
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
         // v9.2.0: Only use one write method — strategyEngine or dailyPlanner.
+        // v9.2.3: Pass the reason so admin can see it was a missed-grace, not a real failure.
         if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+            error: `Slot >30min overdue — marked as passed (grace period). Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
+            stage: "grace",
+            plugin: null,
+          }).catch(() => {});
         } else {
           await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
         }
@@ -369,12 +378,29 @@ export class SchedulerService {
             url: pipelineResult.item.url,
             source: pipelineResult.item.pluginId,
           } : null;
-          await this.notifyAdminOfFailure(slot, pipelineResult.error ?? "Pipeline failed (no fallback content)", failItem).catch(() => {});
+          const failError = pipelineResult.error ?? "Pipeline failed (no fallback content)";
+          const failStage = pipelineResult.stage ?? "pipeline";
+          const failPlugin = pipelineResult.item?.pluginId ?? slot.category;
+          await this.notifyAdminOfFailure(slot, failError, failItem, { stage: failStage, plugin: failPlugin }).catch(() => {});
 
           // v8.2.1: Mark strategy plan post as failed too.
+          // v9.2.3: Pass the real error info so the Manager UI can show it.
           if (this.deps.strategyEngine) {
-            await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+            await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+              error: failError,
+              stage: failStage,
+              plugin: failPlugin,
+            }).catch(() => {});
           }
+
+          // v9.2.3: Record in the always-on failure ring buffer.
+          await this.recordFailure({
+            slot,
+            error: failError,
+            stage: failStage,
+            plugin: failPlugin,
+            contentId: pipelineResult.item?.id ?? null,
+          }).catch(() => {});
 
           // Mark slot as fired (to avoid retrying with no content).
           if (!this.deps.strategyEngine) {
@@ -388,7 +414,7 @@ export class SchedulerService {
             telegramMessageId: null,
             telegramChatId: null,
             publishedAt: Date.now(),
-            error: pipelineResult.error ?? "No content available",
+            error: failError,
             attempts: 0,
           };
         }
@@ -433,8 +459,13 @@ export class SchedulerService {
               if (fbPubResult.ok) {
                 backupContent = fbResult.content;
                 // v8.8.0: Mark as "backup" (not "published" or "failed").
+                // v9.2.3: Pass the original error so admin can see why primary failed.
                 if (this.deps.strategyEngine) {
-                  await this.deps.strategyEngine.markPostBackup(slot.date, slot.index).catch(() => {});
+                  await this.deps.strategyEngine.markPostBackup(slot.date, slot.index, {
+                    error: result.error ?? "unknown",
+                    stage: "publish",
+                    plugin: content.pluginId,
+                  }).catch(() => {});
                 }
                 // Send admin notification about the backup.
                 const adminId = this.deps.adminId?.() ?? 0;
@@ -475,8 +506,14 @@ export class SchedulerService {
         }
 
         // No backup succeeded — mark as failed.
+        // v9.2.3: Capture the original error AND the fallback attempts.
+        const finalError = result.error ?? "All plugins failed (primary + fallbacks)";
         if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch((e: unknown) => {
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+            error: finalError,
+            stage: "publish",
+            plugin: content.pluginId,
+          }).catch((e: unknown) => {
             this.deps.logger.warn("scheduler.skip", {
               slotIndex: slot.index,
               error: e instanceof Error ? e.message : String(e),
@@ -484,6 +521,15 @@ export class SchedulerService {
             });
           });
         }
+
+        // v9.2.3: Record in the always-on failure ring buffer.
+        await this.recordFailure({
+          slot,
+          error: finalError,
+          stage: "publish",
+          plugin: content.pluginId,
+          contentId: content.id,
+        }).catch(() => {});
 
         // Send failure report to admin.
         const adminId = this.deps.adminId?.() ?? 0;
@@ -495,7 +541,9 @@ export class SchedulerService {
             ``,
             `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
             `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-            `<blockquote>❌ <b>Error:</b> ${escapeHtml(result.error ?? "unknown")}</blockquote>`,
+            `<blockquote>🔌 <b>Original plugin:</b> ${escapeHtml(content.pluginId)}</blockquote>`,
+            `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(content.id)}</code></blockquote>`,
+            `<blockquote>❌ <b>Error:</b> ${escapeHtml(finalError)}</blockquote>`,
             `<blockquote>⚠️ <b>All fallback plugins also failed.</b></blockquote>`,
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
@@ -514,13 +562,27 @@ export class SchedulerService {
             });
           });
         } else {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch((e: unknown) => {
+          // v9.2.3: Pass real error info to markPostFailed.
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+            error: result.error ?? "unknown",
+            stage: "publish",
+            plugin: content.pluginId,
+          }).catch((e: unknown) => {
             this.deps.logger.warn("scheduler.skip", {
               slotIndex: slot.index,
               error: e instanceof Error ? e.message : String(e),
               message: "markPostFailed failed",
             });
           });
+          // v9.2.3: Record in the always-on failure ring buffer (for cases
+          // where we got here without going through the fallback branch above).
+          await this.recordFailure({
+            slot,
+            error: result.error ?? "unknown",
+            stage: "publish",
+            plugin: content.pluginId,
+            contentId: content.id,
+          }).catch(() => {});
         }
       }
 
@@ -575,8 +637,20 @@ export class SchedulerService {
         }
         // Mark strategy plan as failed too.
         if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
+          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+            error: message,
+            stage: "publish",
+            plugin: content.pluginId,
+          }).catch(() => {});
         }
+        // v9.2.3: Record in the always-on failure ring buffer.
+        await this.recordFailure({
+          slot,
+          error: message,
+          stage: "publish",
+          plugin: content.pluginId,
+          contentId: content.id,
+        }).catch(() => {});
         return {
           ok: false,
           contentId: content.id,
@@ -749,6 +823,7 @@ export class SchedulerService {
     slot: SlotTime,
     error: string,
     item?: { id?: string; title?: string; url?: string; source?: string } | null,
+    errorInfo?: { stage?: string; plugin?: string | null } | null,
   ): Promise<void> {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg) return;
@@ -762,6 +837,14 @@ export class SchedulerService {
       `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
       `<blockquote>❌ <b>Error:</b> ${escapeHtml(error)}</blockquote>`,
     ];
+
+    // v9.2.3: Show pipeline stage + plugin if known.
+    if (errorInfo?.stage) {
+      lines.push(`<blockquote>🩺 <b>Failed stage:</b> ${escapeHtml(errorInfo.stage)}</blockquote>`);
+    }
+    if (errorInfo?.plugin) {
+      lines.push(`<blockquote>🔌 <b>Plugin attempted:</b> ${escapeHtml(errorInfo.plugin)}</blockquote>`);
+    }
 
     if (item) {
       lines.push(``);
@@ -783,6 +866,77 @@ export class SchedulerService {
     await this.deps.tg.sendMessage(adminId, lines.join("\n"), {
       parse_mode: "HTML",
     }).catch(() => {});
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // v9.2.3: Always-on failure ring buffer
+  // ────────────────────────────────────────────────────────────
+
+  /** v9.2.3: KV key for the always-on failure ring buffer. This buffer is
+   *  INDEPENDENT of DEBUG_MODE — failures are always recorded so the admin
+   *  can see them in the Manager Logs tab even when debug mode is off.
+   *  Capped at 30 entries (oldest evicted on overflow). 7-day TTL. */
+  private static readonly FAILURE_BUFFER_KEY = "fredy:debug:failures";
+  private static readonly FAILURE_BUFFER_CAP = 30;
+  private static readonly FAILURE_BUFFER_TTL = 7 * 24 * 3600; // 7 days
+
+  /** Record a publish failure to the always-on ring buffer. Called from
+   *  every failure path in fireSlot(). Never throws — failures here must
+   *  not crash the scheduler. */
+  private async recordFailure(info: {
+    slot: SlotTime;
+    error: string;
+    stage: string;
+    plugin: string | null;
+    contentId: string | null;
+  }): Promise<void> {
+    try {
+      const kv = this.deps.kv;
+      if (!kv) return; // No KV wired — silently skip (test environments).
+      const entry = {
+        time: Date.now(),
+        slotIndex: info.slot.index,
+        date: info.slot.date,
+        slotTime: info.slot.time,
+        category: info.slot.category,
+        error: info.error,
+        stage: info.stage,
+        plugin: info.plugin,
+        contentId: info.contentId,
+      };
+      const existing = await kv.getJson<unknown[]>(SchedulerService.FAILURE_BUFFER_KEY);
+      const list = Array.isArray(existing) ? existing : [];
+      list.unshift(entry);
+      if (list.length > SchedulerService.FAILURE_BUFFER_CAP) {
+        list.length = SchedulerService.FAILURE_BUFFER_CAP;
+      }
+      await kv.setJson(SchedulerService.FAILURE_BUFFER_KEY, list, SchedulerService.FAILURE_BUFFER_TTL);
+    } catch (err) {
+      // Never crash the scheduler from a logging failure.
+      console.error("[scheduler] recordFailure failed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** v9.2.3: Read the always-on failure ring buffer. Exposed for the
+   *  Manager UI via container.scheduler.getRecentFailures(). */
+  async getRecentFailures(): Promise<readonly unknown[]> {
+    try {
+      const kv = this.deps.kv;
+      if (!kv) return [];
+      const existing = await kv.getJson<unknown[]>(SchedulerService.FAILURE_BUFFER_KEY);
+      return Array.isArray(existing) ? existing : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** v9.2.3: Clear the failure ring buffer. */
+  async clearFailures(): Promise<void> {
+    try {
+      const kv = this.deps.kv;
+      if (!kv) return;
+      await kv.delete(SchedulerService.FAILURE_BUFFER_KEY);
+    } catch { /* non-fatal */ }
   }
 
   /**
