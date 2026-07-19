@@ -11,14 +11,29 @@
  *   1. Authenticate (synchronous, fast)
  *   2. Acquire KV lock (prevent concurrent execution)
  *   3. Return 200 OK immediately with "tick started" log
- *   4. [background] Publish due posts
- *   5. [background] Maintain queue (refill if below minimum)
- *   6. [background] Cleanup + release lock
+ *   4. [background] Stale-tick check (v9.2.2 — see below)
+ *   5. [background] Publish due posts
+ *   6. [background] Maintain queue (refill if below minimum)
+ *   7. [background] Cleanup + release lock
  *
  * v9.2.1: refreshSources() / refreshSourcesIfNeeded() removed — the stub
  * paid a KV write every ~2h for `fredy:tick:lastRefresh` while doing zero
  * work. Source fetching is already covered by content.processForCategory()
  * inside maintainQueue().
+ *
+ * v9.2.2: Stale-tick detection moved here from cron.ts (no extra trigger).
+ * Before overwriting LAST_TICK_KEY, we read its previous value. If the gap
+ * exceeds STALE_TICK_GAP_HOURS, a single admin PM is sent and a cooldown
+ * timestamp is written so we don't spam. Cost on the happy path: 1 extra
+ * KV READ per tick (zero extra writes). The KV-write only happens in the
+ * rare case of a real gap (>5h) — once per cooldown window.
+ *
+ * Detection latency: alerts fire when the service RECOVERS, not at the
+ * moment of failure. Worst case: cron-job.org goes down for 3h, comes
+ * back, and the admin gets the alert ~3h late. This is acceptable for a
+ * free-tier project that values minimal triggers over real-time alerts.
+ * For instant failure detection, enable cron-job.org's built-in "alert me
+ * if this job doesn't run" feature on their dashboard — zero code, zero KV.
  */
 
 import type { Env, Container } from "../types/env";
@@ -36,6 +51,15 @@ export interface TickHandlerDeps {
 
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
+
+/** v9.2.2: Stale-tick threshold. The external cron fires every ~2h, so a
+ *  gap >5h means at least 2 cycles were missed — strong signal something
+ *  is wrong (cron-job.org down, network partition, deploy misconfig). */
+const STALE_TICK_GAP_HOURS = 5;
+/** v9.2.2: Cooldown to avoid repeating the alert on every tick after a gap.
+ *  Once alerted, subsequent ticks within this window are silent. */
+const STALE_TICK_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+const STALE_TICK_LAST_ALERT_KEY = "fredy:tick:lastStaleAlert";
 
 export async function tickHandler(
   request: Request,
@@ -71,7 +95,24 @@ export async function tickHandler(
 
   // ── 3. Return 200 immediately and run work in background ───
   const startedAt = new Date().toISOString();
-  await container.kv.set(LAST_TICK_KEY, String(Date.now())).catch(() => {});
+
+  // v9.2.2: Stale-tick check — read the PREVIOUS lastTick BEFORE overwriting.
+  // If the gap is unusually long (cron-job.org was down), fire one admin PM.
+  // Cost on the happy path: 1 KV READ per tick (no writes). The write + TG
+  // send only happen in the rare case of a real gap. Runs in background.
+  const previousTickStr = await container.kv.get(LAST_TICK_KEY).catch(() => null);
+  const now = Date.now();
+  if (ctx && previousTickStr) {
+    const previousTick = Number(previousTickStr);
+    if (Number.isFinite(previousTick)) {
+      const gapHours = (now - previousTick) / (60 * 60 * 1000);
+      if (gapHours > STALE_TICK_GAP_HOURS) {
+        ctx.waitUntil(notifyStaleTick(env, container, gapHours, previousTick, now));
+      }
+    }
+  }
+  // Now safe to overwrite with the current tick timestamp.
+  await container.kv.set(LAST_TICK_KEY, String(now)).catch(() => {});
 
   // If ctx is available, run in background. Otherwise run synchronously (legacy mode).
   if (ctx) {
@@ -92,6 +133,51 @@ export async function tickHandler(
     durationMs: Date.now() - startTime,
     log,
   });
+}
+
+// ────────────────────────────────────────────────────────────
+// v9.2.2: Stale-tick notification (background)
+// ────────────────────────────────────────────────────────────
+
+/** Send a single admin PM if the gap since the last tick exceeds the threshold.
+ *  Suppresses repeats within STALE_TICK_ALERT_COOLDOWN_MS via a KV cooldown key. */
+async function notifyStaleTick(
+  env: Env,
+  container: Container,
+  gapHours: number,
+  previousTick: number,
+  currentTick: number,
+): Promise<void> {
+  try {
+    // Check cooldown to avoid spamming the admin on every tick after a gap.
+    const lastAlertStr = await container.kv.get(STALE_TICK_LAST_ALERT_KEY).catch(() => null);
+    const lastAlert = lastAlertStr ? Number(lastAlertStr) : 0;
+    if (lastAlert && currentTick - lastAlert < STALE_TICK_ALERT_COOLDOWN_MS) {
+      return; // Already alerted recently — suppress.
+    }
+
+    const adminId = Number(env.ADMIN_ID ?? "0");
+    if (adminId > 0) {
+      await container.tg.sendMessage(
+        adminId,
+        [
+          ``,
+          `<b>━━━ ⚠️ STALE TICK ALERT ━━━</b>`,
+          ``,
+          ``,
+          `<blockquote>⏰ <b>Gap since last tick:</b> ${gapHours.toFixed(1)} hours</blockquote>`,
+          `<blockquote>🕐 <b>Last tick:</b> ${new Date(previousTick).toISOString()}</blockquote>`,
+          `<blockquote>🔄 <b>This tick:</b> ${new Date(currentTick).toISOString()}</blockquote>`,
+          `<blockquote>💡 <b>External cron (cron-job.org) may have been down.</b></blockquote>`,
+        ].join("\n"),
+        { parse_mode: "HTML" },
+      ).catch(() => {});
+    }
+    // Record the alert time so we don't spam.
+    await container.kv.set(STALE_TICK_LAST_ALERT_KEY, String(currentTick), 24 * 60 * 60).catch(() => {});
+  } catch (error) {
+    console.error("[tick] stale-tick notification failed:", error instanceof Error ? error.message : error);
+  }
 }
 
 // ────────────────────────────────────────────────────────────

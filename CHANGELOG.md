@@ -2,6 +2,65 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [9.2.2] — 2026-07-19 — Revert extra cron, move stale-tick into tick.ts (minimal-trigger design)
+
+### Critical Fix — Reverts v9.2.1's `*/30 * * * *` cron
+
+- **Reverted the v9.2.1 30-minute cron trigger.** Adding a third trigger
+  violated the project's minimal-trigger design philosophy. Per the user's
+  correction: even though a single `kv.get` is cheap, *trigger count itself*
+  is a resource that should be minimised on a free-tier project. The right
+  place for stale-tick detection is inside the existing 2-hourly tick —
+  zero new triggers, zero extra KV writes on the happy path.
+
+### Replacement — Stale-tick detection moved into `tick.ts`
+
+- **`src/entry/tick.ts`** now reads `fredy:tick:lastTick` *before*
+  overwriting it. If the gap exceeds `STALE_TICK_GAP_HOURS` (5h — i.e.
+  at least 2 missed cycles), it schedules a background admin PM via
+  `ctx.waitUntil(notifyStaleTick(...))`. Cost on the happy path:
+  **1 extra KV READ per tick, 0 extra KV writes**. The write + TG send
+  only happen in the rare case of a real gap, and a 6h cooldown
+  (`fredy:tick:lastStaleAlert`) suppresses repeat alerts.
+- **Detection latency trade-off:** alerts fire when the service *recovers*,
+  not at the moment of failure. Worst case: cron-job.org goes down for 3h,
+  comes back, the admin gets the alert ~3h late. This is acceptable for a
+  free-tier project that values minimal triggers over real-time alerts.
+- **Complementary (free, outside Cloudflare):** cron-job.org has a built-in
+  "alert me if this job doesn't run" feature on their dashboard. Enabling
+  it gives instant failure detection with zero code, zero KV. Recommended.
+- **`src/entry/cron.ts`** — `cronHandler` now only handles the `0 0 * * *`
+  24-hour backup branch. The `*/30 * * * *` branch and the `checkStaleTick`
+  function are removed. The daily 24h backup cron still runs the full tick
+  as a safety net (unchanged from v8.10.3).
+- **`wrangler.toml`** — `crons` reverted to `["0 0 * * *"]`. Single
+  internal cron trigger, exactly as originally designed.
+
+### Verification — Box-drawing cover UI for admin PMs
+
+- Confirmed that all admin PM notifications still use the box-drawing
+  `━━━ ✅ TITLE ━━━` banner followed by `<blockquote>` rows for each
+  detail field. This is the cover UI that was debugged and fixed in an
+  earlier pass. Verified present in:
+  - `notifyAdminPm()` — success/failure notice after auto-publish
+    (`━━━ 🤖 📤 AUTO-PUBLISHED POST ━━━`, `━━━ ✅ AUTO-PUBLISHED ━━━`,
+    `━━━ ❌ AUTO-PUBLISH FAILED ━━━`)
+  - `notifyAdminOfFailure()` — pipeline failure notice
+    (`━━━ ⚠️ SCHEDULED POST FAILED ━━━`)
+  - Backup-post notice (`━━━ 🔄 BACKUP POST PUBLISHED ━━━`)
+  - KV quota notice (`━━━ ⚠️ KV QUOTA EXCEEDED ━━━`)
+  - New stale-tick notice (`━━━ ⚠️ STALE TICK ALERT ━━━`) — same style
+    for visual consistency.
+
+### Housekeeping
+
+- `core/constants.ts`: `APP_VERSION = "9.2.2"`.
+- `package.json`: `version: "9.2.2"`.
+- `VERSION` file: `9.2.2`.
+- `wrangler.toml`: cron section reverted and re-documented.
+
+---
+
 ## [9.2.1] — 2026-07-19 — Stale-tick watchdog cron, refreshSources() cleanup, dedup comments, Queue page refactor
 
 ### Critical Fixes
