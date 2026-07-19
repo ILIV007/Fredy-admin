@@ -2,6 +2,7 @@
  * src/admin/screens/register.ts
  * Register all screens with a ScreenRegistry instance.
  * Called from container.ts at startup.
+ * v11.3.0: Added tiers, plan, schedulerdebug screens.
  */
 
 import type { ScreenRegistry } from "../registry";
@@ -19,6 +20,9 @@ import {
   editorScreen,
   languageScreen,
   strategyScreen,
+  tiersScreen,
+  planScreen,
+  schedulerDebugScreen,
 } from "./index";
 
 export function registerScreens(registry: ScreenRegistry): void {
@@ -35,4 +39,8 @@ export function registerScreens(registry: ScreenRegistry): void {
   registry.register(editorScreen);
   registry.register(languageScreen);
   registry.register(strategyScreen);
+  // v11.3.0 new screens
+  registry.register(tiersScreen);
+  registry.register(planScreen);
+  registry.register(schedulerDebugScreen);
 }

@@ -482,10 +482,17 @@ export class AdminOrchestrator {
     // "toggle:<scope>" → main screen handles toggles inline
     if (first === "toggle") return "main";
 
+    // v11.3.0: New screen callbacks
+    if (first === "tier") return "tiers";
+    if (first === "plan") return "plan";
+    if (first === "sdebug") return "schedulerdebug";
+
     // Direct screen IDs
     if (first === "scheduler") return "schedule";
     if (first === "soul") return "soul";
     if (first === "manual") return "manual";
+    if (first === "tiers") return "tiers";
+    if (first === "schedulerdebug") return "schedulerdebug";
 
     return first || "main";
   }

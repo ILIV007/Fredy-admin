@@ -23,19 +23,25 @@ const GH_API = "https://api.github.com";
 const CACHE_KEY = "fredy:source:github-events:recent";
 const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours (Tier S)
 
-/** Event types we care about (v11 Phase 2 spec). */
+/** Event types we care about (v11 Phase 2 spec).
+ *  v11.3.0: Added PublicEvent and ForkEvent for more variety. */
 const ACCEPTED_EVENT_TYPES = new Set([
   "ReleaseEvent",
   "PushEvent",
   "WatchEvent",
   "CreateEvent",
+  "PublicEvent",
+  "ForkEvent",
 ]);
 
-/** Curated list of popular orgs/repos to poll for events. */
+/** Curated list of popular orgs/repos to poll for events.
+ *  v11.3.0: Expanded list with more active orgs. */
 const WATCHED_ORGS = [
   "microsoft", "vercel", "facebook", "rust-lang", "golang",
   "nodejs", "python", "tailwindlabs", "prisma", "cloudflare",
   "denoland", "oven-sh", "astral-sh", "withastro", "openai",
+  "hashicorp", "grafana", "elastic", "posthog", "supabase",
+  "nuxt", "sveltejs", "vuetifyjs", "quasarframework",
 ];
 
 export interface GitHubEventsPluginDeps {
@@ -94,8 +100,9 @@ export class GitHubEventsPlugin implements Plugin {
       headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
     }
 
-    // Poll 3 random orgs to stay within rate limits
-    const shuffled = [...WATCHED_ORGS].sort(() => Math.random() - 0.5).slice(0, 3);
+    // v11.3.0: Poll 5 random orgs (was 3) to increase hit rate.
+    // Without GITHUB_TOKEN, rate limit is 60/hour — 5 requests is safe.
+    const shuffled = [...WATCHED_ORGS].sort(() => Math.random() - 0.5).slice(0, 5);
     const allEvents: GHEvent[] = [];
 
     for (const org of shuffled) {
@@ -116,14 +123,21 @@ export class GitHubEventsPlugin implements Plugin {
       }
     }
 
-    // Filter: only accepted event types, age <= 24h
+    // v11.3.0: Extended age filter from 24h to 72h — GitHub Events API
+    // only returns the last 90 days of public events, but many orgs don't
+    // have events every day. 72h gives a wider window.
     const now = Date.now();
-    const cutoff = now - 24 * 3600 * 1000;
+    const cutoff = now - 72 * 3600 * 1000; // 72 hours
     const filtered = allEvents
       .filter((e) => ACCEPTED_EVENT_TYPES.has(e.type))
       .filter((e) => {
         const ts = Date.parse(e.created_at) || 0;
         return ts >= cutoff;
+      })
+      // v11.3.0: Deduplicate by repo+type+createdAt to avoid duplicates.
+      .filter((e, idx, arr) => {
+        const key = `${e.repo?.name}-${e.type}-${e.created_at}`;
+        return arr.findIndex((o) => `${o.repo?.name}-${o.type}-${o.created_at}` === key) === idx;
       });
 
     const items = filtered.map((e) => this.normalize(e)).slice(0, 10);
@@ -136,6 +150,7 @@ export class GitHubEventsPlugin implements Plugin {
       plugin: "github-events",
       orgsChecked: shuffled.length,
       eventsFound: allEvents.length,
+      filtered: filtered.length,
       returned: items.length,
     });
 

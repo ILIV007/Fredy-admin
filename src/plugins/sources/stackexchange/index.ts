@@ -21,20 +21,28 @@ export { stackexchangeManifest } from "./manifest";
 
 const SO_API = "https://api.stackexchange.com/2.3";
 const CACHE_KEY = "fredy:source:stackexchange:top";
-const CACHE_TTL_SECONDS = 24 * 3600; // 24 hours (long cache to avoid throttle)
+// v11.3.0: Reduced from 24h to 6h — 24h cache meant empty results persisted all day.
+const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours
 
 // Programming tags to filter by (rotates for variety)
+// v11.3.0: Added more popular tags to increase hit rate.
 const TAG_SETS = [
-  ["javascript", "typescript"],
+  ["javascript"],
+  ["typescript"],
   ["python"],
   ["rust"],
   ["go"],
   ["java"],
-  ["c++"],
   ["react"],
   ["node.js"],
   ["docker"],
   ["git"],
+  ["kubernetes"],
+  ["aws"],
+  ["vue.js"],
+  ["angular"],
+  ["sql"],
+  ["regex"],
 ];
 
 export interface StackExchangePluginDeps {
@@ -69,82 +77,92 @@ export class StackExchangePlugin implements Plugin {
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "stackexchange" });
 
-    // Check cache first
+    // Check cache first — but DON'T cache empty results (v11.3.0 fix).
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) {
       this.deps.logger.info("source.fetch_cache_hit", { plugin: "stackexchange", count: cached.length });
       return cached;
     }
 
-    // Pick a random tag set for variety
-    const tags = TAG_SETS[Math.floor(Math.random() * TAG_SETS.length)]!;
-    const tagged = tags.join(";");
+    // v11.3.0: Try multiple tag sets if the first returns empty.
+    // Previously picked ONE random tag and gave up if it returned nothing.
+    const shuffledTags = [...TAG_SETS].sort(() => Math.random() - 0.5);
+    let items: readonly SourceItem[] = [];
 
-    // Build URL — use default filter (no custom filter to avoid 400 errors)
-    // The default filter returns: title, link, score, tags, is_answered, creation_date
-    // We don't get the body, but that's OK — the AI generates the body.
-    const params = new URLSearchParams({
-      order: "desc",
-      sort: "votes",
-      tagged,
-      site: "stackoverflow",
-      pagesize: "20",
-    });
+    for (const tags of shuffledTags.slice(0, 3)) {
+      const tagged = tags.join(";");
 
-    const url = `${SO_API}/questions?${params.toString()}`;
-
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)",
-        "Accept": "application/json",
-      },
-    });
-
-    if (!res.ok) {
-      // StackExchange returns 400 on throttle violation (shared Cloudflare IPs).
-      // Return empty array instead of throwing so the pipeline can try other plugins.
-      const body = await res.text().catch(() => "");
-      if (res.status === 400 && body.includes("throttle")) {
-        this.deps.logger.warn("source.throttled", {
-          plugin: "stackexchange",
-          message: "StackExchange API throttled — skipping (will retry from cache next time)",
-        });
-        return [];
-      }
-      throw new Error(`SO API ${res.status}: ${res.statusText}`);
-    }
-
-    const data = await res.json() as { items?: SOQuestion[]; error_id?: number; error_message?: string };
-    if (data.error_id) {
-      // Throttle or other API error — return empty gracefully.
-      this.deps.logger.warn("source.api_error", {
-        plugin: "stackexchange",
-        errorId: data.error_id,
-        errorMessage: data.error_message,
+      const params = new URLSearchParams({
+        order: "desc",
+        sort: "votes",
+        tagged,
+        site: "stackoverflow",
+        pagesize: "20",
+        // v11.3.0: Add filter to get body excerpt
+        filter: "!nNPvSNdWme",
       });
-      return [];
+
+      const url = `${SO_API}/questions?${params.toString()}`;
+
+      try {
+        const res = await fetch(url, {
+          headers: {
+            "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)",
+            "Accept": "application/json",
+          },
+        });
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          if (res.status === 400 && body.includes("throttle")) {
+            this.deps.logger.warn("source.throttled", {
+              plugin: "stackexchange",
+              message: "StackExchange API throttled — trying next tag set",
+            });
+            continue;
+          }
+          this.deps.logger.warn("source.api_error", {
+            plugin: "stackexchange", status: res.status, tags,
+          });
+          continue;
+        }
+
+        const data = await res.json() as { items?: SOQuestion[]; error_id?: number; error_message?: string };
+        if (data.error_id) {
+          this.deps.logger.warn("source.api_error", {
+            plugin: "stackexchange", errorId: data.error_id, errorMessage: data.error_message,
+          });
+          continue;
+        }
+
+        const questions = data.items ?? [];
+
+        // v11.3.0: Relaxed filter — score >= 1 (was > 1), is_answered optional.
+        const filtered = questions
+          .filter((q) => (q.score ?? 0) >= 1)
+          .slice(0, 10);
+
+        items = filtered.map((q) => this.normalize(q));
+
+        if (items.length > 0) {
+          this.deps.logger.info("source.fetch_success", {
+            plugin: "stackexchange", tags, returned: items.length,
+          });
+          break; // Got results, stop trying more tags.
+        }
+      } catch (error) {
+        this.deps.logger.warn("source.fetch_error", {
+          plugin: "stackexchange", tags,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
     }
-    const questions = data.items ?? [];
 
-    // Filter: score > 1, is_answered (lowered threshold to get more results)
-    const filtered = questions
-      .filter((q) => (q.score ?? 0) > 1 && q.is_answered)
-      .slice(0, 10);
-
-    const items = filtered.map((q) => this.normalize(q));
-
-    // Cache the result
+    // Cache the result (only if non-empty, v11.3.0).
     if (items.length > 0) {
       await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
     }
-
-    this.deps.logger.info("source.fetch_success", {
-      plugin: "stackexchange",
-      tags,
-      totalQuestions: questions.length,
-      filtered: filtered.length,
-      returned: items.length,
-    });
 
     return items;
   }

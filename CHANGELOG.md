@@ -2,6 +2,100 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.3.0] — 2026-07-20 — Plugin Fixes + Telegram Bot Full Refactor
+
+### 🔴 Critical Plugin Fixes (Empty APIs)
+
+- **FIX: stackexchange returns 0 items** — Cache TTL reduced 24h→6h (empty results
+  were cached for 24h). Now tries 3 different tag sets before giving up. Relaxed
+  filter from `score > 1` to `score >= 1`. Added body excerpt filter.
+
+- **FIX: producthunt returns 0 items (no token)** — Added RSS fallback when
+  `PRODUCTHUNT_TOKEN` is not set. Product Hunt has a public RSS feed at
+  `/feed` that works without authentication. Health check now always returns
+  healthy (RSS works without token).
+
+- **FIX: github-events returns 0 items** — Extended age filter from 24h to 72h
+  (many orgs don't have events every day). Added 9 more watched orgs (hashicorp,
+  grafana, elastic, posthog, supabase, nuxt, sveltejs, etc.). Added PublicEvent
+  and ForkEvent to accepted types. Polls 5 orgs instead of 3. Added deduplication
+  by repo+type+createdAt.
+
+- **FIX: reddit-v2 returns 0 items (Reddit blocks CF Workers)** — Added RSS
+  fallback. JSON API is tried first with a browser User-Agent; if blocked,
+  falls back to RSS feed (`/top.rss`). RSS feeds are more permissive than
+  the JSON API for server-side requests.
+
+### 🔴 Critical Config Fix
+
+- **FIX: telegram.adminId was empty string** — The `telegram.adminId` setting
+  defaulted to `""` and was never synced from `env.ADMIN_ID`. This caused all
+  admin PM notifications (grace failure, strategy change, stale tick) to
+  silently fail. Now synced automatically in `container.ts` on first request.
+
+### 🆕 Telegram Bot Full Refactor
+
+- **3 new screens** (total: 16, up from 13):
+  - `tiers` — Provider Tier Management (view all 20 providers by tier, enable/
+    disable, test, force-refresh, weight display)
+  - `plan` — Daily Plan viewer (today's slots with status badges, fire-next,
+    regenerate, scheduler debug link)
+  - `schedulerdebug` — Scheduler Debug (current time, scheduler state, grace
+    & thresholds, plan summary, due slots, lock status, last tick/publish,
+    queue depths)
+
+- **5 new commands** (total: 12, up from 7):
+  - `/tiers` — View all providers grouped by tier
+  - `/plan` — View today's publishing plan
+  - `/debug` — Scheduler debug summary (due slots, lock, last tick)
+  - `/providers` — Quick provider health overview (which are empty/healthy)
+  - `/force` — Force publish now (runs scheduler tick immediately)
+
+- **Admin orchestrator updated** — `resolveScreenId()` now handles `tier:`,
+  `plan:`, `sdebug:` callback namespaces.
+
+### New Documentation
+
+- **TELEGRAM_BOT_ROADMAP.md** — Engineering roadmap for the bot refactor,
+  including: current state assessment, refactor goals, new command list,
+  new screen catalog, main menu redesign, keyboard button conventions,
+  implementation plan, design principles, compatibility, success criteria.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.2.0 → 11.3.0 |
+| `package.json` | version 11.3.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.3.0" |
+| `src/plugins/sources/stackexchange/index.ts` | Cache 24h→6h, multi-tag retry, relaxed filter |
+| `src/plugins/sources/producthunt/index.ts` | RSS fallback, always healthy |
+| `src/plugins/sources/github-events/index.ts` | Age 24h→72h, more orgs, more event types, dedup |
+| `src/plugins/sources/reddit-v2/index.ts` | RSS fallback, browser User-Agent |
+| `src/container.ts` | Sync env.ADMIN_ID → settings.telegram.adminId |
+| **`src/admin/screens/tiers.ts`** | **NEW** — Tier management screen |
+| **`src/admin/screens/plan.ts`** | **NEW** — Daily plan viewer |
+| **`src/admin/screens/schedulerdebug.ts`** | **NEW** — Scheduler debug screen |
+| **`src/admin/commands/tiers.ts`** | **NEW** — /tiers command |
+| **`src/admin/commands/plan.ts`** | **NEW** — /plan command |
+| **`src/admin/commands/debug.ts`** | **NEW** — /debug command |
+| **`src/admin/commands/providers.ts`** | **NEW** — /providers command |
+| **`src/admin/commands/force.ts`** | **NEW** — /force command |
+| `src/admin/screens/index.ts` | Added 3 new screen exports |
+| `src/admin/screens/register.ts` | Registered 3 new screens |
+| `src/admin/commands/index.ts` | Added 5 new command exports |
+| `src/admin/commands/register.ts` | Registered 5 new commands |
+| `src/orchestrators/admin.ts` | resolveScreenId handles tier/plan/sdebug |
+| **`TELEGRAM_BOT_ROADMAP.md`** | **NEW** — Bot refactor roadmap |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.3.0
+
+---
+
 ## [11.2.0] — 2026-07-20 — CRITICAL: Scheduler Missed-Slot Recovery + Dashboard Debug
 
 ### 🔴 CRITICAL Fixes (Scheduler Publishing Bugs)

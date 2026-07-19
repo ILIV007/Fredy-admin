@@ -63,47 +63,140 @@ export class RedditV2Plugin implements Plugin {
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) return cached;
 
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0; +https://github.com/ilivir3/fredy)",
-    };
+    // v11.3.0: Reddit JSON API blocks Cloudflare Workers IPs.
+    // Try JSON API first, fall back to RSS feed.
+    const sub = SUBREDDITS[Math.floor(Math.random() * SUBREDDITS.length)] ?? "programming";
 
-    const allItems: SourceItem[] = [];
-    const sub = SUBREDDITS[Math.floor(Math.random() * SUBREDDITS.length)];
+    // Attempt 1: JSON API (may work with proper User-Agent)
+    const jsonItems = await this.fetchJSON(sub);
+    if (jsonItems.length > 0) return jsonItems;
 
+    // Attempt 2: RSS fallback
+    return this.fetchRSS(sub);
+  }
+
+  /** v11.3.0: JSON API fetch (may be blocked by Reddit). */
+  private async fetchJSON(sub: string): Promise<readonly SourceItem[]> {
     try {
-      const url = `https://old.reddit.com/r/${sub}/top.json?t=day&limit=15`;
+      const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+      };
+
+      const url = `https://www.reddit.com/r/${sub}/top.json?t=day&limit=15`;
       const res = await fetch(url, { headers });
 
       if (!res.ok) {
-        this.deps.logger.warn("source.fetch_error", { plugin: "reddit-v2", sub, status: res.status });
+        this.deps.logger.warn("source.fetch_error", { plugin: "reddit-v2", sub, status: res.status, source: "json" });
         return [];
       }
 
       const data = await res.json() as { data?: { children?: readonly RedditPost[] } };
       const posts = data.data?.children ?? [];
 
+      const items: SourceItem[] = [];
       for (const post of posts) {
         const item = this.normalize(post);
-        if (this.validate(item)) {
-          allItems.push(item);
-        }
+        if (this.validate(item)) items.push(item);
       }
 
-      if (allItems.length > 0) {
-        await this.deps.kv.setJson(CACHE_KEY, allItems.slice(0, 10), CACHE_TTL_SECONDS).catch(() => {});
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items.slice(0, 10), CACHE_TTL_SECONDS).catch(() => {});
+      }
+
+      return items;
+    } catch (error) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "reddit-v2", sub, source: "json",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** v11.3.0: RSS fallback — Reddit RSS feeds are more permissive. */
+  private async fetchRSS(sub: string): Promise<readonly SourceItem[]> {
+    try {
+      const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      };
+
+      const url = `https://www.reddit.com/r/${sub}/top.rss?t=day&limit=10`;
+      const res = await fetch(url, { headers });
+
+      if (!res.ok) {
+        this.deps.logger.warn("source.fetch_error", { plugin: "reddit-v2", sub, status: res.status, source: "rss" });
+        return [];
+      }
+
+      const xml = await res.text();
+      const items = this.parseRSS(xml, sub);
+
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items.slice(0, 10), CACHE_TTL_SECONDS).catch(() => {});
       }
 
       this.deps.logger.info("source.fetch_success", {
-        plugin: "reddit-v2", sub, returned: allItems.length,
+        plugin: "reddit-v2", sub, source: "rss", returned: items.length,
       });
+
+      return items;
     } catch (error) {
       this.deps.logger.warn("source.fetch_error", {
-        plugin: "reddit-v2",
+        plugin: "reddit-v2", sub, source: "rss",
         error: error instanceof Error ? error.message : String(error),
       });
+      return [];
     }
+  }
 
-    return allItems.slice(0, 10);
+  /** v11.3.0: Parse Reddit RSS XML. */
+  private parseRSS(xml: string, sub: string): readonly SourceItem[] {
+    const items: SourceItem[] = [];
+    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = entryRegex.exec(xml)) !== null && items.length < 10) {
+      const block = match[1] ?? "";
+      const title = this.extractTag(block, "title");
+      const link = this.extractLink(block);
+      const content = this.stripHtml(this.extractTag(block, "content"));
+      const published = this.extractTag(block, "published");
+
+      if (title && link) {
+        items.push({
+          id: `reddit-${title.slice(0, 30).replace(/\s+/g, "-")}`,
+          source: this.metadata.id,
+          category: this.metadata.category,
+          title,
+          body: content.slice(0, 500) || title,
+          url: link,
+          language: "en",
+          publishedAt: published ? Date.parse(published) || undefined : undefined,
+          metadata: {
+            subreddit: sub,
+            source: "rss",
+          },
+          fetchedAt: Date.now(),
+        });
+      }
+    }
+    return items;
+  }
+
+  private extractTag(xml: string, tag: string): string {
+    const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+    const match = regex.exec(xml);
+    return (match?.[1] ?? "").trim();
+  }
+
+  private extractLink(xml: string): string {
+    const match = /<link[^>]*href="([^"]+)"/.exec(xml) || /<link>([^<]+)<\/link>/.exec(xml);
+    return match?.[1] ?? "";
+  }
+
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]+>/g, "").replace(/&[^;]+;/g, " ").trim();
   }
 
   normalize(raw: unknown): SourceItem {

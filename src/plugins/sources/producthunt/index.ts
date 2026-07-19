@@ -57,16 +57,24 @@ export class ProductHuntPlugin implements Plugin {
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "producthunt" });
 
-    // ProductHunt requires a token — if not set, return empty
-    const token = (this.deps.env as unknown as Record<string, string | undefined>).PRODUCTHUNT_TOKEN;
-    if (!token) {
-      this.deps.logger.warn("source.fetch_no_token", { plugin: "producthunt" });
-      return [];
-    }
-
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) return cached;
 
+    // v11.3.0: Try GraphQL API first, fall back to RSS if no token.
+    const token = (this.deps.env as unknown as Record<string, string | undefined>).PRODUCTHUNT_TOKEN;
+
+    if (token) {
+      // GraphQL API path
+      const items = await this.fetchGraphQL(token);
+      if (items.length > 0) return items;
+    }
+
+    // v11.3.0: RSS fallback — Product Hunt has a public RSS feed.
+    return this.fetchRSS();
+  }
+
+  /** v11.3.0: GraphQL API fetch (requires token). */
+  private async fetchGraphQL(token: string): Promise<readonly SourceItem[]> {
     const query = `
       query {
         posts(first: 10, order: VOTES) {
@@ -106,22 +114,100 @@ export class ProductHuntPlugin implements Plugin {
 
       const data = await res.json() as { data?: { posts?: { edges: readonly PHProduct[] } } };
       const products = data.data?.posts?.edges ?? [];
-
       const items = products.map((p) => this.normalize(p.node)).slice(0, 10);
 
       if (items.length > 0) {
         await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
       }
 
-      this.deps.logger.info("source.fetch_success", { plugin: "producthunt", returned: items.length });
       return items;
     } catch (error) {
       this.deps.logger.warn("source.fetch_error", {
         plugin: "producthunt",
         error: error instanceof Error ? error.message : String(error),
+        message: "GraphQL failed, trying RSS fallback",
       });
       return [];
     }
+  }
+
+  /** v11.3.0: RSS fallback when no API token is available. */
+  private async fetchRSS(): Promise<readonly SourceItem[]> {
+    const RSS_URL = "https://www.producthunt.com/feed";
+    try {
+      const res = await fetch(RSS_URL, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0)" },
+      });
+
+      if (!res.ok) {
+        this.deps.logger.warn("source.fetch_error", { plugin: "producthunt", status: res.status, source: "rss" });
+        return [];
+      }
+
+      const xml = await res.text();
+      const items = this.parseRSS(xml);
+
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+      }
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "producthunt", source: "rss", returned: items.length,
+      });
+      return items;
+    } catch (error) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "producthunt", source: "rss",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** v11.3.0: Simple RSS XML parser for Product Hunt feed. */
+  private parseRSS(xml: string): readonly SourceItem[] {
+    const items: SourceItem[] = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = itemRegex.exec(xml)) !== null && items.length < 10) {
+      const block = match[1] ?? "";
+      const title = this.extractTag(block, "title");
+      const link = this.extractTag(block, "link") || this.extractLink(block);
+      const description = this.stripHtml(this.extractTag(block, "description"));
+      const pubDate = this.extractTag(block, "pubDate");
+
+      if (title && link) {
+        items.push({
+          id: `ph-${title.slice(0, 30).replace(/\s+/g, "-")}`,
+          source: this.metadata.id,
+          category: this.metadata.category,
+          title,
+          body: description.slice(0, 500),
+          url: link,
+          language: "en",
+          publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
+          metadata: { source: "rss" },
+          fetchedAt: Date.now(),
+        });
+      }
+    }
+    return items;
+  }
+
+  private extractTag(xml: string, tag: string): string {
+    const regex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>|<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+    const match = regex.exec(xml);
+    return (match?.[1] ?? match?.[2] ?? "").trim();
+  }
+
+  private extractLink(xml: string): string {
+    const match = /<link[^>]*href="([^"]+)"/.exec(xml);
+    return match?.[1] ?? "";
+  }
+
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]+>/g, "").replace(/&[^;]+;/g, " ").trim();
   }
 
   normalize(raw: unknown): SourceItem {
@@ -176,10 +262,10 @@ export class ProductHuntPlugin implements Plugin {
   }
 
   async health(): Promise<PluginStatus> {
-    const token = (this.deps.env as unknown as Record<string, string | undefined>).PRODUCTHUNT_TOKEN;
+    // v11.3.0: Always healthy — RSS fallback works without token.
     return {
       pluginId: this.metadata.id,
-      healthy: !!token,
+      healthy: true,
       enabled: this.metadata.enabled,
       lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null,
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,

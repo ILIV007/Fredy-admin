@@ -106,6 +106,29 @@ export function buildContainer(env: Env): Container {
   const cache = sharedConfigCache;
   const config = new ConfigService({ kv, env, repository, cache, registry });
 
+  // v11.3.0: Sync env.ADMIN_ID → settings.telegram.adminId if missing.
+  // This fixes the bug where telegram.adminId was empty string (default)
+  // even though env.ADMIN_ID was set as a secret. Without this sync,
+  // admin PM notifications (grace failure, strategy change, etc.) silently fail.
+  if (env.ADMIN_ID) {
+    void (async () => {
+      try {
+        const adminId = Number(env.ADMIN_ID);
+        const settings = await config.getSettings(adminId);
+        if (!settings.telegram.adminId) {
+          await config.updateSettings(adminId, {
+            telegram: { ...settings.telegram, adminId: env.ADMIN_ID ?? "" },
+          });
+          logger.info("config.update", {
+            message: "Synced ADMIN_ID from env to settings.telegram.adminId",
+          });
+        }
+      } catch {
+        // non-fatal — will retry on next request
+      }
+    })();
+  }
+
   // Layer 2: Telegram + Debug (depend on kv + logger)
   const tg = new TelegramService({
     botToken: env.BOT_TOKEN,
