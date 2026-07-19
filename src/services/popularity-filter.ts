@@ -26,9 +26,10 @@ export interface PopularityFilterDeps {
 const DEFAULT_MIN_SCORE = 30;
 
 /** Per-plugin minimum star counts — used when the plugin exposes
- *  `metadata.stars` directly (GitHub, GitHub Trending, GitHub Releases). */
+ *  `metadata.stars` directly (GitHub, GitHub Trending, GitHub Releases).
+ *  v9.2.0: Raised minimums — only genuinely popular repos get through. */
 const PLUGIN_MIN_STARS: Readonly<Record<string, number>> = {
-  github: 50,           // main GitHub plugin — be picky
+  github: 100,            // v9.2.0: raised from 50 — only repos with 100+ stars
   "github-trending": 100, // trending should be genuinely trending
   "github-releases": 0,   // releases are pre-curated (we picked the repos)
   // Other plugins don't have stars — they're exempt.

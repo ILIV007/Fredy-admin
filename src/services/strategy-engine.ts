@@ -128,9 +128,7 @@ export class StrategyEngine {
     );
 
     // 5. Assign categories + providers + priorities.
-    // v9.0.3: Mark any slots that are already in the past as "failed" —
-    // they can't be fired (grace period would skip them anyway).
-    // This prevents the "published in table but not in channel" bug.
+    // v9.0.3: Mark any slots that are already in the past as "failed".
     const now = Date.now();
     const posts: PlannedPost[] = slots.map((slot, index) => {
       const provider = this.selectProvider(slot.category, theme);
@@ -147,8 +145,6 @@ export class StrategyEngine {
         language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,
         priority,
         queueTarget: this.getQueueTarget(slot.category),
-        // v9.0.3: If this slot's time has already passed, mark as "failed"
-        // so the scheduler doesn't try to fire it (grace period would skip it anyway).
         status: (slot.epochMs <= now ? "failed" : "pending") as PlannedPostStatus,
         windowIndex: index,
       };

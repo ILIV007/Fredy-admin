@@ -101,9 +101,9 @@ export class GitHubPlugin implements Plugin {
     const data = await res.json() as { items?: GHRepo[]; total_count?: number };
     const repos = data.items ?? [];
 
-    // Filter: must have stars > 10 and description
+    // v9.2.0: Filter: must have stars >= 100 and description
     const filtered = repos.filter((r) =>
-      (r.stargazers_count ?? 0) > 10 && r.description && r.html_url,
+      (r.stargazers_count ?? 0) >= 100 && r.description && r.html_url,
     );
 
     const items = filtered.map((r) => this.normalize(r));

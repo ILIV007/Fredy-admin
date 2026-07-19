@@ -46,8 +46,7 @@ export async function cronHandler(
     ctx.waitUntil(processScheduledQueue(env, container));
     ctx.waitUntil(
       (async () => {
-        // v9.1.0: Stale-tick alert — check if the external cron has stopped.
-        // If LAST_TICK_KEY is older than 4 hours, the external cron is likely down.
+        // v9.2.0: Stale-tick alert — check if external cron has stopped.
         const LAST_TICK_KEY = "fredy:tick:lastTick";
         const lastTickStr = await container.kv.get(LAST_TICK_KEY).catch(() => null);
         if (lastTickStr) {

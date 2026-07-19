@@ -246,7 +246,7 @@ export class SchedulerService {
       // as "passed" instead of firing (avoids burst-publishing missed slots
       // after a long scheduler outage).
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
-        // v8.5.1: Mark as failed in strategy plan (not dailyPlanner).
+        // v9.2.0: Only use one write method — strategyEngine or dailyPlanner.
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
         } else {
@@ -376,10 +376,10 @@ export class SchedulerService {
             await this.deps.strategyEngine.markPostFailed(slot.date, slot.index).catch(() => {});
           }
 
-          // v9.1.0: Only use dailyPlanner when strategyEngine is not available.
+          // Mark slot as fired (to avoid retrying with no content).
           if (!this.deps.strategyEngine) {
-            await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
-          }
+          await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+        }
 
           return {
             ok: false,
@@ -402,9 +402,6 @@ export class SchedulerService {
       const result = await this.deps.publishingService.publish(content);
 
       // 4. Mark slot as fired (success or failure — prevents infinite retry).
-      // v9.1.0: Only call dailyPlanner.markSlotFired when strategyEngine is NOT available.
-      // When strategyEngine is available, markPostPublished/markPostFailed is the
-      // single source of truth — calling both was doubling KV writes.
       if (!this.deps.strategyEngine) {
         await this.deps.dailyPlanner.markSlotFired(slot, content.id);
       }
@@ -455,7 +452,6 @@ export class SchedulerService {
                   ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
                 }
                 // Return the backup result.
-                // v9.1.0: Skip dailyPlanner when strategyEngine is available.
                 if (!this.deps.strategyEngine) {
                   await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
                 }
@@ -558,7 +554,7 @@ export class SchedulerService {
         error: message,
         message: "Publish failed",
       });
-      // v9.1.0: Only use dailyPlanner when strategyEngine is not available.
+      // Mark slot as fired to prevent infinite retry loop.
       if (!this.deps.strategyEngine) {
         await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
       }
@@ -678,8 +674,8 @@ export class SchedulerService {
     // 2. Send the formatted post (photo or text). Fall back to text-only
     //    if sendPhoto fails.
     const sentPostNotice = pubResult.ok
-      ? "🤖 <b>📤 Auto-Published Post — Copy of Channel Message:</b>"
-      : "⚠️ <b>Auto-Publish FAILED — Post for Manual Forwarding:</b>";
+      ? "<b>━━━ 🤖 📤 AUTO-PUBLISHED POST ━━━</b>\n\n<i>Copy of the channel post:</i>"
+      : "<b>━━━ ⚠️ AUTO-PUBLISH FAILED ━━━</b>\n\n<i>Formatted post for manual forwarding:</i>";
 
     try {
       if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
