@@ -9,6 +9,7 @@ export const stackexchangeManifest: PluginManifest = {
   version: "1.0.0",
   enabled: true,
   category: "A",
+  tier: "A",
   priority: 4,
   rateLimit: 300,
   supportsImages: false,

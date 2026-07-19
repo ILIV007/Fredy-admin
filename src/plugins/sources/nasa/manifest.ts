@@ -11,6 +11,7 @@ export const nasaManifest: PluginManifest = {
   version: "1.1.0",
   enabled: true,
   category: "C",
+  tier: "S",
   priority: 1,
   rateLimit: 1000,
   supportsImages: true,

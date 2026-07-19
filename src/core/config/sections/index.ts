@@ -15,6 +15,7 @@ import { telegramSection } from "./telegram";
 import { languageSection } from "./language";
 import { schedulerSection } from "./scheduler";
 import { categoriesSection } from "./categories";
+import { tiersSection } from "./tiers";
 import { aiSection } from "./ai";
 import { providersSection } from "./providers";
 import { contentSection } from "./content";
@@ -32,6 +33,7 @@ export * from "./telegram";
 export * from "./language";
 export * from "./scheduler";
 export * from "./categories";
+export * from "./tiers";
 export * from "./ai";
 export * from "./providers";
 export * from "./content";
@@ -48,6 +50,7 @@ export * from "./strategy";
  * Called once at container construction.
  *
  * Order matters for the admin panel display (sections appear in this order).
+ * v11: Added `tiers` section (Provider Tier-based scheduling).
  */
 export function registerAllSections(registry: ConfigSectionRegistry): void {
   registry.register(generalSection);
@@ -55,6 +58,7 @@ export function registerAllSections(registry: ConfigSectionRegistry): void {
   registry.register(languageSection);
   registry.register(schedulerSection);
   registry.register(categoriesSection);
+  registry.register(tiersSection);
   registry.register(aiSection);
   registry.register(providersSection);
   registry.register(contentSection);
@@ -74,6 +78,7 @@ export const ALL_SECTION_KEYS = [
   "language",
   "scheduler",
   "categories",
+  "tiers",
   "ai",
   "providers",
   "content",

@@ -9,6 +9,7 @@ export const redditManifest: PluginManifest = {
   version: "1.0.0",
   enabled: false,
   category: "A",
+  tier: "B",
   priority: 5,
   rateLimit: 60,
   supportsImages: true,

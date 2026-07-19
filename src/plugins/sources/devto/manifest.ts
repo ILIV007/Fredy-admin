@@ -9,6 +9,7 @@ export const devtoManifest: PluginManifest = {
   version: "1.0.0",
   enabled: true,
   category: "A",
+  tier: "S",
   priority: 3,
   rateLimit: 1000,
   supportsImages: true,

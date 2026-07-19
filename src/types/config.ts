@@ -18,6 +18,7 @@ import type { TelegramConfig } from "../core/config/sections/telegram";
 import type { LanguageConfig } from "../core/config/sections/language";
 import type { SchedulerConfig } from "../core/config/sections/scheduler";
 import type { CategoriesConfig } from "../core/config/sections/categories";
+import type { TiersConfig } from "../core/config/sections/tiers";
 import type { AIConfig } from "../core/config/sections/ai";
 import type { ProvidersConfig } from "../core/config/sections/providers";
 import type { ContentConfig } from "../core/config/sections/content";
@@ -33,6 +34,8 @@ import type { StrategyConfig } from "../core/config/sections/strategy";
  * The complete Fredy settings blob.
  * Stored at KV `fredy:settings:<adminId>`.
  * Rarely changes — edit via admin panel.
+ *
+ * v11: Added `tiers` section (Provider Tier-based scheduling).
  */
 export interface FredySettings {
   readonly general: GeneralConfig;
@@ -40,6 +43,7 @@ export interface FredySettings {
   readonly language: LanguageConfig;
   readonly scheduler: SchedulerConfig;
   readonly categories: CategoriesConfig;
+  readonly tiers: TiersConfig;
   readonly ai: AIConfig;
   readonly providers: ProvidersConfig;
   readonly content: ContentConfig;
@@ -84,6 +88,7 @@ export type SettingsPatch = Partial<{
   language: Partial<LanguageConfig>;
   scheduler: Partial<SchedulerConfig>;
   categories: Partial<CategoriesConfig>;
+  tiers: Partial<TiersConfig>;
   ai: Partial<AIConfig>;
   providers: Partial<ProvidersConfig>;
   content: Partial<ContentConfig>;

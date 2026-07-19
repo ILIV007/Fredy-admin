@@ -17,6 +17,7 @@ const REQUIRED_METHODS = [
   "supportsMedia",
   "getSource",
   "getCategory",
+  "getTier",
   "health",
 ] as const;
 
@@ -27,6 +28,7 @@ const REQUIRED_MANIFEST_FIELDS = [
   "version",
   "enabled",
   "category",
+  "tier",
   "priority",
   "rateLimit",
   "supportsImages",

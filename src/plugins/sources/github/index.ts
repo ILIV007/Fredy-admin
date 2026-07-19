@@ -14,6 +14,7 @@
 import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
+import type { Tier } from "../../../types/tier";
 import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
@@ -57,6 +58,7 @@ export class GitHubPlugin implements Plugin {
 
   getSource(): string { return this.metadata.id; }
   getCategory(): Category { return this.metadata.category; }
+  getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
   async fetch(): Promise<readonly SourceItem[]> {
@@ -160,6 +162,13 @@ export class GitHubPlugin implements Plugin {
       lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null,
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,
+      // v11 Phase 3: Provider Analytics
+      itemsAccepted: 0,
+      itemsRejected: 0,
+      averageLatencyMs: null,
+      consecutiveEmptyFetches: 0,
+      currentBackoffMultiplier: 1,
+      lastRefreshAt: null,
     };
   }
 }

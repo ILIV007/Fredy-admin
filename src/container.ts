@@ -27,6 +27,7 @@ import { QualityEngine } from "./services/quality-engine";
 import { PluginManager } from "./services/plugin-manager";
 import { ProviderRegistry } from "./services/provider-registry";
 import { PluginLoader } from "./services/plugin-loader";
+import { ProviderEngine } from "./services/provider-engine";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
 import { LanguageManager } from "./services/language-manager";
@@ -125,7 +126,7 @@ export function buildContainer(env: Env): Container {
     state: () => config.getState(Number(env.ADMIN_ID)),
   });
 
-  // Layer 4: Plugin Manager + Provider Registry + Plugin Loader
+  // Layer 4: Plugin Manager + Provider Registry + Plugin Loader + Provider Engine (v11)
   const plugins = new PluginManager({ kv, logger });
   const providers = new ProviderRegistry({ logger, env });
   const pluginLoader = new PluginLoader({
@@ -136,6 +137,8 @@ export function buildContainer(env: Env): Container {
     providerRegistry: providers,
   });
   pluginLoader.loadAll();
+  // v11 Phase 3: Intelligent Provider Engine (staggered refresh, adaptive backoff, analytics)
+  const providerEngine = new ProviderEngine({ kv, logger, pluginManager: plugins });
 
   // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
@@ -302,6 +305,7 @@ export function buildContainer(env: Env): Container {
     soul,
     plugins,
     providers,
+    providerEngine,
     categories,
     scheduler,
     lang,

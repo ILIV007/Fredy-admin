@@ -9,6 +9,7 @@ export const githubTrendingManifest: PluginManifest = {
   version: "1.0.0",
   enabled: true,
   category: "C",
+  tier: "S",
   priority: 4,
   rateLimit: 60,
   supportsImages: true,

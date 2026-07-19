@@ -25,7 +25,9 @@ import {
   PluginNotRegisteredError,
 } from "../core/plugin/errors";
 import type { Category } from "../types/category";
-import type { Plugin, PluginManifest, PluginStatus } from "../types/plugin";
+import { tierPriority } from "../types/tier";
+import type { Tier } from "../types/tier";
+import type { Plugin, PluginManifest, PluginStatus, ProviderQualityResult } from "../types/plugin";
 import type { SourceItem } from "../types/api";
 import type { KVStore } from "./kv-store";
 import type { Logger } from "./logger";
@@ -62,6 +64,13 @@ function defaultStatus(pluginId: string): PluginStatus {
     rateLimitRemaining: null,
     rateLimitResetAt: null,
     lastItemCount: null,
+    // v11 Phase 3: Provider Analytics
+    itemsAccepted: 0,
+    itemsRejected: 0,
+    averageLatencyMs: null,
+    consecutiveEmptyFetches: 0,
+    currentBackoffMultiplier: 1,
+    lastRefreshAt: null,
   };
 }
 
@@ -196,6 +205,73 @@ export class PluginManager {
       .filter((p) => p.getCategory() === category)
       .filter((p) => this.isEnabled(p.metadata.id))
       .sort((a, b) => a.metadata.priority - b.metadata.priority);
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // v11: Tier-based listing (replaces category-based scheduling)
+  // ────────────────────────────────────────────────────────────
+
+  /** List plugins for a specific tier. */
+  listByTier(tier: Tier): readonly Plugin[] {
+    return this.list().filter((p) => p.getTier() === tier);
+  }
+
+  /** List enabled plugins for a tier, sorted by priority. */
+  listEnabledForTier(tier: Tier): readonly Plugin[] {
+    return this.list()
+      .filter((p) => p.getTier() === tier)
+      .filter((p) => this.isEnabled(p.metadata.id))
+      .sort((a, b) => a.metadata.priority - b.metadata.priority);
+  }
+
+  /** List all enabled plugins across all tiers, sorted by tier priority then plugin priority. */
+  listEnabledByTier(): readonly Plugin[] {
+    return this.list()
+      .filter((p) => this.isEnabled(p.metadata.id))
+      .sort((a, b) => {
+        const tierDiff = tierPriority(a.getTier()) - tierPriority(b.getTier());
+        if (tierDiff !== 0) return tierDiff;
+        return a.metadata.priority - b.metadata.priority;
+      });
+  }
+
+  /**
+   * v11 Phase 3: Fetch items from a plugin and run the per-provider quality filter.
+   * Returns only items that PASS the quality filter.
+   */
+  async fetchWithQualityFilter(
+    id: string,
+  ): Promise<{ readonly source: string; readonly items: readonly { readonly item: SourceItem; readonly score: number; readonly boost: boolean }[] } | null> {
+    const plugin = this.get(id);
+    if (!plugin) return null;
+
+    const rawItems = await this.fetchFrom(id);
+    if (rawItems.length === 0) return { source: id, items: [] };
+
+    // Run quality filter on each item (if the plugin implements it)
+    const filterResults = await Promise.all(
+      rawItems.map(async (item) => {
+        if (plugin.qualityFilter) {
+          return plugin.qualityFilter(item);
+        }
+        // Default: accept everything with a neutral score
+        return { item, score: 50, boost: false } as ProviderQualityResult;
+      }),
+    );
+
+    const accepted = filterResults
+      .filter((r): r is ProviderQualityResult => r !== null)
+      .map((r) => ({ item: r.item, score: r.score, boost: r.boost ?? false }));
+
+    // Update analytics counters
+    const status = this.getStatus(id);
+    this.updateStatus(id, {
+      itemsAccepted: status.itemsAccepted + accepted.length,
+      itemsRejected: status.itemsRejected + (rawItems.length - accepted.length),
+      consecutiveEmptyFetches: accepted.length === 0 ? status.consecutiveEmptyFetches + 1 : 0,
+    });
+
+    return { source: id, items: accepted };
   }
 
   /** Get all manifests (metadata only). */
@@ -353,6 +429,14 @@ export class PluginManager {
   // ────────────────────────────────────────────────────────────
   // Internal helpers
   // ────────────────────────────────────────────────────────────
+
+  /**
+   * v11: Public status updater for use by ProviderEngine.
+   * Updates the in-memory status and persists to KV. Returns the new status.
+   */
+  updateProviderStatus(id: string, patch: Partial<PluginStatus>): PluginStatus {
+    return this.updateStatus(id, patch);
+  }
 
   /** Update the in-memory status. Returns the new status. */
   private updateStatus(id: string, patch: Partial<PluginStatus>): PluginStatus {

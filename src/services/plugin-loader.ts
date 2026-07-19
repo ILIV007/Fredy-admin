@@ -38,6 +38,21 @@ import { createXkcdPlugin } from "../plugins/sources/xkcd/index";
 import { createGitHubTrendingPlugin } from "../plugins/sources/github-trending/index";
 import { createWikimediaPlugin } from "../plugins/sources/wikimedia/index";
 
+// v11: New Tier-Based Source Plugins
+// Tier S — Core providers (refresh every 2h)
+import { createGitHubEventsPlugin } from "../plugins/sources/github-events/index";
+import { createHackerNewsAlgoliaPlugin } from "../plugins/sources/hackernews-algolia/index";
+
+// Tier A — Important providers (refresh every 6h)
+import { createCloudflareBlogPlugin } from "../plugins/sources/cloudflare-blog/index";
+import { createHuggingFaceBlogPlugin } from "../plugins/sources/huggingface-blog/index";
+import { createProductHuntPlugin } from "../plugins/sources/producthunt/index";
+
+// Tier B — Supporting providers (refresh every 12h)
+import { createGitHubSecurityPlugin } from "../plugins/sources/github-security/index";
+import { createOpenAINewsPlugin } from "../plugins/sources/openai-news/index";
+import { createRedditV2Plugin } from "../plugins/sources/reddit-v2/index";
+
 // AI providers
 import { GeminiProvider } from "../plugins/ai/gemini";
 import { OpenRouterProvider } from "../plugins/ai/openrouter";
@@ -68,21 +83,33 @@ export class PluginLoader {
   /** Register all content source plugins. */
   private loadSources(): void {
     const sources = [
-      // Category A — Developer Content
+      // ─── Legacy providers (v9.x, kept for backward compat, disabled by default) ───
+      { id: "news", factory: createNewsPlugin },            // Tier: legacy
+      { id: "joke", factory: createJokePlugin },            // Tier: legacy
+      { id: "wikimedia", factory: createWikimediaPlugin },  // Tier: legacy
+      { id: "hackernews", factory: createHackerNewsPlugin },// Tier: legacy (superseded by hackernews-algolia)
+      { id: "reddit", factory: createRedditPlugin },        // Tier: legacy (superseded by reddit-v2)
+
+      // ─── v11 Tier S — Core providers (refresh every 2h) ───
       { id: "github", factory: createGitHubPlugin },
-      { id: "devto", factory: createDevToPlugin },
-      { id: "stackexchange", factory: createStackExchangePlugin },
-      { id: "reddit", factory: createRedditPlugin },
       { id: "github-releases", factory: createGitHubReleasesPlugin },
-      // Category B — Tech News
-      { id: "news", factory: createNewsPlugin },
-      { id: "hackernews", factory: createHackerNewsPlugin },
-      // Category C — Support Content
-      { id: "nasa", factory: createNasaPlugin },
-      { id: "joke", factory: createJokePlugin },
-      { id: "xkcd", factory: createXkcdPlugin },
       { id: "github-trending", factory: createGitHubTrendingPlugin },
-      { id: "wikimedia", factory: createWikimediaPlugin },
+      { id: "github-events", factory: createGitHubEventsPlugin },
+      { id: "devto", factory: createDevToPlugin },
+      { id: "hackernews-algolia", factory: createHackerNewsAlgoliaPlugin },
+      { id: "nasa", factory: createNasaPlugin },
+
+      // ─── v11 Tier A — Important providers (refresh every 6h) ───
+      { id: "stackexchange", factory: createStackExchangePlugin },
+      { id: "cloudflare-blog", factory: createCloudflareBlogPlugin },
+      { id: "huggingface-blog", factory: createHuggingFaceBlogPlugin },
+      { id: "producthunt", factory: createProductHuntPlugin },
+
+      // ─── v11 Tier B — Supporting providers (refresh every 12h) ───
+      { id: "xkcd", factory: createXkcdPlugin },
+      { id: "reddit-v2", factory: createRedditV2Plugin },
+      { id: "github-security", factory: createGitHubSecurityPlugin },
+      { id: "openai-news", factory: createOpenAINewsPlugin },
     ];
 
     for (const { id, factory } of sources) {

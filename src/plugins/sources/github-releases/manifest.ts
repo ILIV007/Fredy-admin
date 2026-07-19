@@ -9,6 +9,7 @@ export const githubReleasesManifest: PluginManifest = {
   version: "1.0.0",
   enabled: true,
   category: "A",
+  tier: "S",
   priority: 2,
   rateLimit: 60,
   supportsImages: true,

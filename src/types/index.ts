@@ -5,6 +5,7 @@
 
 export * from "./env";
 export * from "./category";
+export * from "./tier";
 export * from "./post";
 export * from "./plugin";
 export * from "./api";

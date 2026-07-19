@@ -7,6 +7,7 @@
  */
 
 import type { Category } from "./category";
+import type { Tier } from "./tier";
 import type { AICompleteRequest, AICompleteResponse } from "./ai";
 import type { SourceItem } from "./api";
 import type { Env } from "./env";
@@ -18,6 +19,9 @@ import type { Env } from "./env";
 /**
  * Static metadata about a plugin. Declared in each plugin's manifest.ts.
  * The PluginManager reads this to register, sort, and display the plugin.
+ *
+ * v11: Added `tier` field. Tiers determine SCHEDULING PRIORITY.
+ *      `category` remains for CONTENT CLASSIFICATION only.
  */
 export interface PluginManifest {
   /** Unique identifier. Used in KV keys, logs, admin panel. e.g., "github". */
@@ -32,10 +36,22 @@ export interface PluginManifest {
   /** Whether the plugin is enabled by default. Can be toggled at runtime. */
   readonly enabled: boolean;
 
-  /** Which category this plugin feeds. */
+  /**
+   * Content category this plugin produces (for classification only).
+   * v11: Categories are NO LONGER used for scheduling. Use `tier` for that.
+   */
   readonly category: Category;
 
-  /** Priority (1 = highest). Used when multiple plugins serve the same category. */
+  /**
+   * Scheduling tier (v11+). Determines refresh interval and priority.
+   * - "S"      : Core, every 2h, always enabled
+   * - "A"      : Important, every 6h, enabled
+   * - "B"      : Supporting, every 12h, enabled
+   * - "legacy" : Old providers, every 24h, disabled by default
+   */
+  readonly tier: Tier;
+
+  /** Priority (1 = highest). Used when multiple plugins share the same tier. */
   readonly priority: number;
 
   /** Rate limit in requests per hour. 0 = unlimited. */
@@ -70,6 +86,12 @@ export interface PluginManifest {
 /**
  * Runtime status of a plugin. Updated after every fetch and health check.
  * Stored in KV at `fredy:plugin:<id>:status`.
+ *
+ * v11: Added fields for provider analytics (Phase 3):
+ *   - itemsAccepted / itemsRejected (quality filter pass rate)
+ *   - averageLatencyMs
+ *   - currentBackoffMultiplier (adaptive refresh)
+ *   - consecutiveEmptyFetches (adaptive refresh trigger)
  */
 export interface PluginStatus {
   readonly pluginId: string;
@@ -96,6 +118,26 @@ export interface PluginStatus {
 
   /** Items returned in the last successful fetch. */
   readonly lastItemCount: number | null;
+
+  // ─── v11 Phase 3: Provider Analytics ───
+
+  /** Items that PASSED the per-provider quality filter (v11 Phase 2). */
+  readonly itemsAccepted: number;
+
+  /** Items that FAILED the per-provider quality filter. */
+  readonly itemsRejected: number;
+
+  /** Rolling average latency in milliseconds across recent fetches. */
+  readonly averageLatencyMs: number | null;
+
+  /** Consecutive fetches returning zero useful items (triggers adaptive backoff). */
+  readonly consecutiveEmptyFetches: number;
+
+  /** Current adaptive backoff multiplier (1 = normal, up to 4 = max backoff). */
+  readonly currentBackoffMultiplier: number;
+
+  /** Last time the provider's cache was refreshed (epoch ms). */
+  readonly lastRefreshAt: number | null;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -106,13 +148,17 @@ export interface PluginStatus {
  * A content source plugin. Each external API (GitHub, News, NASA, Joke)
  * implements this interface.
  *
+ * v11: Added `getTier()` and optional `qualityFilter()`.
+ *
  * Every plugin MUST expose:
- *   - fetch()         — pull raw items from the upstream API
- *   - normalize(raw)  — convert a raw API response into a SourceItem
- *   - validate(item)  — check if a SourceItem is valid and publishable
- *   - supportsMedia() — whether this plugin returns image/video items
- *   - getSource()     — return the plugin's source identifier
- *   - getCategory()   — return the category this plugin feeds
+ *   - fetch()           — pull raw items from the upstream API
+ *   - normalize(raw)    — convert a raw API response into a SourceItem
+ *   - validate(item)    — check if a SourceItem is valid and publishable
+ *   - supportsMedia()   — whether this plugin returns image/video items
+ *   - getSource()       — return the plugin's source identifier
+ *   - getCategory()     — return the category this plugin feeds (classification)
+ *   - getTier()         — return the scheduling tier (v11)
+ *   - qualityFilter()   — per-provider quality filter (v11 Phase 2)
  */
 export interface Plugin {
   /** Static metadata. Declared once in the plugin's manifest. */
@@ -136,8 +182,41 @@ export interface Plugin {
   /** Return the category this plugin feeds (same as metadata.category). */
   getCategory(): Category;
 
+  /** Return the scheduling tier (v11, same as metadata.tier). */
+  getTier(): Tier;
+
+  /**
+   * Per-provider quality filter (v11 Phase 2).
+   * Runs BEFORE the item enters the pipeline, BEFORE AI, BEFORE ranking.
+   * Returns the item with an optional quality score, or null if rejected.
+   * Default implementation (if not overridden): accepts everything.
+   */
+  qualityFilter?(item: SourceItem): Promise<ProviderQualityResult | null>;
+
   /** Health check — return current status without fetching new items. */
   health(): Promise<PluginStatus>;
+}
+
+// ────────────────────────────────────────────────────────────
+// Provider Quality Result (v11 Phase 2)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Result of a per-provider quality filter check.
+ * Returned by Plugin.qualityFilter().
+ */
+export interface ProviderQualityResult {
+  /** The (possibly enriched) source item that passed the filter. */
+  readonly item: SourceItem;
+
+  /** Provider-specific quality score (0-100). Higher = better. */
+  readonly score: number;
+
+  /** Human-readable reason for the score (for debugging/dashboard). */
+  readonly reason?: string;
+
+  /** Whether this item should be boosted in ranking (e.g., trending). */
+  readonly boost?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

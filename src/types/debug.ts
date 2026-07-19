@@ -23,6 +23,8 @@ export type DebugEventName =
   | "source.fetch_repo_error"
   | "source.fetch_cache_hit"
   | "source.fetch_skip"
+  | "source.fetch_no_token"
+  | "source.fetch_org_error"
   | "source.throttled"
   | "source.api_error"
   | "scheduler.tick"
@@ -39,7 +41,12 @@ export type DebugEventName =
   | "telegram.send"
   | "telegram.error"
   | "admin.action"
-  | "config.update";
+  | "config.update"
+  // v11 Phase 3: Provider Engine events
+  | "provider.adaptive_backoff"
+  | "provider.adaptive_restore"
+  | "provider.refresh_failed"
+  | "provider.refresh_batch";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

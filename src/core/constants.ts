@@ -8,10 +8,10 @@
  *  Bump together with VERSION file and CHANGELOG.md entry.
  *  All "version" strings in API responses should read from here, not be
  *  hardcoded inline (otherwise they drift, like the v6.2.0 strings did). */
-export const APP_VERSION = "9.3.2" as const;
+export const APP_VERSION = "11.0.0" as const;
 
 /** Build date — bump with each release. */
-export const APP_BUILD_DATE = "2026-07-19" as const;
+export const APP_BUILD_DATE = "2026-07-20" as const;
 
 /** Telegram Bot API base URL. */
 export const TELEGRAM_API_BASE = "https://api.telegram.org/bot" as const;
@@ -52,3 +52,53 @@ export const SOURCE_EMOJI_POOL = [
 
 /** Schema version. Must match src/types/config.ts. */
 export const SETTINGS_SCHEMA_VERSION = 1 as const;
+
+// ────────────────────────────────────────────────────────────
+// Provider Tier System (v11+)
+// ────────────────────────────────────────────────────────────
+// Tiers determine SCHEDULING PRIORITY (how often a provider is refreshed).
+// Categories remain for CONTENT CLASSIFICATION only (Programming, AI, Space...).
+// See PROJECT_STATUS_REPORT.md §15 (v11 Compatibility Notes).
+
+/** Default refresh interval for Tier S providers (core, every 2 hours). */
+export const TIER_S_REFRESH_HOURS = 2 as const;
+/** Default refresh interval for Tier A providers (important, every 6 hours). */
+export const TIER_A_REFRESH_HOURS = 6 as const;
+/** Default refresh interval for Tier B providers (supporting, every 12 hours). */
+export const TIER_B_REFRESH_HOURS = 12 as const;
+/** Default refresh interval for Legacy providers (every 24 hours). */
+export const TIER_LEGACY_REFRESH_HOURS = 24 as const;
+
+/** Default provider reputation scores (Phase 3). */
+export const PROVIDER_REPUTATION_DEFAULTS: Readonly<Record<string, number>> = {
+  "github-releases": 100,
+  "github-events": 95,
+  "hackernews-algolia": 95,
+  "cloudflare-blog": 95,
+  "huggingface-blog": 92,
+  "devto": 88,
+  "stackexchange": 85,
+  "nasa": 80,
+  "xkcd": 75,
+  "github-trending": 90,
+  "producthunt": 85,
+  "reddit": 70,
+  "github-security": 93,
+  "openai-news": 90,
+  // Legacy providers
+  "news": 60,
+  "joke": 50,
+  "wikimedia": 55,
+  "hackernews": 95,
+  "github": 90,
+};
+
+/** Adaptive refresh: how many consecutive empty/low-quality fetches before backing off. */
+export const ADAPTIVE_REFRESH_EMPTY_THRESHOLD = 3 as const;
+/** Adaptive refresh multiplier when backing off (e.g., 2x the normal interval). */
+export const ADAPTIVE_REFRESH_BACKOFF_MULTIPLIER = 2 as const;
+/** Adaptive refresh: max backoff multiplier cap (don't exceed 4x). */
+export const ADAPTIVE_REFRESH_MAX_BACKOFF = 4 as const;
+
+/** Provider health ring buffer capacity (for analytics dashboard). */
+export const PROVIDER_HEALTH_HISTORY_CAPACITY = 50 as const;

@@ -9,6 +9,7 @@ export const xkcdManifest: PluginManifest = {
   version: "1.0.0",
   enabled: true,
   category: "C",
+  tier: "B",
   priority: 3,
   rateLimit: 0,
   supportsImages: true,

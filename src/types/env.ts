@@ -43,6 +43,8 @@ export interface Container {
   readonly soul: import("../services/soul-loader").SoulLoader;
   readonly plugins: import("../services/plugin-manager").PluginManager;
   readonly providers: import("../services/provider-registry").ProviderRegistry;
+  /** v11 Phase 3: Intelligent Provider Engine (staggered refresh, adaptive backoff, analytics). */
+  readonly providerEngine: import("../services/provider-engine").ProviderEngine;
   readonly categories: import("../services/category-manager").CategoryManager;
   readonly scheduler: import("../services/scheduler-service").SchedulerService;
   readonly lang: import("../services/language-manager").LanguageManager;

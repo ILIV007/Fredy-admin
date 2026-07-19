@@ -30,5 +30,21 @@ export { XkcdPlugin, createXkcdPlugin, xkcdManifest } from "./xkcd";
 export { GitHubTrendingPlugin, createGitHubTrendingPlugin, githubTrendingManifest } from "./github-trending";
 export { WikimediaPlugin, createWikimediaPlugin, wikimediaManifest } from "./wikimedia";
 
+// ─── v11: New Tier-Based Providers ───
+
+// Tier S — Core providers (refresh every 2h)
+export { GitHubEventsPlugin, createGitHubEventsPlugin, githubEventsManifest } from "./github-events";
+export { HackerNewsAlgoliaPlugin, createHackerNewsAlgoliaPlugin, hackernewsAlgoliaManifest } from "./hackernews-algolia";
+
+// Tier A — Important providers (refresh every 6h)
+export { CloudflareBlogPlugin, createCloudflareBlogPlugin, cloudflareBlogManifest } from "./cloudflare-blog";
+export { HuggingFaceBlogPlugin, createHuggingFaceBlogPlugin, huggingfaceBlogManifest } from "./huggingface-blog";
+export { ProductHuntPlugin, createProductHuntPlugin, producthuntManifest } from "./producthunt";
+
+// Tier B — Supporting providers (refresh every 12h)
+export { GitHubSecurityPlugin, createGitHubSecurityPlugin, githubSecurityManifest } from "./github-security";
+export { OpenAINewsPlugin, createOpenAINewsPlugin, openaiNewsManifest } from "./openai-news";
+export { RedditV2Plugin, createRedditV2Plugin, redditV2Manifest } from "./reddit-v2";
+
 // Re-export the Plugin interface for convenience.
-export type { Plugin, PluginManifest, PluginStatus } from "../../types/plugin";
+export type { Plugin, PluginManifest, PluginStatus, ProviderQualityResult } from "../../types/plugin";

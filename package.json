@@ -1,7 +1,7 @@
 {
   "name": "fredy-admin",
-  "version": "9.3.2",
-  "description": "Fredy — AI-powered Content Operating System for the ILIVIR3 Telegram channel. Cloudflare Workers, serverless, plugin-architected.",
+  "version": "11.0.0",
+  "description": "Fredy v11 — AI-powered Content Operating System with Tier-Based Provider Architecture. Cloudflare Workers, serverless, plugin-architected.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
