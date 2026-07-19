@@ -11,7 +11,7 @@ import type { InlineKeyboard } from "../../types/telegram";
 import type { Category } from "../../types/category";
 import { buildKeyboardWithBack, labelButton, navButton } from "../keyboards";
 import { header, divider, kv } from "../helpers/formatting";
-import { escapeHtml } from "../../primitives/strings";
+import { reportBanner, reportRow, qualityRow } from "../../primitives/report";
 
 export const manualScreen: Screen = {
   id: "manual",
@@ -93,6 +93,8 @@ export const manualScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
+            // v9.3.1: Record in dedup store ONLY after successful publish.
+            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
             // Send the EXACT same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
@@ -108,15 +110,18 @@ export const manualScreen: Screen = {
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               ``,
-              `   📤 MANUAL PUBLISH — CATEGORY ${arg}`,
+              reportBanner("📤", `MANUAL PUBLISH — CATEGORY ${arg}`),
               ``,
               ``,
-              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
-              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
-              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
-              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
+              reportRow("🏷️", "Category", result.content.category),
+              reportRow("🔌", "Source Plugin", result.content.pluginId),
+              reportRow("🤖", "AI Model", `${result.content.aiProvider}/${result.content.aiModel}`),
+              qualityRow(result.content.quality.overallScore),
+              reportRow("📊", "Tokens Used", String(result.content.tokensUsed)),
+              reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId)),
+              reportRow("🔖", "Content ID", result.content.id),
+              reportRow("🔗", "Source URL", result.content.sourceUrl ?? "(none)"),
+              reportRow("📰", "Headline", result.content.headline ?? "(none)"),
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ Category ${arg} published!`, redirectTo: "menu:main" };
           }
@@ -198,13 +203,13 @@ export const manualScreen: Screen = {
           try {
             await ctx.container.tg.sendMessage(ctx.adminId, [
               ``,
-              `<b>━━━ 🔁 DUPLICATE DETECTED ━━━</b>`,
+              reportBanner("🔁", "DUPLICATE DETECTED"),
               ``,
               ``,
-              `<blockquote>🔌 <b>Source:</b> ${arg}</blockquote>`,
-              `<blockquote>📰 <b>Item:</b> ${escapeHtml(dupItem.title?.slice(0, 200) ?? "(no title)")}</blockquote>`,
-              `<blockquote>🔗 <b>URL:</b> ${escapeHtml(dupItem.url ?? "(no url)")}</blockquote>`,
-              `<blockquote>⚠️ <b>Matches existing:</b> <code>${escapeHtml(firstDuplicate.existingId)}</code> (${firstDuplicate.reason})</blockquote>`,
+              reportRow("🔌", "Source", arg),
+              reportRow("📰", "Item", dupItem.title?.slice(0, 200) ?? "(no title)"),
+              reportRow("🔗", "URL", dupItem.url ?? "(no url)"),
+              reportRow("⚠️", "Matches existing", `${firstDuplicate.existingId} (${firstDuplicate.reason})`),
               ``,
               `<blockquote>💡 <i>The formatted post above was sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
@@ -215,6 +220,8 @@ export const manualScreen: Screen = {
         if (result && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
+            // v9.3.1: Record in dedup store ONLY after successful publish.
+            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
             // Send the EXACT same formatted post to admin PM as what went to channel.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
@@ -230,15 +237,18 @@ export const manualScreen: Screen = {
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
               ``,
-              `   📤 MANUAL PUBLISH — ${arg}`,
+              reportBanner("📤", `MANUAL PUBLISH — ${arg}`),
               ``,
               ``,
-              `<blockquote>🔌 <b>Source Plugin:</b> ${result.content.pluginId}</blockquote>`,
-              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-              `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
-              `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
-              `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
+              reportRow("🏷️", "Category", result.content.category),
+              reportRow("🔌", "Source Plugin", result.content.pluginId),
+              reportRow("🤖", "AI Model", `${result.content.aiProvider}/${result.content.aiModel}`),
+              qualityRow(result.content.quality.overallScore),
+              reportRow("📊", "Tokens Used", String(result.content.tokensUsed)),
+              reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId)),
+              reportRow("🔖", "Content ID", result.content.id),
+              reportRow("🔗", "Source URL", result.content.sourceUrl ?? "(none)"),
+              reportRow("📰", "Headline", result.content.headline ?? "(none)"),
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
             return { toast: `✅ ${arg} published!`, redirectTo: "menu:main" };
           }

@@ -132,33 +132,51 @@ export class ContentQueue {
     return async () => {};
   }
 
-  /** Peek at the oldest item without removing it. */
+  /** Peek at the oldest non-expired item without removing it.
+   *  v9.3.0: Filters expired items (was returning expired items, then the
+   *  scheduler's stale-language check would drop them silently). */
   async peek(category: Category): Promise<QueuedContent | null> {
     const queue = await this.getQueue(category);
-    return queue[0] ?? null;
+    const now = Date.now();
+    return queue.find((item) => item.expiresAt > now) ?? null;
   }
 
-  /** Get queue depth per category. */
+  /** Get queue depth per category.
+   *  v9.3.0: Filters out expired items so the dashboard `depth` matches
+   *  the actual items shown in `listItems()`. Previously, `depth()` returned
+   *  the raw count including expired items, while `listItems()` filtered them
+   *  out — causing the dashboard to show "depth 2" but an empty table.
+   *  Also opportunistically cleans up expired items from KV when found. */
   async depth(): Promise<readonly QueueDepth[]> {
     const categories: Category[] = ["A", "B", "C"];
+    const now = Date.now();
     const depths = await Promise.all(
       categories.map(async (cat) => {
         const queue = await this.getQueue(cat);
-        const oldest = queue[0];
+        // Filter out expired items.
+        const fresh = queue.filter((item) => item.expiresAt > now);
+        // Opportunistic cleanup: if expired items were found, persist the
+        // trimmed queue so the next read doesn't have to filter again.
+        if (fresh.length < queue.length) {
+          await this.saveQueue(cat, fresh).catch(() => {});
+        }
+        const oldest = fresh[0];
         return {
           category: cat,
-          depth: queue.length,
-          oldestItemAge: oldest ? Date.now() - oldest.enqueuedAt : null,
+          depth: fresh.length,
+          oldestItemAge: oldest ? now - oldest.enqueuedAt : null,
         } satisfies QueueDepth;
       }),
     );
     return depths;
   }
 
-  /** Get depth for a single category. */
+  /** Get depth for a single category.
+   *  v9.3.0: Also filters expired items (consistent with `depth()`). */
   async depthFor(category: Category): Promise<number> {
     const queue = await this.getQueue(category);
-    return queue.length;
+    const now = Date.now();
+    return queue.filter((item) => item.expiresAt > now).length;
   }
 
   /** Move an item to the dead-letter queue. */

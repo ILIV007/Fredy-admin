@@ -340,25 +340,19 @@ export class ContentManager {
     }
 
     // ── Stage 8: Record in dedup store ──────────────────────
-    // v8.10.0: Catch KV quota errors — if KV is full, fail the pipeline
-    // so the scheduler knows and doesn't try to publish.
-    if (!skipDedup) {
-      try {
-        await this.deps.duplicateDetector.record(item);
-      } catch (kvError) {
-        const errMsg = kvError instanceof Error ? kvError.message : String(kvError);
-        if (errMsg.includes("KV put() limit") || errMsg.includes("quota")) {
-          this.deps.logger.error("pipeline.error", {
-            error: errMsg,
-            message: "KV quota exceeded — failing pipeline",
-          });
-          // v8.10.1: Fail the pipeline — don't return content that can't be properly tracked.
-          return this.reject("format", "kv_quota", `KV quota exceeded: ${errMsg}`, item);
-        } else {
-          throw kvError;
-        }
-      }
-    }
+    // v9.3.1: MOVED to after successful publish. Previously, record() was
+    // called here — BEFORE enqueue and BEFORE the post was actually published.
+    // This caused posts that failed quality gate at publish time, or failed
+    // sendPhoto, or were dropped as stale-language, to be permanently in the
+    // dedup store. Next time the same content was fetched, it was falsely
+    // detected as a duplicate — even though it was never published to the
+    // channel. Now, record() is called by the scheduler/manager/manual paths
+    // ONLY after the Telegram message is successfully sent.
+    //
+    // The trade-off: if the same content is fetched again while sitting in
+    // the queue (not yet published), it will be processed again by the AI
+    // pipeline. This wastes some tokens but is far better than falsely
+    // blocking content that was never published.
 
     // ── Stage 9: Enqueue ────────────────────────────────────
     if (!skipEnqueue) {

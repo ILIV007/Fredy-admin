@@ -283,6 +283,58 @@ describe("7. clear() wipes everything", async () => {
   assert(!result.isDuplicate, "after clear(), item is not a duplicate again");
 });
 
+// v9.3.1: Tests for the new recordPublished() method (called after successful
+// publish, not before). This is the key fix for the "unpublished posts
+// falsely detected as duplicates" bug.
+describe("8. v9.3.1: recordPublished() records a ReadyContent after publish", async () => {
+  const { detector, kv } = makeDetector();
+  // Simulate a ReadyContent (has headline/text/sourceUrl, not title/body/url).
+  const readyContent = {
+    id: "post-pub-1",
+    pluginId: "github",
+    headline: "Cool Repo",
+    text: "A test repository body for publish test.",
+    sourceUrl: "https://github.com/test/repo",
+  };
+  await detector.recordPublished(readyContent);
+  assert(kv.count() === 2, "recordPublished() writes 2 entries (hash + url)");
+
+  // The equivalent ContentItem should now be detected as a duplicate.
+  const equivItem = makeItem({
+    id: "post-pub-1",
+    pluginId: "github",
+    title: "Cool Repo",
+    body: "A test repository body for publish test.",
+    url: "https://github.com/test/repo",
+  });
+  const result = await detector.check(equivItem);
+  assert(result.isDuplicate, "after recordPublished(), equivalent ContentItem is detected as duplicate");
+});
+
+describe("9. v9.3.1: recordPublished() with empty body uses fallback hash", async () => {
+  const { detector } = makeDetector();
+  // HackerNews-style ReadyContent: no text body, just headline + URL.
+  const hnContent = {
+    id: "hn-pub-1",
+    pluginId: "hackernews",
+    headline: "Show HN: Cool project",
+    text: "",
+    sourceUrl: "https://news.ycombinator.com/item?id=999",
+  };
+  await detector.recordPublished(hnContent);
+
+  // Another HN post with different headline+URL should NOT be a duplicate.
+  const otherHn = makeItem({
+    id: "hn-pub-2",
+    pluginId: "hackernews",
+    title: "Different HN post",
+    body: "",
+    url: "https://news.ycombinator.com/item?id=1000",
+  });
+  const result = await detector.check(otherHn);
+  assert(!result.isDuplicate, "different empty-body HN post is NOT a duplicate");
+});
+
 // ────────────────────────────────────────────────────────────
 // Runner
 // ────────────────────────────────────────────────────────────

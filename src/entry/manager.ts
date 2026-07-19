@@ -7,6 +7,7 @@
 import type { Env, Container } from "../types/env";
 import { APP_VERSION, APP_BUILD_DATE } from "../core/constants";
 import { escapeHtml } from "../primitives/strings";
+import { reportBanner, reportRow, qualityRow } from "../primitives/report";
 
 export interface ManagerHandlerDeps {
   readonly env: Env;
@@ -215,6 +216,8 @@ export async function managerHandler(
       const pubResult = await container.finalPublisher.publish(target.content);
       if (pubResult.ok) {
         await container.queue.deleteItem(cat, body.contentId);
+        // v9.3.1: Record in dedup store ONLY after successful publish.
+        await container.duplicateDetector.recordPublished(target.content).catch(() => {});
         const adminId = Number(env.ADMIN_ID ?? "0");
         if (adminId > 0) {
           // Send formatted post to admin PM.
@@ -232,13 +235,15 @@ export async function managerHandler(
           // Send summary report.
           await container.tg.sendMessage(adminId, [
             ``,
-            `   📤 QUEUE SEND NOW — CAT ${cat}`,
+            reportBanner("📤", `QUEUE SEND NOW — CAT ${cat}`),
             ``,
             ``,
-            `<blockquote>🔌 <b>Source Plugin:</b> ${target.content.pluginId}</blockquote>`,
-            `<blockquote>🤖 <b>AI Model:</b> ${target.content.aiProvider}/${target.content.aiModel}</blockquote>`,
-            `<blockquote>${target.content.quality.overallScore >= 80 ? "🟢" : target.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${target.content.quality.overallScore}/100</blockquote>`,
-            `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
+            reportRow("🔌", "Source Plugin", target.content.pluginId),
+            reportRow("🤖", "AI Model", `${target.content.aiProvider}/${target.content.aiModel}`),
+            qualityRow(target.content.quality.overallScore),
+            reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId)),
+            reportRow("🔖", "Content ID", target.content.id),
+            reportRow("🔗", "Source URL", target.content.sourceUrl ?? "(none)"),
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
         return json({ ok: true, messageId: pubResult.telegramMessageId });
@@ -891,6 +896,10 @@ export async function managerHandler(
       // Stage 3: Publish to channel
       const t2 = Date.now();
       const pubResult = await container.finalPublisher.publish(result.content);
+      // v9.3.1: Record in dedup store ONLY after successful publish.
+      if (pubResult.ok) {
+        await container.duplicateDetector.recordPublished(result.content).catch(() => {});
+      }
       stages["publish"] = {
         ok: pubResult.ok,
         durationMs: Date.now() - t2,
@@ -922,15 +931,18 @@ export async function managerHandler(
           } catch { /* skip if transform fails */ }
           await container.tg.sendMessage(adminId, [
             ``,
-            `   📤 MANUAL PUBLISH — ${pluginId}`,
+            reportBanner("📤", `MANUAL PUBLISH — ${pluginId}`),
             ``,
             ``,
-            `<blockquote>🏷️ <b>Category:</b> ${result.content.category}</blockquote>`,
-            `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-            `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-            `<blockquote>📊 <b>Tokens Used:</b> ${result.content.tokensUsed}</blockquote>`,
-            `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`,
-            `<blockquote>🔖 <b>Content ID:</b> <code>${result.content.id}</code></blockquote>`,
+            reportRow("🏷️", "Category", result.content.category),
+            reportRow("🔌", "Source Plugin", result.content.pluginId),
+            reportRow("🤖", "AI Model", `${result.content.aiProvider}/${result.content.aiModel}`),
+            qualityRow(result.content.quality.overallScore),
+            reportRow("📊", "Tokens Used", String(result.content.tokensUsed)),
+            reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId)),
+            reportRow("🔖", "Content ID", result.content.id),
+            reportRow("🔗", "Source URL", result.content.sourceUrl ?? "(none)"),
+            reportRow("📰", "Headline", result.content.headline ?? "(none)"),
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         } else {
           // ── FAILURE: send the raw post + failure notice ──
@@ -955,15 +967,15 @@ export async function managerHandler(
             // If even the transform fails, send a plain-text fallback.
             await container.tg.sendMessage(adminId, [
               ``,
-              `<b>━━━ ❌ POST REJECTED ━━━</b>`,
+              reportBanner("❌", "POST REJECTED"),
               ``,
               ``,
-              `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
-              `<blockquote>⚠️ <b>Reason:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
-              `<blockquote>📰 <b>Headline:</b> ${escapeHtml(result.content.headline ?? "(none)")}</blockquote>`,
-              `<blockquote>🔗 <b>Source URL:</b> ${escapeHtml(result.content.sourceUrl ?? "(none)")}</blockquote>`,
-              `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-              `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
+              reportRow("🔌", "Plugin", pluginId),
+              reportRow("⚠️", "Reason", pubResult.error ?? "unknown"),
+              reportRow("📰", "Headline", result.content.headline ?? "(none)"),
+              reportRow("🔗", "Source URL", result.content.sourceUrl ?? "(none)"),
+              qualityRow(result.content.quality.overallScore),
+              reportRow("🤖", "AI Model", `${result.content.aiProvider}/${result.content.aiModel}`),
               ``,
               `<blockquote>💡 <i>Could not format the post for forwarding. Check the API response for details.</i></blockquote>`,
             ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
@@ -971,13 +983,13 @@ export async function managerHandler(
           // Send a short failure summary.
           await container.tg.sendMessage(adminId, [
             ``,
-            `<b>━━━ ❌ PUBLISH FAILED ━━━</b>`,
+            reportBanner("❌", "PUBLISH FAILED"),
             ``,
             ``,
-            `<blockquote>🔌 <b>Plugin:</b> ${pluginId}</blockquote>`,
-            `<blockquote>${result.content.quality.overallScore >= 80 ? "🟢" : result.content.quality.overallScore >= 60 ? "🟡" : "🔴"} <b>Quality Score:</b> ${result.content.quality.overallScore}/100</blockquote>`,
-            `<blockquote>🤖 <b>AI Model:</b> ${result.content.aiProvider}/${result.content.aiModel}</blockquote>`,
-            `<blockquote>⚠️ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+            reportRow("🔌", "Plugin", pluginId),
+            qualityRow(result.content.quality.overallScore),
+            reportRow("🤖", "AI Model", `${result.content.aiProvider}/${result.content.aiModel}`),
+            reportRow("⚠️", "Error", pubResult.error ?? "unknown"),
           ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
         }
       }

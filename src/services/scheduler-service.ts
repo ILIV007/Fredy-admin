@@ -36,6 +36,7 @@ import type { UXLayer } from "./ux-layer";
 import type { QuietHoursChecker } from "./quiet-hours-checker";
 import { SchedulerDisabledError } from "../core/scheduler/errors";
 import { escapeHtml } from "../primitives/strings";
+import { reportBanner, reportRow, qualityRow } from "../primitives/report";
 
 /** Publisher interface — both PublishingService and FinalPublisher implement this. */
 export interface Publisher {
@@ -219,7 +220,14 @@ export class SchedulerService {
    *  status is the single source of truth — if a post is "published" or
    *  "failed" in the strategy plan, it's skipped. */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
-    const GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
+    // v9.3.1: Increased from 30min to 125min (2h5min).
+    // The external cron (cron-job.org) fires every 2 hours. Slot times are
+    // randomized within posting windows. If a slot is at 08:17 and the cron
+    // fires at 08:00 (slot not yet due) and 10:00 (1h43 overdue), the old
+    // 30-min grace would mark it as failed. With 125-min grace, the slot
+    // still fires on the next cron tick as long as it's within ~2h of the
+    // scheduled time. This matches the cron interval + a small buffer.
+    const GRACE_PERIOD_MS = 125 * 60 * 1000; // 2 hours 5 minutes
 
     // v8.5.1: If using strategyEngine, get the plan to check post statuses.
     let stratPlan: import("../types/strategy").DailyPublishPlan | null = null;
@@ -467,19 +475,52 @@ export class SchedulerService {
                     plugin: content.pluginId,
                   }).catch(() => {});
                 }
+                // v9.3.1: Record the primary's failure in the always-on ring buffer
+                // so it shows up in the Manager Logs tab.
+                await this.recordFailure({
+                  slot,
+                  error: result.error ?? "unknown",
+                  stage: "publish",
+                  plugin: content.pluginId,
+                  contentId: content.id,
+                }).catch(() => {});
+                // v9.3.1: Record the BACKUP content in dedup (it was successfully published).
+                if (this.deps.duplicateDetector) {
+                  await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
+                }
                 // Send admin notification about the backup.
                 const adminId = this.deps.adminId?.() ?? 0;
                 if (adminId > 0 && this.deps.tg) {
+                  // v9.3.1: Also send the formatted backup post to admin PM
+                  // (previously only the summary was sent, not the actual post).
+                  try {
+                    if (this.deps.uxLayer) {
+                      const backupPost = await this.deps.uxLayer.transform(fbResult.content);
+                      if (backupPost.media && backupPost.media.type === "image" && backupPost.media.url) {
+                        await this.deps.tg.sendPhoto(adminId, backupPost.media.url, backupPost.caption, {
+                          parse_mode: "HTML",
+                        }).catch(() => {});
+                      } else {
+                        await this.deps.tg.sendMessage(adminId, backupPost.fullText, {
+                          parse_mode: "HTML",
+                        }).catch(() => {});
+                      }
+                    }
+                  } catch { /* non-fatal */ }
+                  // Send the backup summary notification.
                   await this.deps.tg.sendMessage(adminId, [
                     ``,
-                    `<b>━━━ 🔄 BACKUP POST PUBLISHED ━━━</b>`,
+                    reportBanner("🔄", "BACKUP POST PUBLISHED"),
                     ``,
                     ``,
-                    `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
-                    `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-                    `<blockquote>❌ <b>Original failed:</b> ${escapeHtml(result.error ?? "unknown")}</blockquote>`,
-                    `<blockquote>✅ <b>Backup plugin:</b> ${fbPlugin}</blockquote>`,
-                    `<blockquote>📤 <b>Channel Msg ID:</b> <code>${fbPubResult.telegramMessageId}</code></blockquote>`,
+                    reportRow("📅", "Slot", `${slot.date} at ${slot.time}`),
+                    reportRow("🏷️", "Category", slot.category),
+                    reportRow("❌", "Original failed", result.error ?? "unknown"),
+                    reportRow("🔌", "Original plugin", content.pluginId),
+                    reportRow("✅", "Backup plugin", fbPlugin),
+                    qualityRow(fbResult.content.quality.overallScore),
+                    reportRow("📤", "Channel Msg ID", String(fbPubResult.telegramMessageId)),
+                    reportRow("🔖", "Content ID", fbResult.content.id),
                   ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
                 }
                 // Return the backup result.
@@ -561,6 +602,12 @@ export class SchedulerService {
               message: "markPostPublished failed",
             });
           });
+          // v9.3.1: Record in dedup store ONLY after successful publish.
+          // Previously this was done in content-manager.ts before enqueue,
+          // causing unpublished posts to be falsely detected as duplicates.
+          if (this.deps.duplicateDetector) {
+            await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
+          }
         } else {
           // v9.2.3: Pass real error info to markPostFailed.
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
@@ -731,7 +778,7 @@ export class SchedulerService {
       });
       await this.deps.tg.sendMessage(adminId, [
         ``,
-        `   🤖 AUTO-PUBLISH NOTICE`,
+        `<b>━━━ 🤖 AUTO-PUBLISH NOTICE ━━━</b>`,
         ``,
         ``,
         `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
@@ -777,24 +824,22 @@ export class SchedulerService {
 
     // 3. Send the summary report with professional UI.
     const statusBanner = pubResult.ok
-      ? `<b>━━━ ✅ AUTO-PUBLISHED ━━━</b>`
-      : `<b>━━━ ❌ AUTO-PUBLISH FAILED ━━━</b>`;
-
-    const qualityEmoji = content.quality.overallScore >= 80 ? "🟢" : content.quality.overallScore >= 60 ? "🟡" : "🔴";
+      ? reportBanner("✅", "AUTO-PUBLISHED")
+      : reportBanner("❌", "AUTO-PUBLISH FAILED");
 
     await this.deps.tg.sendMessage(adminId, [
       statusBanner,
       ``,
-      `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
-      `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-      `<blockquote>🔌 <b>Source Plugin:</b> ${escapeHtml(content.pluginId)}</blockquote>`,
-      `<blockquote>🤖 <b>AI Model:</b> ${escapeHtml(content.aiProvider)}/${escapeHtml(content.aiModel)}</blockquote>`,
-      `<blockquote>${qualityEmoji} <b>Quality Score:</b> ${content.quality.overallScore}/100</blockquote>`,
-      `<blockquote>📊 <b>Tokens Used:</b> ${content.tokensUsed}</blockquote>`,
-      `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(content.id)}</code></blockquote>`,
+      reportRow("📅", "Scheduled", `${slot.date} at ${slot.time}`),
+      reportRow("🏷️", "Category", slot.category),
+      reportRow("🔌", "Source Plugin", content.pluginId),
+      reportRow("🤖", "AI Model", `${content.aiProvider}/${content.aiModel}`),
+      qualityRow(content.quality.overallScore),
+      reportRow("📊", "Tokens Used", String(content.tokensUsed)),
+      reportRow("🔖", "Content ID", content.id),
       pubResult.ok
-        ? `<blockquote>📤 <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-        : `<blockquote>⚠️ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
+        ? reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId))
+        : reportRow("⚠️", "Error", pubResult.error ?? "unknown"),
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
 
@@ -828,29 +873,27 @@ export class SchedulerService {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg) return;
 
-    const statusBanner = `<b>━━━ ⚠️ SCHEDULED POST FAILED ━━━</b>`;
-
-    const lines = [
-      statusBanner,
+    const lines: string[] = [
+      reportBanner("⚠️", "SCHEDULED POST FAILED"),
       ``,
-      `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
-      `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-      `<blockquote>❌ <b>Error:</b> ${escapeHtml(error)}</blockquote>`,
+      reportRow("📅", "Scheduled", `${slot.date} at ${slot.time}`),
+      reportRow("🏷️", "Category", slot.category),
+      reportRow("❌", "Error", error),
     ];
 
     // v9.2.3: Show pipeline stage + plugin if known.
     if (errorInfo?.stage) {
-      lines.push(`<blockquote>🩺 <b>Failed stage:</b> ${escapeHtml(errorInfo.stage)}</blockquote>`);
+      lines.push(reportRow("🩺", "Failed stage", errorInfo.stage));
     }
     if (errorInfo?.plugin) {
-      lines.push(`<blockquote>🔌 <b>Plugin attempted:</b> ${escapeHtml(errorInfo.plugin)}</blockquote>`);
+      lines.push(reportRow("🔌", "Plugin attempted", errorInfo.plugin));
     }
 
     if (item) {
       lines.push(``);
-      lines.push(`<blockquote>📰 <b>Title:</b> ${escapeHtml(item.title ?? "(none)")}</blockquote>`);
+      lines.push(reportRow("📰", "Title", item.title ?? "(none)"));
       if (item.source) {
-        lines.push(`<blockquote>🔌 <b>Source:</b> ${escapeHtml(item.source)}</blockquote>`);
+        lines.push(reportRow("🔌", "Source", item.source));
       }
       if (item.url) {
         lines.push(`<blockquote>🔗 <b>URL:</b> ${escapeHtml(item.url)}</blockquote>`);

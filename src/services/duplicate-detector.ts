@@ -91,12 +91,53 @@ export class DuplicateDetector {
     }
   }
 
+  /** v9.3.1: Record a ReadyContent in the dedup store AFTER successful publish.
+   *  This is the correct place to record — only after the post is actually
+   *  published to the channel. Accepts a ReadyContent (which has slightly
+   *  different field names: headline→title, text→body, sourceUrl→url). */
+  async recordPublished(content: {
+    readonly id: string;
+    readonly pluginId: string;
+    readonly headline: string | null;
+    readonly text: string;
+    readonly sourceUrl: string;
+  }): Promise<void> {
+    const item = {
+      id: content.id,
+      pluginId: content.pluginId,
+      title: content.headline ?? content.id,
+      body: content.text,
+      url: content.sourceUrl,
+    };
+    const hash = await this.computeHash(item);
+    const titleHash = this.computeTitleHash(item.title);
+    const now = Date.now();
+
+    const record: DedupRecord = {
+      hash,
+      url: item.url,
+      titleHash,
+      contentId: item.id,
+      pluginId: item.pluginId,
+      createdAt: now,
+      expiresAt: now + this.ttlSeconds * 1000,
+    };
+
+    await this.deps.kv.setJson(dedupKey(hash), record, this.ttlSeconds);
+    if (item.url) {
+      const urlHash = await this.hashUrl(item.url);
+      await this.deps.kv.setJson(`fredy:dedup:url:${urlHash}`, record, this.ttlSeconds);
+    }
+  }
+
   /** Compute the content hash (SHA-1 of normalized body).
    *  IMPORTANT: if the body is empty (common for HackerNews items that
    *  only have a title), fall back to hashing the URL + title. Otherwise
    *  all empty-body items would hash to the same value (sha1 of empty
-   *  string) and be falsely detected as duplicates of each other. */
-  private async computeHash(item: ContentItem): Promise<string> {
+   *  string) and be falsely detected as duplicates of each other.
+   *  v9.3.1: Accepts a minimal shape (id/title/body/url) so it can be
+   *  called from `recordPublished()` which only has ReadyContent fields. */
+  private async computeHash(item: { body?: string; url?: string; title?: string }): Promise<string> {
     const normalizedBody = normalizeForDedup(item.body ?? "");
     // If body is empty/whitespace, hash URL + title instead.
     if (!normalizedBody || normalizedBody.length < 3) {

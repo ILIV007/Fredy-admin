@@ -2,6 +2,116 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [9.3.1] — 2026-07-19 — Dedup-after-publish fix, grace-period fix, backup-PM fix, failure-log fix
+
+### Critical Fixes
+
+- **Dedup record moved to AFTER successful publish.** Previously,
+  `duplicateDetector.record()` was called in `content-manager.ts` BEFORE
+  enqueue and BEFORE the post was actually published to the channel. This
+  meant: if a post failed quality gate at publish time, failed sendPhoto,
+  or was dropped as stale-language, it was STILL recorded in the dedup
+  store. Next time the same content was fetched, it was falsely detected
+  as a duplicate — even though it was never published. **Root cause of the
+  "unpublished posts detected as duplicates" bug.**
+  
+  Fix: removed `record()` from `content-manager.ts` stage 8. Added new
+  `recordPublished()` method to `DuplicateDetector` that accepts a
+  `ReadyContent` (with headline/text/sourceUrl fields). Called from:
+  - `scheduler-service.ts` after `markPostPublished()` (scheduled path)
+  - `scheduler-service.ts` after backup publish succeeds (fallback path)
+  - `entry/manager.ts` queue send-now after `pubResult.ok`
+  - `entry/manager.ts` post/channel after `pubResult.ok`
+  - `admin/screens/manual.ts` category path after `pubResult.ok`
+  - `admin/screens/manual.ts` source path after `pubResult.ok`
+
+- **Grace period increased from 30min to 125min (2h5min).** The external
+  cron (cron-job.org) fires every 2 hours. Slot times are randomized
+  within posting windows. If a slot was at 08:17 and the cron fired at
+  08:00 (slot not yet due) and 10:00 (1h43 overdue), the old 30-min grace
+  would mark it as failed — the slot never fired. With 125-min grace, the
+  slot still fires on the next cron tick as long as it's within ~2h of the
+  scheduled time. **Root cause of the "posts not firing on schedule" bug.**
+
+- **Backup posts now sent to admin PM.** Previously, when the primary
+  publish failed and a backup plugin succeeded, only a summary
+  notification was sent to the admin — not the actual formatted post.
+  Now the formatted backup post is sent to the admin PM first (photo or
+  text), followed by the summary notification with the `━━━ 🔄 BACKUP POST
+  PUBLISHED ━━━` banner. **Root cause of the "backup posts not in admin
+  PM" bug.**
+
+- **Backup-succeeded path now records failure in the always-on ring
+  buffer.** Previously, when a backup succeeded, the primary's failure
+  was NOT recorded in `fredy:debug:failures` — only the strategy plan
+  was marked as "backup". This meant the Manager Logs tab showed nothing
+  even though a failure occurred. Now `recordFailure()` is called on the
+  backup-succeeded path too, so the failure shows up in the Logs tab.
+  **Root cause of the "empty error logs despite a failure" bug.**
+
+- **Backup content recorded in dedup.** When a backup plugin's post is
+  successfully published, it's now recorded in the dedup store via
+  `recordPublished()`. Previously, backup posts were never recorded,
+  so the same backup content could be re-published later.
+
+### New Methods
+
+- `DuplicateDetector.recordPublished(content: ReadyContent)` — records
+  a successfully-published post in the dedup store. Accepts the
+  ReadyContent shape (headline/text/sourceUrl) directly, no conversion
+  needed. Writes 2 KV entries (hash + URL), same as `record()`.
+
+### Tests
+
+- 2 new dedup tests for `recordPublished()`:
+  - Test 8: `recordPublished()` writes 2 entries and equivalent
+    ContentItem is detected as duplicate.
+  - Test 9: `recordPublished()` with empty body uses fallback hash
+    (no false positives between different empty-body HN posts).
+- Total dedup tests: 21 (was 18).
+- Total tests: 137 (was 134).
+
+### Housekeeping
+
+- `core/constants.ts`: `APP_VERSION = "9.3.1"`.
+- `package.json`: `version: "9.3.1"`.
+- `VERSION` file: `9.3.1`.
+- TypeScript: 0 errors.
+
+### Important: Clear existing dedup store after deploy
+
+Since the old `record()` was called before publish, the dedup store may
+contain entries for posts that were never published. After deploying
+v9.3.1, use the Manager UI → System → "Clear Dedup" button to wipe the
+stale dedup store. This will allow previously-blocked content to be
+fetched and published again.
+
+---
+
+## [9.3.0] — 2026-07-19 — Admin PM cover UI unified, queue display fix, code optimization
+
+### Critical Fixes
+
+- **Admin PM report cover UI unified.** All 5 manual-publish report paths
+  now use the `━━━ 📤 TITLE ━━━` box-drawing banner (was plain text in 4
+  of them). New `src/primitives/report.ts` centralizes the banner, row,
+  and quality-emoji helpers — eliminates 7+ duplicated code blocks.
+
+- **Ready Queue display fix.** `depth()` was returning raw count including
+  expired items, while `listItems()` filtered them — causing "depth 2 but
+  empty table" for Category B. Now `depth()`, `depthFor()`, and `peek()`
+  all filter expired items. Opportunistic cleanup: expired items are
+  pruned from KV when found.
+
+### Optimization
+
+- Eliminated 7 duplicated quality-emoji blocks → 1 `qualityEmoji()`.
+- Eliminated 5+ duplicated banner patterns → 1 `reportBanner()`.
+- Eliminated 30+ duplicated `<blockquote>` rows → 1 `reportRow()`.
+- Queue `depth()` now auto-prunes expired items (saves future reads).
+
+---
+
 ## [9.2.3] — 2026-07-19 — Debuggable scheduled-post failures (clickable Failed badge + always-on failure log + richer admin PM)
 
 ### Problem
