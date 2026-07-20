@@ -110,7 +110,9 @@ export interface SchedulerStatus {
 // Publishing
 // ────────────────────────────────────────────────────────────
 
-/** Result of a publish attempt. */
+/** Result of a publish attempt.
+ *  v12.0.7: Added sentText + sentMediaUrl — the EXACT content sent to the
+ *  channel, so the admin PM can forward the identical post (not a re-transform). */
 export interface PublishResult {
   readonly ok: boolean;
   readonly contentId: string | null;
@@ -120,6 +122,10 @@ export interface PublishResult {
   readonly publishedAt: number;
   readonly error?: string;
   readonly attempts: number;
+  /** v12.0.7: The exact text/caption sent to the channel (after URL stripping). */
+  readonly sentText?: string;
+  /** v12.0.7: The exact image URL sent to the channel (null = text-only post). */
+  readonly sentMediaUrl?: string | null;
 }
 
 /** Options for manual publishing. */

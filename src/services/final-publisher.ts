@@ -283,7 +283,7 @@ export class FinalPublisher {
       };
     }
 
-    const { messageId, chatId } = retryResult.value;
+    const { messageId, chatId, sentText, sentMediaUrl } = retryResult.value;
 
     // ── Record success in history ───────────────────────────
     await this.deps.history.recordPublished(content, messageId, chatId);
@@ -320,14 +320,18 @@ export class FinalPublisher {
       telegramChatId: chatId,
       publishedAt: Date.now(),
       attempts: retryResult.attempts,
+      sentText,
+      sentMediaUrl,
     };
   }
 
   /** Publish a FinalPost to Telegram (text or photo).
-   *  v11.7.0: Uses unified ImageResolver — no fallback logos. */
+   *  v11.7.0: Uses unified ImageResolver — no fallback logos.
+   *  v12.0.7: Returns sentText + sentMediaUrl — the EXACT content sent to
+   *  the channel, so the admin PM can forward the identical post. */
   private async publishToTelegram(
     post: FinalPost,
-  ): Promise<{ messageId: number; chatId: string }> {
+  ): Promise<{ messageId: number; chatId: string; sentText: string; sentMediaUrl: string | null }> {
     const settings = await this.deps.settings();
     const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
     const parseMode = settings?.telegram?.parseMode ?? "HTML";
@@ -401,6 +405,8 @@ export class FinalPublisher {
         return {
           messageId: result.result.message_id,
           chatId: String(result.result.chat?.id ?? channel),
+          sentText: cleanCaption,
+          sentMediaUrl: coverUrl,
         };
       } catch {
         // sendPhoto failed — fall through to text-only.
@@ -438,6 +444,8 @@ export class FinalPublisher {
     return {
       messageId: result.result.message_id,
       chatId: String(result.result.chat?.id ?? channel),
+      sentText: cleanText,
+      sentMediaUrl: null,
     };
   }
 

@@ -846,9 +846,22 @@ export class SchedulerService {
                 await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
               }
 
-              // v12.0.6: Send admin backup notification — summary only (no post copy).
+              // v12.0.7: Send the EXACT backup post to admin PM (same as channel), then the report.
               const adminId = this.deps.adminId?.() ?? 0;
               if (adminId > 0 && this.deps.tg) {
+                // Send the exact same post that went to the channel.
+                if (fbPubResult.sentText) {
+                  if (fbPubResult.sentMediaUrl) {
+                    await this.deps.tg.sendPhoto(adminId, fbPubResult.sentMediaUrl, fbPubResult.sentText, {
+                      parse_mode: "HTML",
+                    }).catch(() => {});
+                  } else {
+                    await this.deps.tg.sendMessage(adminId, fbPubResult.sentText, {
+                      parse_mode: "HTML",
+                    }).catch(() => {});
+                  }
+                }
+                // Then send the backup summary report.
                 await this.deps.tg.sendMessage(adminId, [
                   ``,
                   reportBanner("🔄", "BACKUP POST PUBLISHED"),
@@ -986,11 +999,26 @@ export class SchedulerService {
     const adminId = this.deps.adminId?.() ?? 0;
     if (adminId <= 0 || !this.deps.tg) return;
 
-    // v12.0.6: Removed the formatted-post copy (was sending the channel post
-    // to admin PM). The admin already sees the post in the channel — sending
-    // a duplicate copy in PM is unnecessary noise. Now we send ONLY the
-    // summary report with status + key details.
+    // v12.0.7: Send the EXACT same post that went to the channel — using the
+    // sentText + sentMediaUrl from PublishResult (captured inside FinalPublisher).
+    // This ensures the admin PM receives an identical copy, not a re-transformed
+    // version that might differ slightly.
+    if (pubResult.ok && pubResult.sentText) {
+      const mediaUrl = pubResult.sentMediaUrl;
+      if (mediaUrl) {
+        // Photo post — send the same photo + caption to admin PM.
+        await this.deps.tg.sendPhoto(adminId, mediaUrl, pubResult.sentText, {
+          parse_mode: "HTML",
+        }).catch(() => {});
+      } else {
+        // Text-only post — send the same text to admin PM.
+        await this.deps.tg.sendMessage(adminId, pubResult.sentText, {
+          parse_mode: "HTML",
+        }).catch(() => {});
+      }
+    }
 
+    // Then send the summary report.
     const statusBanner = pubResult.ok
       ? reportBanner("✅", "AUTO-PUBLISHED")
       : reportBanner("❌", "AUTO-PUBLISH FAILED");

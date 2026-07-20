@@ -11,6 +11,7 @@ import { cronHandler } from "./entry/cron";
 import { debugHandler } from "./entry/debug";
 import { tickHandler } from "./entry/tick";
 import { managerHandler } from "./entry/manager";
+import { providerRefreshHandler } from "./entry/provider-refresh";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -31,10 +32,17 @@ export default {
       return detailedHealthHandler(env);
     }
 
-    // POST or GET /internal/tick — external cron endpoint.
+    // POST or GET /internal/tick — external cron endpoint (manual trigger).
     if (url.pathname === "/internal/tick") {
       const container = buildContainer(env);
       return tickHandler(request, url, { env, container, ctx });
+    }
+
+    // v12.0.8: GET /internal/provider-refresh — external cron endpoint (cron-job.org).
+    // Called every 2 hours by cron-job.org to refresh provider content + queues.
+    if (url.pathname === "/internal/provider-refresh") {
+      const container = buildContainer(env);
+      return providerRefreshHandler(request, url, { env, container, ctx });
     }
 
     // GET /internal/health

@@ -49,13 +49,13 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 # ============================================================
-# Cron Triggers — v12.0.0 Three-Layer Architecture
+# Cron Triggers — v12.0.8 Hybrid Architecture
 # ============================================================
-# Fredy v12.0.0 uses THREE independent Cloudflare cron triggers,
-# each with a single responsibility. This replaces the old single-
-# trigger + external cron-job.org design.
+# Fredy v12.0.8 uses a HYBRID cron architecture:
+#   - Cloudflare Cron: time-critical operations (scheduler + maintenance)
+#   - External cron (cron-job.org): background provider refresh
 #
-# Layer 1 — SCHEDULER WATCHER (every 20 minutes):
+# Layer 1 — SCHEDULER WATCHER (Cloudflare Cron, every 20 minutes):
 #   "*/20 * * * *"
 #   Lightweight: loads daily plan (1 KV read), checks if a post's
 #   scheduledTime has been reached. If yes → full publish pipeline.
@@ -63,26 +63,29 @@ id = "5361932dda4544358b92e9341f3e77ef"
 #   This is the ONLY trigger that publishes posts. Expected delay
 #   between scheduledTime and actual publish: 0-20 minutes.
 #
-# Layer 2 — PROVIDER REFRESH (every 2 hours):
-#   "0 */2 * * *"
+# Layer 2 — PROVIDER REFRESH (External cron-job.org, every 2 hours):
+#   Calls GET /internal/provider-refresh?key=<CRON_KEY>
 #   Fetches content from providers (GitHub, Dev.to, Reddit, News),
 #   maintains queue depth, applies adaptive backoff. Does NOT
 #   publish posts — only content preparation. Respects queue depth
 #   (skips providers whose queue is already full).
+#   v12.0.8: Moved to external cron — provider refresh is NOT
+#   latency-sensitive, so it doesn't need Cloudflare's precise timing.
+#   This reduces Cloudflare Worker wakeups by 12/day.
 #
-# Layer 3 — DAILY MAINTENANCE (every 24 hours):
+# Layer 3 — DAILY MAINTENANCE (Cloudflare Cron, every 24 hours):
 #   "0 0 * * *"
 #   Generates tomorrow's daily plan (with fresh random scheduledTime
 #   per window), cleans expired KV data, resets daily counters,
 #   updates statistics. Runs at midnight UTC.
 #
-# Cloudflare Free Plan: 5 cron triggers max — we use 3. ✓
+# Cloudflare Free Plan: 5 cron triggers max — we use 2. ✓
+# External cron-job.org: 1 trigger (provider refresh every 2h). ✓
 # KV limits: 100K reads/day, 1K writes/day — well under. ✓
-# The /internal/tick endpoint is retained for manual triggers and
-# backward compatibility with cron-job.org (optional fallback).
+# The /internal/tick endpoint is retained for manual triggers.
 
 [triggers]
-crons = ["*/20 * * * *", "0 */2 * * *", "0 0 * * *"]
+crons = ["*/20 * * * *", "0 0 * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

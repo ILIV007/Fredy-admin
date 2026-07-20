@@ -1875,7 +1875,7 @@ async function loadDashboard(){
           '<div style="font-size:12px;color:var(--text2);margin-top:2px">Provider: <code>'+(np.provider||"auto")+'</code></div>'+
           '<div style="font-size:11px;color:var(--text2);margin-top:4px">The 20-min watcher fires on the first tick at or after '+escapeHtml(np.scheduledTime)+'.</div>'+
         '</div>'+
-    '</div>':'<div style="margin-top:14px;padding:14px;background:var(--surface2);border-radius:10px;color:var(--text2);font-size:13px">No pending posts today. The 24h maintenance cron will generate tomorrow\'s plan at midnight UTC.</div>')+
+    '</div>':'<div style="margin-top:14px;padding:14px;background:var(--surface2);border-radius:10px;color:var(--text2);font-size:13px">No pending posts today. The 24h maintenance cron will generate tomorrows plan at midnight UTC.</div>')+
   '</div>';
 
   // ── QUICK CONTROLS ──
@@ -2347,7 +2347,7 @@ async function loadSchedulerDebug(){
       card("⏳ Remaining",'<span style="color:'+remainingColor+';font-weight:bold">'+(ns.remainingLabel||'—')+'</span>')+
       '</div><div style="margin-top:8px;color:var(--text2);font-size:12px">The 20-min watcher will publish this on the first tick at or after <b>'+(ns.scheduledTime||ns.time)+'</b>. Expected delay: 0–20 min.</div></div>';
   } else {
-    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Post</h3><p style="color:var(--text2)">No pending slots remaining today. The 24h maintenance cron will generate tomorrow\'s plan at midnight UTC.</p></div>';
+    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Post</h3><p style="color:var(--text2)">No pending slots remaining today. The 24h maintenance cron will generate tomorrows plan at midnight UTC.</p></div>';
   }
 
   // Due Slots (CRITICAL — these should fire on next 20-min tick)
