@@ -67,8 +67,24 @@ export interface SchedulerServiceDeps {
 
 export class SchedulerService {
   private consecutiveFailures = 0;
+  /** v12.0.5: Maximum replacement attempts when a candidate is rejected as duplicate. */
+  private static readonly MAX_REPLACEMENT_ATTEMPTS = 5;
 
   constructor(private readonly deps: SchedulerServiceDeps) {}
+
+  /**
+   * v12.0.5: Check if a publish failure was caused by duplicate detection.
+   * Used to decide whether to retry with a replacement candidate.
+   * Returns true for both pre-publish dedup (final-publisher.ts) and
+   * pipeline dedup (content-manager.ts) rejections.
+   */
+  private isDedupFailure(result: PublishResult): boolean {
+    if (result.ok) return false;
+    const err = (result.error ?? "").toLowerCase();
+    // Pre-publish dedup: "Duplicate content (already published as ...)"
+    // Pipeline dedup: "duplicate_canonical", "duplicate_url", "duplicate_hash"
+    return err.includes("duplicate") || err.includes("already published");
+  }
 
   /**
    * Tick — called by the cron handler every minute.
@@ -325,11 +341,13 @@ export class SchedulerService {
       }
       if (alreadyFired) continue;
 
-      // v11.18.0: RANDOM JITTER — the scheduler fires when now >= scheduledTime
-      // (not windowStart). This restores human-like random posting.
-      // Cron tolerance: allow firing up to 10 minutes BEFORE scheduledTime.
-      const CRON_TOLERANCE_MINUTES = 10;
-      if (nowMinutes < scheduledMin - CRON_TOLERANCE_MINUTES) {
+      // v12.0.2: EXACT scheduledTime trigger — no early execution.
+      // Previously (v11.18.0–v12.0.1) a 10-minute cron tolerance allowed
+      // firing BEFORE scheduledTime, causing dashboard/actual-time mismatch.
+      // Now the scheduler fires ONLY when now >= scheduledTime.
+      // With a 20-min cron, the actual publish lands on the first tick
+      // AT OR AFTER scheduledTime (0-20 min delay). This is the real jitter.
+      if (nowMinutes < scheduledMin) {
         // scheduledTime hasn't been reached yet — skip.
         continue;
       }
@@ -408,40 +426,32 @@ export class SchedulerService {
     }
   }
 
-  /** Fire a slot — dequeue content, validate, publish. */
-  private async fireSlot(slot: SlotTime): Promise<PublishResult> {
-    this.deps.logger.info("scheduler.slot_fired", {
-      slotIndex: slot.index,
-      date: slot.date,
-      time: slot.time,
-      category: slot.category,
-      message: "Firing slot",
-    });
-
-    // 0. Load current settings once — used for language validation and
-    //    as the language argument when generating fresh content.
-    const settings = await this.deps.settings();
-    // Resolve the *effective* target language (auto → fa/en) so we can
-    // reject stale queued content that was generated under a different
-    // language. Without this check, old English posts would keep being
-    // published even after the operator switched the bot to Persian.
-    const expectedLang = (settings.language.default === "fa" || settings.language.default === "en")
-      ? settings.language.default
-      : (settings.language.autoDetect ? "fa" : "en"); // matches language-injector's fallback
-
+  /**
+   * v12.0.5: Acquire a content candidate for a slot.
+   * Encapsulates: dequeue from same-category queue → processForCategory → fallback plugins.
+   * Returns ReadyContent if a valid candidate is found, null otherwise.
+   *
+   * This method is called multiple times by the replacement loop in fireSlot()
+   * when a candidate is rejected as a duplicate. Each call will:
+   *   1. Try dequeue (the queue may have been refilled since the last attempt)
+   *   2. If queue empty, call processForCategory (fetches fresh items, filters dups)
+   *   3. If that fails, try fallback plugins from the same category
+   *
+   * IMPORTANT: Only returns content from the SAME CATEGORY as the slot.
+   * This preserves category distribution — a Cat A slot will never get Cat B content.
+   */
+  private async acquireContent(
+    slot: SlotTime,
+    settings: FredySettings,
+    expectedLang: string,
+  ): Promise<ReadyContent | null> {
     // 1. Try to dequeue ready content for this category.
-    // contentQueue.dequeue() returns QueuedContent (which wraps ReadyContent in .content).
-    // We need to unwrap it to get the ReadyContent for publishing.
-    // Stale-language items are skipped (dropped from queue) so the next
-    // item or a fresh generation can take over.
-    let content: ReadyContent | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
       if (!queued) break;
       const queuedLang = queued.content.language;
       if (queuedLang === expectedLang || queuedLang === settings.language.default) {
-        content = queued.content;
-        break;
+        return queued.content;
       }
       // Stale language — log and try the next item.
       this.deps.logger.warn("scheduler.stale_language", {
@@ -453,278 +463,170 @@ export class SchedulerService {
     }
 
     // 2. If queue is empty (or all stale), process a fresh item from a plugin.
-    if (!content) {
-      const pipelineResult = await this.deps.contentManager.processForCategory(
-        slot.category,
-        null, // anti-repeat handled by ContentManager via PluginManager
-        settings.language.default,
-        { skipEnqueue: true },
-      );
+    const pipelineResult = await this.deps.contentManager.processForCategory(
+      slot.category,
+      null,
+      settings.language.default,
+      { skipEnqueue: true },
+    );
 
-      if (!pipelineResult.ok || !pipelineResult.content) {
-        this.deps.logger.warn("scheduler.skip", {
-          slotIndex: slot.index,
-          category: slot.category,
-          reason: pipelineResult.error ?? "Pipeline failed",
-          message: "No content available — trying fallback plugin",
+    if (pipelineResult.ok && pipelineResult.content) {
+      return pipelineResult.content;
+    }
+
+    this.deps.logger.warn("scheduler.skip", {
+      slotIndex: slot.index,
+      category: slot.category,
+      reason: pipelineResult.error ?? "Pipeline failed",
+      message: "No content available — trying fallback plugin",
+    });
+
+    // 3. Try fallback plugins from the same category.
+    const fallbackPlugins = this.getFallbackPlugins(slot.category);
+    for (const fbPlugin of fallbackPlugins) {
+      try {
+        const fbResult = await this.deps.contentManager.processFromPlugin(
+          fbPlugin,
+          settings.language.default,
+          { skipEnqueue: true },
+        );
+        if (fbResult.ok && fbResult.content) {
+          this.deps.logger.info("pipeline.complete", {
+            slotIndex: slot.index,
+            fallbackPlugin: fbPlugin,
+            contentId: fbResult.content.id,
+            message: "Fallback plugin succeeded",
+          });
+          return fbResult.content;
+        }
+      } catch (e) {
+        this.deps.logger.warn("source.fetch_error", {
+          fallbackPlugin: fbPlugin,
+          error: e instanceof Error ? e.message : String(e),
         });
-
-        // v8.4.0: If the first API/plugin fails, try ONE fallback plugin at a time.
-        // v8.5.0: Optimized — only try the NEXT plugin, not all at once.
-        // The getFallbackPlugins returns all plugins for the category; we try
-        // them one by one until one succeeds.
-        const fallbackPlugins = this.getFallbackPlugins(slot.category);
-        let fallbackContent: ReadyContent | null = null;
-        for (const fbPlugin of fallbackPlugins) {
-          if (fallbackContent) break; // Stop as soon as one succeeds.
-          try {
-            const fbResult = await this.deps.contentManager.processFromPlugin(
-              fbPlugin,
-              settings.language.default,
-              { skipEnqueue: true },
-            );
-            if (fbResult.ok && fbResult.content) {
-              fallbackContent = fbResult.content;
-              this.deps.logger.info("pipeline.complete", {
-                slotIndex: slot.index,
-                fallbackPlugin: fbPlugin,
-                contentId: fbResult.content.id,
-                message: "Fallback plugin succeeded",
-              });
-            }
-          } catch (e) {
-            this.deps.logger.warn("source.fetch_error", {
-              fallbackPlugin: fbPlugin,
-              error: e instanceof Error ? e.message : String(e),
-            });
-          }
-        }
-
-        if (fallbackContent) {
-          content = fallbackContent;
-        } else {
-          // v8.1.3: Send failure report to admin PM.
-          const failItem = pipelineResult.item ? {
-            id: pipelineResult.item.id,
-            title: pipelineResult.item.title,
-            url: pipelineResult.item.url,
-            source: pipelineResult.item.pluginId,
-          } : null;
-          const failError = pipelineResult.error ?? "Pipeline failed (no fallback content)";
-          const failStage = pipelineResult.stage ?? "pipeline";
-          const failPlugin = pipelineResult.item?.pluginId ?? slot.category;
-          await this.notifyAdminOfFailure(slot, failError, failItem, { stage: failStage, plugin: failPlugin }).catch(() => {});
-
-          // v8.2.1: Mark strategy plan post as failed too.
-          // v9.2.3: Pass the real error info so the Manager UI can show it.
-          if (this.deps.strategyEngine) {
-            await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-              error: failError,
-              stage: failStage,
-              plugin: failPlugin,
-            }).catch(() => {});
-          }
-
-          // v9.2.3: Record in the always-on failure ring buffer.
-          await this.recordFailure({
-            slot,
-            error: failError,
-            stage: failStage,
-            plugin: failPlugin,
-            contentId: pipelineResult.item?.id ?? null,
-          }).catch(() => {});
-
-          // Mark slot as fired (to avoid retrying with no content).
-          if (!this.deps.strategyEngine) {
-          await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
-        }
-
-          return {
-            ok: false,
-            contentId: null,
-            category: slot.category,
-            telegramMessageId: null,
-            telegramChatId: null,
-            publishedAt: Date.now(),
-            error: failError,
-            attempts: 0,
-          };
-        }
-      } else {
-        content = pipelineResult.content;
       }
     }
 
-    // 3. Publish.
-    // v11.2.0: Write "publishing" marker BEFORE publish to prevent duplicates
-    // on crash. If the Worker crashes between publish() returning and
-    // markPostPublished() writing, the next tick sees "publishing" and skips.
+    return null; // No content available from any source.
+  }
+
+  /** Fire a slot — acquire content, publish, with v12.0.5 replacement loop.
+   *
+   *  v12.0.5 REPLACEMENT PIPELINE:
+   *  When a candidate is rejected as a duplicate, Fredy now automatically
+   *  searches for another valid post from the SAME CATEGORY (up to 5 attempts).
+   *  The scheduler slot (window, scheduledTime, category) is PRESERVED —
+   *  only the content source changes. This prevents missing posts in the
+   *  daily schedule when duplicates are detected.
+   *
+   *  Flow:
+   *    for attempt 1..5:
+   *      candidate = acquireContent(slot)   // dequeue → processForCategory → fallbacks
+   *      if !candidate → fail (no content)
+   *      result = publish(candidate)
+   *      if result.ok → success (mark published, notify, return)
+   *      if isDedup(result) && attempt < 5 → log replacement, continue
+   *      else → break (non-dedup failure → try backup plugin)
+   *    // All attempts failed
+   *    if all were dedup → fail with NO_VALID_CONTENT_AFTER_DEDUP
+   *    else → existing failure handling (v8.8.0 backup, mark failed, notify)
+   */
+  private async fireSlot(slot: SlotTime): Promise<PublishResult> {
+    this.deps.logger.info("scheduler.slot_fired", {
+      slotIndex: slot.index,
+      date: slot.date,
+      time: slot.time,
+      scheduledTime: slot.scheduledTime ?? slot.time,
+      category: slot.category,
+      message: "Firing slot",
+    });
+
+    const settings = await this.deps.settings();
+    const expectedLang = (settings.language.default === "fa" || settings.language.default === "en")
+      ? settings.language.default
+      : (settings.language.autoDetect ? "fa" : "en");
+
+    // v12.0.5: Replacement tracking for logging + dashboard.
+    const replacements: Array<{
+      attempt: number;
+      contentId: string;
+      pluginId: string;
+      reason: string;
+    }> = [];
+
+    // v12.0.5: Write "publishing" marker BEFORE the replacement loop.
+    // This prevents duplicate processing if the Worker crashes mid-loop.
     if (this.deps.strategyEngine) {
       await this.deps.strategyEngine.markPostPublishing(slot.date, slot.index).catch(() => {});
     }
-    try {
-      const result = await this.deps.publishingService.publish(content);
 
-      // 4. Mark slot as fired (success or failure — prevents infinite retry).
-      if (!this.deps.strategyEngine) {
-        await this.deps.dailyPlanner.markSlotFired(slot, content.id);
-      }
+    // ════════════════════════════════════════════════════════════
+    // v12.0.5: REPLACEMENT LOOP — try up to 5 candidates on dedup.
+    // ════════════════════════════════════════════════════════════
+    let lastContent: ReadyContent | null = null;
+    let lastResult: PublishResult | null = null;
+    let noContentAtAll = false;
 
-      // v8.8.0: If publish failed (quality gate, sendPhoto error, etc.),
-      // try a fallback plugin from the same category before giving up.
-      if (!result.ok && this.deps.contentManager) {
+    for (let attempt = 1; attempt <= SchedulerService.MAX_REPLACEMENT_ATTEMPTS; attempt++) {
+      // ── Acquire candidate (same-category only) ──
+      const content = await this.acquireContent(slot, settings, expectedLang);
+
+      if (!content) {
+        // No content available from any source.
+        noContentAtAll = (attempt === 1);
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
-          contentId: content.id,
-          error: result.error,
-          message: "Publish failed — trying fallback plugin",
+          attempt: `${attempt}/${SchedulerService.MAX_REPLACEMENT_ATTEMPTS}`,
+          message: "No content available for replacement",
         });
+        break;
+      }
 
-        const settings = await this.deps.settings();
-        const fallbackPlugins = this.getFallbackPlugins(slot.category);
-        let backupContent: ReadyContent | null = null;
+      lastContent = content;
 
-        for (const fbPlugin of fallbackPlugins) {
-          if (backupContent) break;
-          try {
-            const fbResult = await this.deps.contentManager.processFromPlugin(
-              fbPlugin,
-              settings.language.default,
-              { skipEnqueue: true },
-            );
-            if (fbResult.ok && fbResult.content) {
-              const fbPubResult = await this.deps.publishingService.publish(fbResult.content);
-              if (fbPubResult.ok) {
-                backupContent = fbResult.content;
-                // v8.8.0: Mark as "backup" (not "published" or "failed").
-                // v9.2.3: Pass the original error so admin can see why primary failed.
-                if (this.deps.strategyEngine) {
-                  await this.deps.strategyEngine.markPostBackup(slot.date, slot.index, {
-                    error: result.error ?? "unknown",
-                    stage: "publish",
-                    plugin: content.pluginId,
-                  }).catch(() => {});
-                }
-                // v9.3.1: Record the primary's failure in the always-on ring buffer
-                // so it shows up in the Manager Logs tab.
-                await this.recordFailure({
-                  slot,
-                  error: result.error ?? "unknown",
-                  stage: "publish",
-                  plugin: content.pluginId,
-                  contentId: content.id,
-                }).catch(() => {});
-                // v9.3.1: Record the BACKUP content in dedup (it was successfully published).
-                if (this.deps.duplicateDetector) {
-                  await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
-                }
-                // Send admin notification about the backup.
-                const adminId = this.deps.adminId?.() ?? 0;
-                if (adminId > 0 && this.deps.tg) {
-                  // v9.3.1: Also send the formatted backup post to admin PM
-                  // (previously only the summary was sent, not the actual post).
-                  try {
-                    if (this.deps.uxLayer) {
-                      const backupPost = await this.deps.uxLayer.transform(fbResult.content);
-                      if (backupPost.media && backupPost.media.type === "image" && backupPost.media.url) {
-                        await this.deps.tg.sendPhoto(adminId, backupPost.media.url, backupPost.caption, {
-                          parse_mode: "HTML",
-                        }).catch(() => {});
-                      } else {
-                        await this.deps.tg.sendMessage(adminId, backupPost.fullText, {
-                          parse_mode: "HTML",
-                        }).catch(() => {});
-                      }
-                    }
-                  } catch { /* non-fatal */ }
-                  // Send the backup summary notification.
-                  await this.deps.tg.sendMessage(adminId, [
-                    ``,
-                    reportBanner("🔄", "BACKUP POST PUBLISHED"),
-                    ``,
-                    ``,
-                    reportRow("📅", "Slot", `${slot.date} at ${slot.time}`),
-                    reportRow("🏷️", "Category", slot.category),
-                    reportRow("❌", "Original failed", result.error ?? "unknown"),
-                    reportRow("🔌", "Original plugin", content.pluginId),
-                    reportRow("✅", "Backup plugin", fbPlugin),
-                    qualityRow(fbResult.content.quality.overallScore),
-                    reportRow("📤", "Channel Msg ID", String(fbPubResult.telegramMessageId)),
-                    reportRow("🔖", "Content ID", fbResult.content.id),
-                  ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-                }
-                // Return the backup result.
-                if (!this.deps.strategyEngine) {
-                  await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
-                }
-                return {
-                  ok: true,
-                  contentId: fbResult.content.id,
-                  category: slot.category,
-                  telegramMessageId: fbPubResult.telegramMessageId,
-                  telegramChatId: fbPubResult.telegramChatId,
-                  publishedAt: Date.now(),
-                  attempts: 1,
-                };
-              }
-            }
-          } catch (e) {
-            this.deps.logger.warn("source.fetch_error", {
-              fallbackPlugin: fbPlugin,
-              error: e instanceof Error ? e.message : String(e),
-            });
-          }
-        }
+      // ── Publish ──
+      let result: PublishResult;
+      try {
+        result = await this.deps.publishingService.publish(content);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = {
+          ok: false,
+          contentId: content.id,
+          category: slot.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: message,
+          attempts: attempt - 1,
+        };
+      }
 
-        // No backup succeeded — mark as failed.
-        // v9.2.3: Capture the original error AND the fallback attempts.
-        const finalError = result.error ?? "All plugins failed (primary + fallbacks)";
-        if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: finalError,
-            stage: "publish",
-            plugin: content.pluginId,
-          }).catch((e: unknown) => {
-            this.deps.logger.warn("scheduler.skip", {
-              slotIndex: slot.index,
-              error: e instanceof Error ? e.message : String(e),
-              message: "markPostFailed failed",
-            });
+      lastResult = result;
+
+      // ── Success? ──
+      if (result.ok) {
+        // v12.0.5: Log replacement summary if any attempts failed.
+        if (attempt > 1) {
+          this.deps.logger.info("pipeline.replacement_success", {
+            PUBLISH_PIPELINE: true,
+            slot: `${slot.date} ${slot.scheduledTime ?? slot.time}`,
+            category: slot.category,
+            originalCandidate: replacements[0]?.contentId ?? "n/a",
+            replacementAttempts: attempt - 1,
+            finalPublished: content.id,
+            finalPlugin: content.pluginId,
+            message: `Published after ${attempt - 1} replacement(s)`,
           });
         }
 
-        // v9.2.3: Record in the always-on failure ring buffer.
-        await this.recordFailure({
-          slot,
-          error: finalError,
-          stage: "publish",
-          plugin: content.pluginId,
-          contentId: content.id,
-        }).catch(() => {});
-
-        // Send failure report to admin.
-        const adminId = this.deps.adminId?.() ?? 0;
-        if (adminId > 0 && this.deps.tg) {
-          await this.deps.tg.sendMessage(adminId, [
-            ``,
-            `<b>━━━ ❌ POST FAILED ━━━</b>`,
-            ``,
-            ``,
-            `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
-            `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-            `<blockquote>🔌 <b>Original plugin:</b> ${escapeHtml(content.pluginId)}</blockquote>`,
-            `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(content.id)}</code></blockquote>`,
-            `<blockquote>❌ <b>Error:</b> ${escapeHtml(finalError)}</blockquote>`,
-            `<blockquote>⚠️ <b>All fallback plugins also failed.</b></blockquote>`,
-          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        // Mark slot as fired (non-strategy path).
+        if (!this.deps.strategyEngine) {
+          await this.deps.dailyPlanner.markSlotFired(slot, content.id);
         }
 
-        return result;
-      }
-
-      // v8.2.1: Update strategy plan status too.
-      if (this.deps.strategyEngine) {
-        if (result.ok) {
+        // v8.2.1: Update strategy plan status.
+        if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostPublished(slot.date, slot.index).catch((e: unknown) => {
             this.deps.logger.warn("scheduler.skip", {
               slotIndex: slot.index,
@@ -733,144 +635,345 @@ export class SchedulerService {
             });
           });
           // v9.3.1: Record in dedup store ONLY after successful publish.
-          // Previously this was done in content-manager.ts before enqueue,
-          // causing unpublished posts to be falsely detected as duplicates.
           if (this.deps.duplicateDetector) {
             await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
           }
-        } else {
-          // v9.2.3: Pass real error info to markPostFailed.
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: result.error ?? "unknown",
-            stage: "publish",
-            plugin: content.pluginId,
-          }).catch((e: unknown) => {
-            this.deps.logger.warn("scheduler.skip", {
-              slotIndex: slot.index,
-              error: e instanceof Error ? e.message : String(e),
-              message: "markPostFailed failed",
-            });
-          });
-          // v9.2.3: Record in the always-on failure ring buffer (for cases
-          // where we got here without going through the fallback branch above).
-          await this.recordFailure({
-            slot,
-            error: result.error ?? "unknown",
-            stage: "publish",
-            plugin: content.pluginId,
-            contentId: content.id,
-          }).catch(() => {});
         }
-      }
 
-      // 5. Notify admin PM — ALWAYS, both on success and on failure.
-      //    The previous code only notified on success (result.ok), which
-      //    meant queued posts that failed quality gate / sendPhoto /
-      //    sendMessage silently disappeared with no admin visibility.
-      //    Now: on success, send the post + summary. On failure, send
-      //    the formatted post + error notice (so admin can see what
-      //    would have been published and decide whether to forward it).
-      if (result.ok) {
-        this.consecutiveFailures = 0; // reset failure counter on success.
-      } else {
-        this.consecutiveFailures++;
-      }
-      await this.notifyAdminPm(content, result, slot).catch((err) => {
-        // Last-resort: try a plain text notice so the admin at least
-        // knows something went wrong, even if the formatted post failed.
-        this.deps.logger.warn("scheduler.admin_pm_failed", {
-          contentId: content.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.deps.logger.error("pipeline.error", {
-        slotIndex: slot.index,
-        contentId: content.id,
-        error: message,
-        message: "Publish failed",
-      });
-      // Mark slot as fired to prevent infinite retry loop.
-      if (!this.deps.strategyEngine) {
-        await this.deps.dailyPlanner.markSlotFired(slot, "publish-error").catch(() => {});
-      }
-
-      // v8.10.0: If KV quota exceeded, notify admin immediately.
-      if (message.includes("KV put() limit") || message.includes("quota")) {
-        const adminId = this.deps.adminId?.() ?? 0;
-        if (adminId > 0 && this.deps.tg) {
-          await this.deps.tg.sendMessage(adminId, [
-            ``,
-            `<b>━━━ ⚠️ KV QUOTA EXCEEDED ━━━</b>`,
-            ``,
-            ``,
-            `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.time}</blockquote>`,
-            `<blockquote>❌ <b>Error:</b> ${escapeHtml(message)}</blockquote>`,
-            `<blockquote>💡 <b>Action:</b> KV daily write limit exceeded. Publishing will resume after midnight UTC reset.</blockquote>`,
-          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-        }
-        // Mark strategy plan as failed too.
-        if (this.deps.strategyEngine) {
-          await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: message,
-            stage: "publish",
-            plugin: content.pluginId,
-          }).catch(() => {});
-        }
-        // v9.2.3: Record in the always-on failure ring buffer.
-        await this.recordFailure({
-          slot,
-          error: message,
-          stage: "publish",
-          plugin: content.pluginId,
-          contentId: content.id,
-        }).catch(() => {});
-        return {
-          ok: false,
-          contentId: content.id,
-          category: slot.category,
-          telegramMessageId: null,
-          telegramChatId: null,
-          publishedAt: Date.now(),
-          error: message,
-          attempts: 0,
-        };
-      }
-
-      // Track consecutive failures and alert admin.
-      this.consecutiveFailures++;
-      if (this.consecutiveFailures >= 3) {
-        const adminId = this.deps.adminId?.() ?? 0;
-        if (adminId > 0 && this.deps.tg) {
-          await this.deps.tg.sendMessage(adminId, [
-            `⚠️ <b>Scheduler: 3 consecutive failures</b>`,
-            ``,
-            `<b>Last error:</b> ${escapeHtml(message)}`,
-            `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
-            `<b>Content ID:</b> <code>${escapeHtml(content.id)}</code>`,
-          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-        }
-        // Reset to avoid spamming.
+        // Reset failure counter.
         this.consecutiveFailures = 0;
+
+        // Notify admin PM.
+        await this.notifyAdminPm(content, result, slot).catch((err) => {
+          this.deps.logger.warn("scheduler.admin_pm_failed", {
+            contentId: content.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+        // v12.0.5: If replacements happened, record them in the failure ring buffer
+        // (for dashboard visibility — shows what was tried before success).
+        if (replacements.length > 0) {
+          for (const rep of replacements) {
+            await this.recordFailure({
+              slot,
+              error: `Duplicate (replaced) — ${rep.reason}`,
+              stage: "duplicate_replaced",
+              plugin: rep.pluginId,
+              contentId: rep.contentId,
+            }).catch(() => {});
+          }
+        }
+
+        return result;
       }
 
-      // Move content to DLQ.
-      // (The publishing service already recorded the failure in history.)
+      // ── Check if dedup failure ──
+      if (this.isDedupFailure(result)) {
+        replacements.push({
+          attempt,
+          contentId: content.id,
+          pluginId: content.pluginId,
+          reason: result.error ?? "duplicate",
+        });
+
+        this.deps.logger.info("pipeline.replacement", {
+          PUBLISH_PIPELINE: true,
+          slot: `${slot.date} ${slot.scheduledTime ?? slot.time}`,
+          category: slot.category,
+          candidate: content.id,
+          candidatePlugin: content.pluginId,
+          DEDUP_RESULT: "duplicate",
+          reason: result.error,
+          ACTION: "searching replacement",
+          attempt: `${attempt}/${SchedulerService.MAX_REPLACEMENT_ATTEMPTS}`,
+          message: `Duplicate detected — searching replacement (attempt ${attempt}/${SchedulerService.MAX_REPLACEMENT_ATTEMPTS})`,
+        });
+
+        if (attempt < SchedulerService.MAX_REPLACEMENT_ATTEMPTS) {
+          continue; // ── Try next candidate ──
+        }
+        // Last attempt was also a dup — fall through to failure handling.
+        break;
+      }
+
+      // ── Non-dedup failure — break to existing failure handling ──
+      break;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // FAILURE HANDLING (all attempts failed, or no content, or non-dedup error)
+    // ════════════════════════════════════════════════════════════
+
+    // Case 1: No content available at all (acquireContent returned null on first attempt).
+    if (noContentAtAll) {
+      const failError = "No content available (all plugins returned empty or failed pipeline)";
+      await this.notifyAdminOfFailure(slot, failError, null, { stage: "pipeline", plugin: null }).catch(() => {});
+
+      if (this.deps.strategyEngine) {
+        await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+          error: failError,
+          stage: "pipeline",
+          plugin: null,
+        }).catch(() => {});
+      } else {
+        await this.deps.dailyPlanner.markSlotFired(slot, "no-content");
+      }
+
+      await this.recordFailure({
+        slot,
+        error: failError,
+        stage: "pipeline",
+        plugin: null,
+        contentId: null,
+      }).catch(() => {});
 
       return {
         ok: false,
-        contentId: content.id,
+        contentId: null,
         category: slot.category,
         telegramMessageId: null,
         telegramChatId: null,
         publishedAt: Date.now(),
-        error: message,
+        error: failError,
         attempts: 0,
       };
     }
+
+    // Case 2: All candidates were duplicates.
+    if (lastResult && this.isDedupFailure(lastResult) && replacements.length > 0) {
+      const failError = `NO_VALID_CONTENT_AFTER_DEDUP (${replacements.length} candidates rejected as duplicates)`;
+      this.deps.logger.warn("pipeline.replacement_exhausted", {
+        PUBLISH_PIPELINE: true,
+        slot: `${slot.date} ${slot.scheduledTime ?? slot.time}`,
+        category: slot.category,
+        totalAttempts: replacements.length,
+        rejectedCandidates: replacements.map(r => ({ id: r.contentId, plugin: r.pluginId, reason: r.reason })),
+        message: failError,
+      });
+
+      if (this.deps.strategyEngine) {
+        await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+          error: failError,
+          stage: "no_valid_content_after_dedup",
+          plugin: replacements[replacements.length - 1]?.pluginId ?? null,
+        }).catch(() => {});
+      } else {
+        await this.deps.dailyPlanner.markSlotFired(slot, "dedup-exhausted");
+      }
+
+      // Record all replacement attempts in the failure ring buffer.
+      for (const rep of replacements) {
+        await this.recordFailure({
+          slot,
+          error: `Duplicate (exhausted) — ${rep.reason}`,
+          stage: "duplicate_exhausted",
+          plugin: rep.pluginId,
+          contentId: rep.contentId,
+        }).catch(() => {});
+      }
+
+      // Notify admin with replacement summary.
+      const adminId = this.deps.adminId?.() ?? 0;
+      if (adminId > 0 && this.deps.tg) {
+        const repList = replacements.map(r =>
+          `<blockquote>  ${r.attempt}. <code>${escapeHtml(r.contentId)}</code> (${escapeHtml(r.pluginId)}) — ${escapeHtml(r.reason)}</blockquote>`,
+        ).join("\n");
+        await this.deps.tg.sendMessage(adminId, [
+          ``,
+          `<b>━━━ ❌ NO VALID CONTENT AFTER DEDUP ━━━</b>`,
+          ``,
+          ``,
+          `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.scheduledTime ?? slot.time} (window ${slot.time}-${slot.windowEnd ?? slot.time})</blockquote>`,
+          `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+          `<blockquote>🔍 <b>Attempts:</b> ${replacements.length}/${SchedulerService.MAX_REPLACEMENT_ATTEMPTS}</blockquote>`,
+          ``,
+          `<b>Rejected candidates:</b>`,
+          repList,
+          ``,
+          `<blockquote>💡 <b>All candidates were duplicates. The slot is marked as failed. Provider caches will refresh on the next 2h Layer 2 tick.</b></blockquote>`,
+        ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+      }
+
+      return {
+        ok: false,
+        contentId: lastContent?.id ?? null,
+        category: slot.category,
+        telegramMessageId: null,
+        telegramChatId: null,
+        publishedAt: Date.now(),
+        error: failError,
+        attempts: replacements.length,
+      };
+    }
+
+    // Case 3: Non-dedup publish failure — try v8.8.0 backup plugin.
+    if (lastContent && lastResult && !lastResult.ok) {
+      this.deps.logger.warn("scheduler.skip", {
+        slotIndex: slot.index,
+        contentId: lastContent.id,
+        error: lastResult.error,
+        message: "Publish failed (non-dedup) — trying backup plugin",
+      });
+
+      const fallbackPlugins = this.getFallbackPlugins(slot.category);
+      for (const fbPlugin of fallbackPlugins) {
+        try {
+          const fbResult = await this.deps.contentManager.processFromPlugin(
+            fbPlugin,
+            settings.language.default,
+            { skipEnqueue: true },
+          );
+          if (fbResult.ok && fbResult.content) {
+            const fbPubResult = await this.deps.publishingService.publish(fbResult.content);
+            if (fbPubResult.ok) {
+              // v8.8.0: Backup succeeded.
+              if (this.deps.strategyEngine) {
+                await this.deps.strategyEngine.markPostBackup(slot.date, slot.index, {
+                  error: lastResult.error ?? "unknown",
+                  stage: "publish",
+                  plugin: lastContent.pluginId,
+                }).catch(() => {});
+              }
+              await this.recordFailure({
+                slot,
+                error: lastResult.error ?? "unknown",
+                stage: "publish",
+                plugin: lastContent.pluginId,
+                contentId: lastContent.id,
+              }).catch(() => {});
+              if (this.deps.duplicateDetector) {
+                await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
+              }
+
+              // Send admin backup notification.
+              const adminId = this.deps.adminId?.() ?? 0;
+              if (adminId > 0 && this.deps.tg) {
+                try {
+                  if (this.deps.uxLayer) {
+                    const backupPost = await this.deps.uxLayer.transform(fbResult.content);
+                    if (backupPost.media && backupPost.media.type === "image" && backupPost.media.url) {
+                      await this.deps.tg.sendPhoto(adminId, backupPost.media.url, backupPost.caption, {
+                        parse_mode: "HTML",
+                      }).catch(() => {});
+                    } else {
+                      await this.deps.tg.sendMessage(adminId, backupPost.fullText, {
+                        parse_mode: "HTML",
+                      }).catch(() => {});
+                    }
+                  }
+                } catch { /* non-fatal */ }
+                await this.deps.tg.sendMessage(adminId, [
+                  ``,
+                  reportBanner("🔄", "BACKUP POST PUBLISHED"),
+                  ``,
+                  ``,
+                  reportRow("📅", "Slot", `${slot.date} at ${slot.scheduledTime ?? slot.time}`),
+                  reportRow("🏷️", "Category", slot.category),
+                  reportRow("❌", "Original failed", lastResult.error ?? "unknown"),
+                  reportRow("🔌", "Original plugin", lastContent.pluginId),
+                  reportRow("✅", "Backup plugin", fbPlugin),
+                  qualityRow(fbResult.content.quality.overallScore),
+                  reportRow("📤", "Channel Msg ID", String(fbPubResult.telegramMessageId)),
+                  reportRow("🔖", "Content ID", fbResult.content.id),
+                ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+              }
+
+              if (!this.deps.strategyEngine) {
+                await this.deps.dailyPlanner.markSlotFired(slot, fbResult.content.id);
+              }
+              this.consecutiveFailures = 0;
+              return {
+                ok: true,
+                contentId: fbResult.content.id,
+                category: slot.category,
+                telegramMessageId: fbPubResult.telegramMessageId,
+                telegramChatId: fbPubResult.telegramChatId,
+                publishedAt: Date.now(),
+                attempts: 1,
+              };
+            }
+          }
+        } catch (e) {
+          this.deps.logger.warn("source.fetch_error", {
+            fallbackPlugin: fbPlugin,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
+      // No backup succeeded — mark as failed.
+      const finalError = lastResult.error ?? "All plugins failed (primary + fallbacks)";
+      if (this.deps.strategyEngine) {
+        await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+          error: finalError,
+          stage: "publish",
+          plugin: lastContent.pluginId,
+        }).catch((e: unknown) => {
+          this.deps.logger.warn("scheduler.skip", {
+            slotIndex: slot.index,
+            error: e instanceof Error ? e.message : String(e),
+            message: "markPostFailed failed",
+          });
+        });
+      }
+
+      await this.recordFailure({
+        slot,
+        error: finalError,
+        stage: "publish",
+        plugin: lastContent.pluginId,
+        contentId: lastContent.id,
+      }).catch(() => {});
+
+      // Send failure report to admin.
+      const adminId = this.deps.adminId?.() ?? 0;
+      if (adminId > 0 && this.deps.tg) {
+        await this.deps.tg.sendMessage(adminId, [
+          ``,
+          `<b>━━━ ❌ POST FAILED ━━━</b>`,
+          ``,
+          ``,
+          `<blockquote>📅 <b>Slot:</b> ${slot.date} at ${slot.scheduledTime ?? slot.time}</blockquote>`,
+          `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
+          `<blockquote>🔌 <b>Original plugin:</b> ${escapeHtml(lastContent.pluginId)}</blockquote>`,
+          `<blockquote>🔖 <b>Content ID:</b> <code>${escapeHtml(lastContent.id)}</code></blockquote>`,
+          `<blockquote>❌ <b>Error:</b> ${escapeHtml(finalError)}</blockquote>`,
+          `<blockquote>⚠️ <b>All fallback plugins also failed.</b></blockquote>`,
+        ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+      }
+
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures >= 3) {
+        const adminId2 = this.deps.adminId?.() ?? 0;
+        if (adminId2 > 0 && this.deps.tg) {
+          await this.deps.tg.sendMessage(adminId2, [
+            `⚠️ <b>Scheduler: 3 consecutive failures</b>`,
+            ``,
+            `<b>Last error:</b> ${escapeHtml(finalError)}`,
+            `<b>Slot:</b> ${slot.date} ${slot.time} (cat ${slot.category})`,
+          ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+        }
+        this.consecutiveFailures = 0;
+      }
+
+      // Notify admin PM with the formatted post.
+      await this.notifyAdminPm(lastContent, lastResult, slot).catch(() => {});
+
+      return lastResult;
+    }
+
+    // Fallback: should not reach here, but return a failure if we do.
+    return {
+      ok: false,
+      contentId: lastContent?.id ?? null,
+      category: slot.category,
+      telegramMessageId: null,
+      telegramChatId: null,
+      publishedAt: Date.now(),
+      error: lastResult?.error ?? "Unknown publish failure",
+      attempts: replacements.length,
+    };
   }
 
   /**

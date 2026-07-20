@@ -337,11 +337,259 @@ export async function managerHandler(
     return json({ ok: true, settings: settings?.scheduler, status });
   }
 
+  // v12.0.3: Combined dashboard overview — 1 API call instead of 3.
+  // Returns health + scheduler debug summary + recent history + next slot.
+  if (apiPath === "dashboard/overview" && request.method === "GET") {
+    try {
+      const now = Date.now();
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+      const tz = settings?.scheduler?.timezone || "UTC";
+
+      // Current time in configured timezone
+      const { formatDateInZone } = await import("../primitives/time");
+      const today = formatDateInZone(now, tz);
+      const localTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }).format(new Date(now));
+
+      // Scheduler status
+      const schedStatus = await container.scheduler.status().catch(() => null);
+
+      // Strategy plan (for next scheduledTime + countdown)
+      const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
+      const nowInTz = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date(now));
+      const [nowH, nowM] = nowInTz.split(":").map(Number);
+      const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+      const slots = plan?.posts ?? [];
+      // v12.0.2: exact comparison — pending = scheduledTime strictly in future
+      const nextPost = slots.find((s) => {
+        if (s.status !== "pending") return false;
+        const schedTime = s.scheduledTime ?? s.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes < schedMin;
+      }) ?? null;
+
+      let nextPostInfo: Record<string, unknown> | null = null;
+      if (nextPost) {
+        const schedTime = nextPost.scheduledTime ?? nextPost.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        const remainingMin = schedMin - nowMinutes;
+        nextPostInfo = {
+          index: nextPost.index,
+          window: `${nextPost.time}-${nextPost.windowEnd ?? nextPost.time}`,
+          scheduledTime: schedTime,
+          category: nextPost.category,
+          provider: nextPost.provider,
+          remainingMinutes: remainingMin,
+          remainingLabel: remainingMin > 0
+            ? (remainingMin >= 60 ? `${Math.floor(remainingMin / 60)}h ${remainingMin % 60}m` : `${remainingMin}m`)
+            : "due now",
+        };
+      }
+
+      // Recent history (last 5 publishes)
+      const recentHistory = await container.history.getRecent(5).catch(() => []);
+
+      // Quiet hours status (computed live, zero KV)
+      const isQuiet = settings
+        ? (container.quietHoursChecker?.isQuietHours(now, settings.scheduler) ?? false)
+        : false;
+
+      // Global stats
+      const state = await container.config.getState(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+
+      // Queue depths
+      const queueDepths = await container.queue.depth().catch(() => []);
+
+      return json({
+        ok: true,
+        version: APP_VERSION,
+        currentTime: {
+          epoch: now, iso: new Date(now).toISOString(), localTime, timezone: tz, date: today,
+        },
+        scheduler: {
+          enabled: settings?.scheduler?.enabled ?? false,
+          postsToday: schedStatus?.postsPublishedToday ?? 0,
+          postsByCategory: schedStatus?.postsByCategoryToday ?? { A: 0, B: 0, C: 0 },
+          nextSlot: schedStatus?.nextSlot ?? null,
+        },
+        bot: {
+          enabled: settings?.general?.botEnabled ?? false,
+          maintenanceMode: settings?.general?.maintenanceMode ?? false,
+        },
+        approveMode: settings?.approveMode ?? false,
+        aiProvider: settings?.ai?.primaryProvider ?? "—",
+        language: settings?.language?.default ?? "—",
+        plugins: {
+          enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length,
+          total: container.plugins.list().length,
+        },
+        quietHours: {
+          active: isQuiet,
+          config: settings?.scheduler?.quietHours ?? null,
+          nextActiveTime: settings?.scheduler?.quietHours?.end ?? null,
+        },
+        nextPost: nextPostInfo,
+        recentPublishes: recentHistory.slice(0, 5).map((e) => ({
+          publishedAt: e.publishedAt,
+          agoMinutes: Math.round((now - e.publishedAt) / 60000),
+          category: e.category,
+          pluginId: e.pluginId,
+          qualityScore: e.qualityScore,
+          textPreview: e.textPreview.slice(0, 80),
+          sourceUrl: e.sourceUrl,
+        })),
+        stats: {
+          processed: state?.stats?.processed ?? 0,
+          published: state?.stats?.published ?? 0,
+          rejected: state?.stats?.rejected ?? 0,
+          failed: state?.stats?.failed ?? 0,
+        },
+        queueDepths,
+        lastTick: await container.kv.get("fredy:tick:lastTick").catch(() => null),
+        hasSecrets: {
+          botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY,
+          openrouter: !!env.OPENROUTER_API_KEY, cronKey: !!env.CRON_KEY,
+        },
+      });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
+
   // ── History ──
   if (apiPath === "history" && request.method === "GET") {
     const today = await container.history.getToday().catch(() => ({ entries: [], total: 0, date: "" }));
     const recent = await container.history.getRecent(7).catch(() => []);
     return json({ ok: true, today, recent });
+  }
+
+  // v12.0.4: Statistics overview — aggregated 7-day data for charts + heatmap.
+  if (apiPath === "statistics/overview" && request.method === "GET") {
+    try {
+      const { formatDateInZone } = await import("../primitives/time");
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
+      const tz = settings?.scheduler?.timezone || "UTC";
+      const recent = await container.history.getRecent(7).catch(() => []);
+
+      // Aggregate by category
+      const byCategory: Record<string, number> = { A: 0, B: 0, C: 0 };
+      // Aggregate by plugin
+      const byPlugin: Record<string, number> = {};
+      // Aggregate by hour-of-day (0-23) for heatmap
+      const byHour: number[] = new Array(24).fill(0);
+      // Aggregate by day-of-week (0=Sun..6=Sat)
+      const byDayOfWeek: number[] = new Array(7).fill(0);
+      // Quality score distribution (buckets: 0-20, 20-40, 40-60, 60-80, 80-100)
+      const qualityBuckets = [0, 0, 0, 0, 0];
+      // Daily totals (last 7 days, oldest first)
+      const dailyTotals: Array<{ date: string; count: number }> = [];
+      // Tokens + cost
+      let totalTokens = 0;
+      let totalCost = 0;
+      let totalQuality = 0;
+      let qualityCount = 0;
+
+      // Build daily totals map
+      const dailyMap: Record<string, number> = {};
+      for (const e of recent) {
+        const date = formatDateInZone(e.publishedAt, tz);
+        dailyMap[date] = (dailyMap[date] ?? 0) + 1;
+      }
+      // Build sorted daily array (last 7 days, oldest first)
+      const now = Date.now();
+      for (let i = 6; i >= 0; i--) {
+        const date = formatDateInZone(now - i * 24 * 3600 * 1000, tz);
+        dailyTotals.push({ date, count: dailyMap[date] ?? 0 });
+      }
+
+      // Process each entry
+      for (const e of recent) {
+        byCategory[e.category] = (byCategory[e.category] ?? 0) + 1;
+        byPlugin[e.pluginId] = (byPlugin[e.pluginId] ?? 0) + 1;
+
+        // Hour of day in timezone
+        const dtf = new Intl.DateTimeFormat("en-US", {
+          timeZone: tz, hour: "2-digit", hour12: false,
+        });
+        const hourStr = dtf.format(new Date(e.publishedAt));
+        const hour = parseInt(hourStr, 10);
+        if (hour >= 0 && hour < 24) byHour[hour]!++;
+
+        // Day of week
+        const dayDtf = new Intl.DateTimeFormat("en-US", {
+          timeZone: tz, weekday: "short",
+        });
+        const weekday = dayDtf.format(new Date(e.publishedAt));
+        const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const dow = dayMap[weekday] ?? 0;
+        byDayOfWeek[dow]!++;
+
+        // Quality bucket
+        if (e.telegramMessageId > 0) {
+          const q = e.qualityScore;
+          const bucket = Math.min(4, Math.floor(q / 20));
+          qualityBuckets[bucket]!++;
+          totalQuality += q;
+          qualityCount++;
+        }
+
+        totalTokens += e.tokensUsed;
+        totalCost += e.estimatedCost;
+      }
+
+      // Sort plugins by count (descending)
+      const topPlugins = Object.entries(byPlugin)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 10)
+        .map(([id, count]) => ({ id, count }));
+
+      // Heatmap data: 7 days × 24 hours
+      // Build a 7×24 matrix from the recent entries
+      const heatmap: number[][] = [];
+      for (let d = 0; d < 7; d++) {
+        const row: number[] = new Array(24).fill(0);
+        const date = formatDateInZone(now - (6 - d) * 24 * 3600 * 1000, tz);
+        for (const e of recent) {
+          const eDate = formatDateInZone(e.publishedAt, tz);
+          if (eDate !== date) continue;
+          const dtf = new Intl.DateTimeFormat("en-US", {
+            timeZone: tz, hour: "2-digit", hour12: false,
+          });
+          const hour = parseInt(dtf.format(new Date(e.publishedAt)), 10);
+          if (hour >= 0 && hour < 24) row[hour]!++;
+        }
+        heatmap.push(row);
+      }
+
+      // Max value for heatmap color scaling
+      const heatMax = Math.max(1, ...heatmap.flat());
+
+      return json({
+        ok: true,
+        totalPosts: recent.length,
+        avgQuality: qualityCount > 0 ? Math.round(totalQuality / qualityCount) : 0,
+        totalTokens,
+        totalCost: Number(totalCost.toFixed(4)),
+        byCategory,
+        topPlugins,
+        byHour,
+        byDayOfWeek,
+        qualityBuckets,
+        dailyTotals,
+        heatmap,
+        heatMax,
+        days: 7,
+      });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
   }
 
   // ── Logs ──
@@ -659,21 +907,22 @@ export async function managerHandler(
 
       const slots = plan?.posts ?? [];
       const completed = slots.filter((s) => s.status === "published" || s.status === "backup");
-      // v11.18.0: Pending = scheduledTime is still in the future (with 10min tolerance)
+      // v12.0.2: EXACT scheduledTime comparison — no 10-min tolerance.
+      // Pending = scheduledTime is still strictly in the future.
       const pending = slots.filter((s) => {
         if (s.status !== "pending") return false;
         const schedTime = s.scheduledTime ?? s.time;
         const [sH, sM] = schedTime.split(":").map(Number);
         const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
-        return nowMinutes < schedMin - 10;
+        return nowMinutes < schedMin;
       });
-      // v11.18.0: Due NOW = scheduledTime has been reached but not yet published
+      // v12.0.2: Due NOW = scheduledTime has been reached (now >= scheduledMin)
       const dueNow = slots.filter((s) => {
         if (s.status !== "pending") return false;
         const schedTime = s.scheduledTime ?? s.time;
         const [sH, sM] = schedTime.split(":").map(Number);
         const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
-        return nowMinutes >= schedMin - 10;
+        return nowMinutes >= schedMin;
       });
       const failed = slots.filter((s) => s.status === "failed");
       const publishing = slots.filter((s) => s.status === "publishing");
@@ -802,8 +1051,9 @@ export async function managerHandler(
         providerEngine: engineSummary,
         gracePeriodHours: 4, // v11.2.0
         staleTickThresholdHours: 3, // v11.2.0
-        // v12.0.1: Cron Optimization — Quiet Hours Guard status.
-        // Computed synchronously from settings + current time (no extra KV read).
+        // v12.0.2: Cron Optimization — Quiet Hours Guard status.
+        // Computed LIVE from settings + current time (zero KV reads).
+        // v12.0.2: Removed lastQuietSkip KV read — quiet hours are zero-KV now.
         cronOptimization: (() => {
           const qh = settings.scheduler.quietHours;
           const isQuiet = container.quietHoursChecker?.isQuietHours(now, settings.scheduler) ?? false;
@@ -816,13 +1066,10 @@ export async function managerHandler(
             nextActiveTime: qh?.end ?? null,
             localTime: localTime,
             timezone: tz,
+            // v12.0.2: Confirm zero-KV during quiet hours.
+            kvOpsDuringQuiet: "0 reads / 0 writes",
           };
         })(),
-        // v12.0.1: Last quiet-skip marker (written by cron-scheduler.ts during quiet hours).
-        lastQuietSkip: await container.kv.getJson<{
-          time: number; localTime: string; timezone: string;
-          quietHours: string; nextActiveTime: string;
-        }>("fredy:tick:lastQuietSkip").catch(() => null),
       });
     } catch (error) {
       return json({ ok: false, error: errMsg(error) }, 500);
@@ -1480,7 +1727,71 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 .progress{background:var(--surface2);border-radius:6px;height:8px;overflow:hidden}.progress-bar{background:var(--accent);height:100%;transition:width .3s}
 .test-result{padding:8px 12px;border-radius:6px;margin:4px 0;display:flex;align-items:center;gap:8px;font-size:13px}.test-pass{background:rgba(34,197,94,.1)}.test-fail{background:rgba(239,68,68,.1)}
 .post-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s}.post-card:hover{border-color:var(--accent)}
-@media(max-width:768px){:root{--sidebar-w:200px}.sidebar{transform:translateX(calc(-1*var(--sidebar-w)))}.sidebar.open{transform:translateX(0)}.main{margin-left:0}}
+@media(max-width:768px){:root{--sidebar-w:200px}.sidebar{transform:translateX(calc(-1*var(--sidebar-w)))}.sidebar.open{transform:translateX(0)}.main{margin-left:0}.resp-2col{grid-template-columns:1fr!important}}
+.hero{background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(129,140,248,.04) 60%,rgba(34,197,94,.04));border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:16px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;top:-40px;right:-40px;width:160px;height:160px;background:radial-gradient(circle,rgba(99,102,241,.15),transparent 70%);pointer-events:none}
+.hero-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;position:relative}
+.live-clock{font-family:'SF Mono',Monaco,monospace;font-size:28px;font-weight:700;color:var(--accent2);letter-spacing:1px;text-shadow:0 0 20px rgba(129,140,248,.3)}
+.live-clock .tz{font-size:12px;color:var(--text2);font-weight:400;margin-left:8px}
+.health-gauge{position:relative;width:72px;height:72px;flex-shrink:0}
+.health-gauge svg{transform:rotate(-90deg)}
+.health-gauge .gauge-bg{fill:none;stroke:var(--surface2);stroke-width:6}
+.health-gauge .gauge-fg{fill:none;stroke:var(--accent);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
+.health-gauge .gauge-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}
+.health-gauge .gauge-val{font-size:18px;font-weight:700}
+.health-gauge .gauge-sub{font-size:9px;color:var(--text2);text-transform:uppercase}
+.countdown-box{text-align:center;padding:12px 20px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:10px;min-width:140px}
+.countdown-box .cd-val{font-size:26px;font-weight:700;color:var(--accent2);font-family:'SF Mono',Monaco,monospace}
+.countdown-box .cd-label{font-size:10px;color:var(--text2);text-transform:uppercase;margin-top:2px}
+.countdown-box .cd-sched{font-size:11px;color:var(--accent);margin-top:4px;font-weight:600}
+.stat-pod{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;transition:all .2s;position:relative;overflow:hidden}
+.stat-pod:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 4px 16px rgba(99,102,241,.15)}
+.stat-pod .sp-icon{position:absolute;top:10px;right:10px;font-size:20px;opacity:.25}
+.stat-pod .sp-label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat-pod .sp-val{font-size:22px;font-weight:700}
+.stat-pod .sp-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.activity-feed{max-height:320px;overflow-y:auto}
+.activity-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border);transition:background .15s}
+.activity-item:last-child{border-bottom:none}
+.activity-item:hover{background:var(--surface2)}
+.activity-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.activity-dot.cat-a{background:var(--accent)}.activity-dot.cat-b{background:var(--blue)}.activity-dot.cat-c{background:var(--green)}
+.activity-body{flex:1;min-width:0}
+.activity-preview{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.activity-meta{font-size:10px;color:var(--text2);margin-top:2px;display:flex;gap:8px}
+.activity-ago{font-size:11px;color:var(--text2);white-space:nowrap;flex-shrink:0}
+.quiet-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.quiet-pill.sleeping{background:rgba(59,130,246,.15);color:var(--blue)}
+.quiet-pill.active{background:rgba(34,197,94,.15);color:var(--green)}
+.divider-label{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px}
+.divider-label::after{content:"";flex:1;height:1px;background:var(--border)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .3s ease}
+.heatmap{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;font-size:10px}
+.heatmap-label{color:var(--text2);padding:2px 6px;text-align:right;white-space:nowrap}
+.heatmap-cell{aspect-ratio:1;border-radius:3px;min-height:20px;display:flex;align-items:center;justify-content:center;color:var(--text);font-size:9px;font-weight:600;transition:transform .15s;cursor:default}
+.heatmap-cell:hover{transform:scale(1.3);z-index:10;box-shadow:0 0 8px rgba(99,102,241,.5)}
+.heatmap-cell.empty{background:var(--surface2)}
+.heatmap-axis{color:var(--text2);font-size:9px;text-align:center;padding:2px 0}
+.donut{position:relative;width:120px;height:120px}
+.donut svg{transform:rotate(-90deg)}
+.donut-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}
+.donut-val{font-size:24px;font-weight:700}
+.donut-label{font-size:10px;color:var(--text2);text-transform:uppercase}
+.bar-chart{display:flex;flex-direction:column;gap:6px}
+.bar-row{display:flex;align-items:center;gap:8px;font-size:12px}
+.bar-label{width:120px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.bar-track{flex:1;height:20px;background:var(--surface2);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;transition:width .8s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:11px;font-weight:600;color:#fff;min-width:24px}
+.dist-bar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dist-label{width:80px;font-size:11px;color:var(--text2);flex-shrink:0}
+.dist-track{flex:1;height:24px;background:var(--surface2);border-radius:4px;overflow:hidden}
+.dist-fill{height:100%;border-radius:4px;transition:width .8s ease;display:flex;align-items:center;padding-left:8px;font-size:11px;font-weight:600;color:#fff}
+.sparkline{display:flex;align-items:flex-end;gap:3px;height:50px;padding:4px 0}
+.spark-bar{flex:1;background:linear-gradient(180deg,var(--accent2),var(--accent));border-radius:3px 3px 0 0;min-height:3px;transition:height .5s;position:relative}
+.spark-bar:hover{filter:brightness(1.3)}
+.spark-bar .spark-tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);padding:3px 6px;border-radius:4px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .15s;pointer-events:none;margin-bottom:4px;z-index:10}
+.spark-bar:hover .spark-tip{opacity:1}
 </style></head><body>
 <div class="sidebar" id="sidebar"><div class="sidebar-header"><span style="font-size:20px">🤖</span><h1>Fredy</h1></div><div class="sidebar-nav" id="nav"></div></div>
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
@@ -1500,22 +1811,162 @@ function card(l,v){return '<div class="card"><div class="card-label">'+l+'</div>
 function copyText(text){navigator.clipboard.writeText(text).then(()=>toast("📋 Copied!")).catch(()=>toast("❌ Copy failed"));}
 function copyElement(id){const el=document.getElementById(id);if(el)copyText(el.textContent);}
 function preWithCopy(id,content){return '<pre id="'+id+'">'+content+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +id+ "'" +')" style="margin-top:4px">📋 Copy</button>';}
-function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,schedulerdebug:loadSchedulerDebug,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
+function loadPage(id){const c=document.getElementById("content");c.innerHTML='<div class="card">Loading…</div>';if(window._dashInterval){clearInterval(window._dashInterval);window._dashInterval=null;}({dashboard:loadDashboard,strategy:loadStrategy,post:loadPost,backtest:loadBacktest,plugins:loadPlugins,queue:loadQueue,ai:loadAI,scheduler:loadScheduler,schedulerdebug:loadSchedulerDebug,statistics:loadStats,logs:loadLogs,debug:loadDebug,config:loadConfig,settings:loadSettings,system:loadSystem,about:loadAbout}[id]||(()=>c.innerHTML='<div class="card">Page not found.</div>'))();}
 
 async function loadDashboard(){
-  const d=await api("health");const c=document.getElementById("content");
-  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
+  const c=document.getElementById("content");
+  c.innerHTML='<div class="card">Loading dashboard…</div>';
+  const d=await api("dashboard/overview");
+  if(!d.ok){c.innerHTML='<div class="card">Error: '+(d.error||"unknown")+'</div>';return;}
+
   const botOn=d.bot?.enabled;
   const apprOn=d.approveMode;
-  c.innerHTML='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">🚀 Quick Test Everything</h3><span class="badge badge-blue">v'+d.version+'</span></div><p style="color:var(--text2);margin-bottom:12px">Runs all 9 system checks + 12 plugin tests + AI test in one click. Full copyable JSON report.</p><div style="display:flex;gap:8px"><button class="btn" onclick="testEverything()">▶️ Test Everything</button><button class="btn btn-ghost" onclick="testAllPlugins()">🔌 Test Plugins Only</button></div><div id="everything-result" style="margin-top:12px"></div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">🎛️ Quick Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap">'+
+  const schedOn=d.scheduler?.enabled;
+  const qh=d.quietHours;
+  const isQuiet=qh?.active;
+  const np=d.nextPost;
+
+  // Health score: 4 checks (bot, scheduler, secrets, plugins)
+  let healthScore=0,healthMax=4;
+  if(botOn)healthScore++;
+  if(schedOn)healthScore++;
+  if(d.hasSecrets?.botToken&&d.hasSecrets?.gemini)healthScore++;
+  if(d.plugins?.enabled>0)healthScore++;
+  const healthPct=Math.round((healthScore/healthMax)*100);
+  const healthColor=healthPct>=75?'var(--green)':healthPct>=50?'var(--yellow)':'var(--red)';
+  // SVG gauge: circumference = 2*pi*r = 2*pi*30 = 188.5
+  const circ=188.5;const dashOffset=circ-(circ*healthPct/100);
+
+  // Stat pods
+  const statPod=(icon,label,val,sub)=>'<div class="stat-pod"><span class="sp-icon">'+icon+'</span><div class="sp-label">'+label+'</div><div class="sp-val">'+val+'</div><div class="sp-sub">'+(sub||"")+'</div></div>';
+
+  let html='<div class="fade-in">';
+
+  // ── HERO SECTION ──
+  html+='<div class="hero">'+
+    '<div class="hero-row">'+
+      '<div>'+
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">'+
+          '<span style="font-size:24px">🤖</span>'+
+          '<span style="font-size:18px;font-weight:700">Fredy</span>'+
+          '<span class="badge badge-blue">v'+d.version+'</span>'+
+          (isQuiet?'<span class="quiet-pill sleeping">😴 Sleeping</span>':'<span class="quiet-pill active">✅ Active</span>')+
+        '</div>'+
+        '<div class="live-clock" id="live-clock">'+escapeHtml(d.currentTime?.localTime||"—")+'<span class="tz">'+escapeHtml(d.currentTime?.timezone||"")+'</span></div>'+
+        '<div style="font-size:12px;color:var(--text2);margin-top:4px">'+escapeHtml(d.currentTime?.date||"")+' · '+(d.lastTick?fmtAgo(d.lastTick)+" since last tick":"no tick yet")+'</div>'+
+      '</div>'+
+      '<div class="health-gauge">'+
+        '<svg width="72" height="72">'+
+          '<circle class="gauge-bg" cx="36" cy="36" r="30"></circle>'+
+          '<circle class="gauge-fg" cx="36" cy="36" r="30" stroke="'+healthColor+'" stroke-dasharray="'+circ+'" stroke-dashoffset="'+dashOffset+'"></circle>'+
+        '</svg>'+
+        '<div class="gauge-label"><div class="gauge-val" style="color:'+healthColor+'">'+healthPct+'%</div><div class="gauge-sub">Health</div></div>'+
+      '</div>'+
+    '</div>'+
+    (np? '<div style="margin-top:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">'+
+        '<div class="countdown-box">'+
+          '<div class="cd-val" id="countdown-val">'+escapeHtml(np.remainingLabel||"—")+'</div>'+
+          '<div class="cd-label">Next Publish In</div>'+
+          '<div class="cd-sched">🎯 '+escapeHtml(np.scheduledTime)+' · '+escapeHtml(np.window)+'</div>'+
+        '</div>'+
+        '<div style="flex:1;min-width:180px">'+
+          '<div style="font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:4px">Upcoming Post</div>'+
+          '<div style="font-size:14px;font-weight:600">Slot #'+np.index+' · Category '+escapeHtml(String(np.category))+'</div>'+
+          '<div style="font-size:12px;color:var(--text2);margin-top:2px">Provider: <code>'+(np.provider||"auto")+'</code></div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-top:4px">The 20-min watcher fires on the first tick at or after '+escapeHtml(np.scheduledTime)+'.</div>'+
+        '</div>'+
+    '</div>':'<div style="margin-top:14px;padding:14px;background:var(--surface2);border-radius:10px;color:var(--text2);font-size:13px">No pending posts today. The 24h maintenance cron will generate tomorrow\'s plan at midnight UTC.</div>')+
+  '</div>';
+
+  // ── QUICK CONTROLS ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">🎛️ Quick Controls</h3><div style="display:flex;gap:8px;flex-wrap:wrap">'+
     '<button class="btn '+(botOn?'btn-danger':'')+'" onclick="toggleBot()">'+(botOn?'🔴 Stop Bot':'🟢 Start Bot')+'</button>'+
     '<button class="btn '+(apprOn?'btn-danger':'')+'" onclick="toggleApprove()">'+(apprOn?'🔓 Approve: OFF':'🔐 Approve: ON')+'</button>'+
     '<button class="btn btn-ghost" onclick="refresh()">🔄 Refresh</button>'+
-  '</div></div>'+
-  '<div class="card-grid">'+card("Version",d.version)+card("Bot",botOn?badge(1):badge(0))+card("Scheduler",d.scheduler?.enabled?badge(1):badge(0))+card("Approve",apprOn?badge(1):badge(0))+card("AI",d.aiProvider??"—")+card("Language",d.language??"—")+card("Plugins",d.plugins?.enabled+"/"+d.plugins?.total)+card("Posts Today",d.scheduler?.postsToday??0)+card("Next Slot",d.scheduler?.nextSlot?.time??"—")+card("Last Tick",d.lastTick?fmtAgo(d.lastTick):"—")+'</div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Global Stats</h3><div class="card-grid">'+card("Processed",d.stats?.processed??0)+card("Published",d.stats?.published??0)+card("Rejected",d.stats?.rejected??0)+card("Failed",d.stats?.failed??0)+'</div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Secrets</h3>'+Object.entries(d.hasSecrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
+    '<button class="btn btn-ghost" onclick="testEverything()">🧪 Test Everything</button>'+
+  '</div></div>';
+
+  // ── STAT PODS (hoverable) ──
+  html+='<div class="divider-label">System Overview</div>';
+  html+='<div class="card-grid">'+
+    statPod('🤖','Bot',botOn?'ON':'OFF',botOn?'running':'stopped')+
+    statPod('📅','Scheduler',schedOn?'ON':'OFF',schedOn?'active':'paused')+
+    statPod('🔐','Approve',apprOn?'ON':'OFF',apprOn?'manual review':'auto')+
+    statPod('🤖','AI',escapeHtml(d.aiProvider||"—"),'primary')+
+    statPod('🌐','Language',escapeHtml(d.language||"—"),'default')+
+    statPod('🔌','Plugins',d.plugins?.enabled+'/'+d.plugins?.total,'enabled/total')+
+    statPod('📤','Posts Today',d.scheduler?.postsToday??0,'published')+
+    statPod('🌙','Quiet Hours',isQuiet?'Sleeping':'Active',qh?.config?qh.config.start+'-'+qh.config.end:'—')+
+  '</div>';
+
+  // ── RECENT ACTIVITY FEED ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">📜 Recent Activity</h3>';
+  if(d.recentPublishes&&d.recentPublishes.length>0){
+    html+='<div class="activity-feed">';
+    for(const p of d.recentPublishes){
+      const catClass='cat-'+String(p.category).toLowerCase();
+      const ago=p.agoMinutes<60?p.agoMinutes+'m ago':Math.floor(p.agoMinutes/60)+'h ago';
+      html+='<div class="activity-item">'+
+        '<div class="activity-dot '+catClass+'"></div>'+
+        '<div class="activity-body">'+
+          '<div class="activity-preview">'+escapeHtml(p.textPreview||"(no preview)")+'</div>'+
+          '<div class="activity-meta"><span>📂 '+escapeHtml(String(p.category))+'</span><span>🔌 '+escapeHtml(p.pluginId||"?")+'</span><span>⭐ '+p.qualityScore+'</span></div>'+
+        '</div>'+
+        '<div class="activity-ago">'+ago+'</div>'+
+      '</div>';
+    }
+    html+='</div>';
+  } else {
+    html+='<p style="color:var(--text2);padding:12px">No recent publishes yet. Once the scheduler fires, the last 5 posts will appear here.</p>';
+  }
+  html+='</div>';
+
+  // ── GLOBAL STATS ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">📊 Global Stats</h3><div class="card-grid">'+
+    card("Processed",d.stats?.processed??0)+
+    card("Published",'<span style="color:var(--green)">'+(d.stats?.published??0)+'</span>')+
+    card("Rejected",'<span style="color:var(--yellow)">'+(d.stats?.rejected??0)+'</span>')+
+    card("Failed",'<span style="color:var(--red)">'+(d.stats?.failed??0)+'</span>')+
+  '</div></div>';
+
+  // ── SECRETS ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">🔑 Secrets</h3>'+Object.entries(d.hasSecrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
+
+  // ── QUIET HOURS NOTE ──
+  if(isQuiet){
+    html+='<div class="card" style="border:1px solid var(--blue);background:rgba(59,130,246,.05)"><h3 style="margin-bottom:4px">🌙 Quiet Hours Active</h3><p style="color:var(--text2);font-size:12px">Layer 1 (Scheduler Watcher) is sleeping with <b>zero KV operations</b>. Normal publishing resumes at <b>'+escapeHtml(qh?.nextActiveTime||"07:30")+'</b>. Manual force-publish still works.</p></div>';
+  }
+
+  html+='</div>';
+  c.innerHTML=html;
+
+  // Start live clock + countdown updater
+  if(window._dashInterval)clearInterval(window._dashInterval);
+  window._dashInterval=setInterval(()=>{
+    const clk=document.getElementById("live-clock");
+    if(clk&&d.currentTime){
+      // Compute current time in the configured timezone
+      try{
+        const fmt=new Intl.DateTimeFormat("en-US",{timeZone:d.currentTime.timezone,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
+        clk.innerHTML=escapeHtml(fmt.format(new Date()))+'<span class="tz">'+escapeHtml(d.currentTime.timezone)+'</span>';
+      }catch(e){/* keep static */}
+    }
+    // Update countdown
+    if(d.nextPost){
+      const cd=document.getElementById("countdown-val");
+      if(cd){
+        // Recompute remaining minutes from the original scheduledTime
+        const [sH,sM]=(d.nextPost.scheduledTime||"").split(":").map(Number);
+        const schedMin=(sH||0)*60+(sM||0);
+        const nowFmt=new Intl.DateTimeFormat("en-US",{timeZone:d.currentTime.timezone,hour:"2-digit",minute:"2-digit",hour12:false});
+        const [nH,nM]=nowFmt.format(new Date()).split(":").map(Number);
+        const nowMin=(nH||0)*60+(nM||0);
+        let rem=schedMin-nowMin;
+        if(rem<0)rem=0;
+        cd.textContent=rem>0?(rem>=60?Math.floor(rem/60)+"h "+(rem%60)+"m":rem+"m"):"due now";
+      }
+    }
+  },1000);
 }
 async function toggleBot(){const d=await api("toggle/bot","POST");toast(d.ok?(d.botEnabled?"🟢 Bot ON":"🔴 Bot OFF"):"❌ Failed");loadDashboard();}
 async function toggleApprove(){const d=await api("toggle/approve","POST");toast(d.ok?(d.approveMode?"🔐 Approve ON":"🔓 Approve OFF"):"❌ Failed");loadDashboard();}
@@ -1815,7 +2266,7 @@ async function loadSchedulerDebug(){
   const s=d.scheduler;
   const p=d.plan;
   const statusBadge=function(st){const m={"published":"badge-green","failed":"badge-red","backup":"badge-yellow","pending":"badge-blue","publishing":"badge-yellow","skipped":"badge-gray","due":"badge-blue"};return '<span class="badge '+(m[st]||"badge-gray")+'">'+st+'</span>';};
-  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🔬 Scheduler Debug (v12.0.1)</h3><button class="btn btn-ghost btn-sm" onclick="loadSchedulerDebug()">🔄 Refresh</button></div><p style="color:var(--text2);margin-top:8px">Three-Layer Cron + Random Jitter + Quiet Hours Guard. scheduledTime is the REAL publish trigger — the 20-min watcher fires on the first tick at or after it.</p></div>';
+  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🔬 Scheduler Debug (v12.0.2)</h3><button class="btn btn-ghost btn-sm" onclick="loadSchedulerDebug()">🔄 Refresh</button></div><p style="color:var(--text2);margin-top:8px">Three-Layer Cron + EXACT Random Jitter + Zero-KV Quiet Hours. scheduledTime is the EXACT trigger (no tolerance) — the 20-min watcher fires on the first tick at or after it.</p></div>';
 
   // Current Time section
   html+='<div class="card"><h3 style="margin-bottom:8px">🕐 Current Time</h3><div class="card-grid">'+
@@ -1857,22 +2308,17 @@ async function loadSchedulerDebug(){
     const isSleeping = co.currentState === 'sleeping';
     const stateColor = isSleeping ? 'var(--blue)' : 'var(--green)';
     const stateBg = isSleeping ? 'rgba(59,130,246,.1)' : 'rgba(34,197,94,.1)';
-    let qhHtml='<div class="card" style="border:1px solid '+stateColor+';background:'+stateBg+'"><h3 style="margin-bottom:8px">🌙 Quiet Hours Optimization (v12.0.1)</h3><div class="card-grid">'+
+    let qhHtml='<div class="card" style="border:1px solid '+stateColor+';background:'+stateBg+'"><h3 style="margin-bottom:8px">🌙 Quiet Hours Optimization (v12.0.2 — Zero-KV)</h3><div class="card-grid">'+
       card("Status", isSleeping ? '<span class="badge badge-blue">SLEEPING 😴</span>' : '<span class="badge badge-green">ACTIVE ✅</span>')+
       card("Guard", co.quietHoursGuard?'<span class="badge badge-green">ON</span>':'<span class="badge badge-gray">OFF</span>')+
       card("Current Time", (co.localTime||'—')+' <span style="color:var(--text2);font-size:11px">'+(co.timezone||'')+'</span>')+
       card("Quiet Hours", co.quietHours||'—')+
-      card("Scheduler Watcher", isSleeping ? '<span style="color:var(--blue);font-weight:bold">Sleeping</span>' : '<span style="color:var(--green);font-weight:bold">Running</span>')+
+      card("Action", isSleeping ? '<span style="color:var(--blue);font-weight:bold">Skipped without KV</span>' : '<span style="color:var(--green);font-weight:bold">Running</span>')+
       card("Next Active Time", co.nextActiveTime||'—')+
       card("Cron", 'Every 20 min')+
-      card("KV Operations", isSleeping ? '<span style="color:var(--green);font-weight:bold">Skipped ✅</span>' : 'Normal')+
+      card("KV Operations", isSleeping ? '<span style="color:var(--green);font-weight:bold">0 reads / 0 writes ✅</span>' : 'Normal')+
       '</div>';
-    if(d.lastQuietSkip){
-      const ls=d.lastQuietSkip;
-      const skipAgo = Math.round((t.epoch - ls.time)/60000);
-      qhHtml+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🕒 Last skip: <b>'+ls.localTime+'</b> ('+skipAgo+' min ago) — quiet hours '+ls.quietHours+', next active '+ls.nextActiveTime+'</div>';
-    }
-    qhHtml+='<div style="margin-top:6px;color:var(--text2);font-size:11px">💡 During quiet hours, Layer 1 skips all KV operations (0 plan reads, 0 scheduler writes). Manual force-publish still works — it bypasses this guard.</div></div>';
+    qhHtml+='<div style="margin-top:6px;color:var(--text2);font-size:11px">💡 v12.0.2: During quiet hours, Layer 1 consumes ZERO KV operations — no reads, no writes, no skip marker. Status is computed live from settings + current time. Manual force-publish bypasses this guard.</div></div>';
     html+=qhHtml;
   }
 
@@ -2044,10 +2490,172 @@ async function loadSystem(){
 }
 
 async function loadStats(){
-  const d=await api("history");const c=document.getElementById("content");
-  if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">Today ('+d.today.date+')</h3>'+(d.today.entries.length===0?"<p>No posts today.</p>":'<table><thead><tr><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>'+d.today.entries.map(e=>'<tr><td>'+new Date(e.publishedAt).toLocaleTimeString()+'</td><td>'+e.pluginId+'</td><td>'+e.category+'</td><td>'+e.qualityScore+'</td><td>'+(e.telegramMessageId>0?e.telegramMessageId:"❌")+'</td></tr>').join("")+'</tbody></table>')+'</div>'+
-  '<div class="card"><h3>Recent (7 days): '+d.recent.length+' posts</h3></div>';
+  const c=document.getElementById("content");
+  c.innerHTML='<div class="card">Loading statistics…</div>';
+  const [hist, stats] = await Promise.all([api("history"), api("statistics/overview")]);
+  if(!hist.ok){c.innerHTML='<div class="card">Error loading history</div>';return;}
+
+  let html='<div class="fade-in">';
+
+  // ── SUMMARY CARDS ──
+  if(stats.ok){
+    const s=stats;
+    const statPod=(icon,label,val,sub)=>'<div class="stat-pod"><span class="sp-icon">'+icon+'</span><div class="sp-label">'+label+'</div><div class="sp-val">'+val+'</div><div class="sp-sub">'+(sub||"")+'</div></div>';
+    html+='<div class="divider-label">7-Day Summary</div>';
+    html+='<div class="card-grid">'+
+      statPod('📊','Total Posts',s.totalPosts??0,'last 7 days')+
+      statPod('⭐','Avg Quality',s.avgQuality??0,'/ 100')+
+      statPod('🪙','Tokens',s.totalTokens??0,'used')+
+      statPod('💲','Cost','$'+(s.totalCost??0).toFixed(4),'estimated')+
+    '</div>';
+
+    // ── DAILY SPARKLINE ──
+    if(s.dailyTotals&&s.dailyTotals.length>0){
+      const maxDaily=Math.max(1,...s.dailyTotals.map(d=>d.count));
+      html+='<div class="card"><h3 style="margin-bottom:8px">📈 Daily Publishing (7 days)</h3><div class="sparkline">';
+      for(const d of s.dailyTotals){
+        const h=Math.round((d.count/maxDaily)*100);
+        const dayLabel=d.date.slice(5);
+        html+='<div class="spark-bar" style="height:'+Math.max(3,h)+'%"><span class="spark-tip">'+escapeHtml(dayLabel)+': '+d.count+' posts</span></div>';
+      }
+      html+='</div><div style="display:flex;gap:3px;margin-top:4px">';
+      for(const d of s.dailyTotals){
+        html+='<div style="flex:1;text-align:center;font-size:9px;color:var(--text2)">'+escapeHtml(d.date.slice(5))+'</div>';
+      }
+      html+='</div></div>';
+    }
+
+    // ── CATEGORY DONUT + PLUGIN BARS (side by side) ──
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" class="resp-2col">';
+    // Category donut
+    if(s.byCategory){
+      const cats=s.byCategory;
+      const total=(cats.A||0)+(cats.B||0)+(cats.C||0);
+      const colors={A:'#6366f1',B:'#3b82f6',C:'#22c55e'};
+      const circ=2*Math.PI*45; // r=45
+      let offset=0;
+      let donutSegs='';
+      for(const [cat,count] of Object.entries(cats)){
+        if(count===0)continue;
+        const frac=count/total;
+        const dashLen=frac*circ;
+        donutSegs+='<circle cx="60" cy="60" r="45" fill="none" stroke="'+(colors[cat]||'#888')+'" stroke-width="14" stroke-dasharray="'+dashLen+' '+(circ-dashLen)+'" stroke-dashoffset="'+(-offset)+'"/>';
+        offset+=dashLen;
+      }
+      html+='<div class="card"><h3 style="margin-bottom:8px">📂 Category Distribution</h3>'+
+        '<div style="display:flex;align-items:center;gap:16px">'+
+          '<div class="donut"><svg width="120" height="120">'+donutSegs+'</svg><div class="donut-center"><div class="donut-val">'+total+'</div><div class="donut-label">Posts</div></div></div>'+
+          '<div style="flex:1">'+
+            (Object.entries(cats).map(([cat,count])=>{
+              const pct=total>0?Math.round((count/total)*100):0;
+              return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:10px;height:10px;border-radius:50%;background:'+(colors[cat]||'#888')+';display:inline-block"></span><span style="font-size:13px;font-weight:600">Cat '+escapeHtml(cat)+'</span><span style="color:var(--text2);font-size:12px;margin-left:auto">'+count+' ('+pct+'%)</span></div>';
+            }).join(""))+
+          '</div>'+
+        '</div></div>';
+    }
+    // Plugin bars
+    if(s.topPlugins&&s.topPlugins.length>0){
+      const maxPlug=Math.max(1,...s.topPlugins.map(p=>p.count));
+      const plugColors=['#6366f1','#818cf8','#3b82f6','#22c55e','#eab308','#ef4444','#a855f7','#ec4899','#14b8a6','#f97316'];
+      html+='<div class="card"><h3 style="margin-bottom:8px">🔌 Top Plugins</h3><div class="bar-chart">';
+      for(let i=0;i<s.topPlugins.length;i++){
+        const p=s.topPlugins[i];
+        const pct=Math.round((p.count/maxPlug)*100);
+        const color=plugColors[i%plugColors.length];
+        html+='<div class="bar-row"><span class="bar-label">'+escapeHtml(p.id)+'</span><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+color+'">'+p.count+'</div></div></div>';
+      }
+      html+='</div></div>';
+    }
+    html+='</div>'; // end 2col grid
+
+    // ── PUBLISHING HEATMAP ──
+    if(s.heatmap&&s.heatmap.length>0){
+      const days=['6d ago','5d ago','4d ago','3d ago','2d','Yesterday','Today'];
+      const hm=s.heatMax||1;
+      html+='<div class="card"><h3 style="margin-bottom:8px">🗓️ Publishing Heatmap (7 days × 24 hours)</h3>';
+      html+='<div class="heatmap">';
+      // Header row: empty + hours 0-23
+      html+='<div></div>';
+      for(let h=0;h<24;h++){
+        html+='<div class="heatmap-axis">'+(h%6===0?String(h).padStart(2,'0'):'')+'</div>';
+      }
+      // Data rows
+      for(let d=0;d<7;d++){
+        html+='<div class="heatmap-label">'+days[d]+'</div>';
+        for(let h=0;h<24;h++){
+          const val=s.heatmap[d][h]||0;
+          if(val===0){
+            html+='<div class="heatmap-cell empty"></div>';
+          }else{
+            const intensity=val/hm;
+            const r=Math.round(99+intensity*156);
+            const g=Math.round(102+intensity*20);
+            const b=Math.round(241-intensity*200);
+            const bg='rgba('+r+','+g+','+b+','+(0.3+intensity*0.7)+')';
+            html+='<div class="heatmap-cell" style="background:'+bg+'" title="'+days[d]+' '+String(h).padStart(2,'0')+':00 — '+val+' posts">'+(val>0?val:'')+'</div>';
+          }
+        }
+      }
+      html+='</div>';
+      // Legend
+      html+='<div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10px;color:var(--text2)"><span>Less</span>';
+      for(let i=0;i<=4;i++){
+        const intensity=i/4;
+        const bg='rgba(99,102,241,'+(0.2+intensity*0.8)+')';
+        html+='<div style="width:12px;height:12px;border-radius:2px;background:'+bg+'"></div>';
+      }
+      html+='<span>More</span></div></div>';
+    }
+
+    // ── QUALITY DISTRIBUTION ──
+    if(s.qualityBuckets&&s.qualityBuckets.length>0){
+      const qb=s.qualityBuckets;
+      const maxQ=Math.max(1,...qb);
+      const labels=['0-20','20-40','40-60','60-80','80-100'];
+      const colors=['#ef4444','#eab308','#f97316','#3b82f6','#22c55e'];
+      html+='<div class="card"><h3 style="margin-bottom:8px">⭐ Quality Score Distribution</h3>';
+      for(let i=0;i<qb.length;i++){
+        const pct=Math.round((qb[i]/maxQ)*100);
+        const countPct=maxQ>0?Math.round((qb[i]/qb.reduce((a,b)=>a+b,0))*100):0;
+        html+='<div class="dist-bar"><span class="dist-label">'+labels[i]+'</span><div class="dist-track"><div class="dist-fill" style="width:'+pct+'%;background:'+colors[i]+'">'+qb[i]+' ('+countPct+'%)</div></div></div>';
+      }
+      html+='</div>';
+    }
+
+    // ── HOUR-OF-DAY BAR CHART ──
+    if(s.byHour&&s.byHour.length===24){
+      const maxHour=Math.max(1,...s.byHour);
+      html+='<div class="card"><h3 style="margin-bottom:8px">🕐 Posts by Hour of Day</h3><div class="sparkline" style="height:60px">';
+      for(let h=0;h<24;h++){
+        const val=s.byHour[h]||0;
+        const ht=Math.round((val/maxHour)*100);
+        html+='<div class="spark-bar" style="height:'+Math.max(3,ht)+'%"><span class="spark-tip">'+String(h).padStart(2,'0')+':00 — '+val+' posts</span></div>';
+      }
+      html+='</div><div style="display:flex;gap:3px;margin-top:4px">';
+      for(let h=0;h<24;h++){
+        html+='<div style="flex:1;text-align:center;font-size:8px;color:var(--text2)">'+(h%3===0?h:'')+'</div>';
+      }
+      html+='</div></div>';
+    }
+  }
+
+  // ── TODAY'S POSTS TABLE ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">📅 Today ('+escapeHtml(hist.today?.date||"—")+')</h3>';
+  if(!hist.today?.entries||hist.today.entries.length===0){
+    html+='<p style="color:var(--text2)">No posts published today yet.</p>';
+  } else {
+    html+='<table><thead><tr><th>Time</th><th>Plugin</th><th>Cat</th><th>Score</th><th>Msg ID</th></tr></thead><tbody>';
+    for(const e of hist.today.entries){
+      const time=new Date(e.publishedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      const scoreColor=e.qualityScore>=80?'var(--green)':e.qualityScore>=60?'var(--yellow)':'var(--red)';
+      html+='<tr><td>'+escapeHtml(time)+'</td><td><code>'+escapeHtml(e.pluginId)+'</code></td><td>'+escapeHtml(String(e.category))+'</td><td><span style="color:'+scoreColor+';font-weight:600">'+e.qualityScore+'</span></td><td>'+(e.telegramMessageId>0?'<span class="badge badge-green">✓</span>':'<span class="badge badge-red">❌</span>')+'</td></tr>';
+    }
+    html+='</tbody></table>';
+  }
+  html+='</div>';
+
+  html+='</div>';
+  c.innerHTML=html;
 }
 
 async function loadStrategy(){

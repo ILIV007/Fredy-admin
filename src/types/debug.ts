@@ -46,7 +46,11 @@ export type DebugEventName =
   | "provider.adaptive_backoff"
   | "provider.adaptive_restore"
   | "provider.refresh_failed"
-  | "provider.refresh_batch";
+  | "provider.refresh_batch"
+  // v12.0.5: Replacement pipeline events
+  | "pipeline.replacement"
+  | "pipeline.replacement_success"
+  | "pipeline.replacement_exhausted";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {
