@@ -33,6 +33,10 @@ export const planScreen: Screen = {
 
       const plan = await ctx.container.strategyEngine.getOrGeneratePlan();
 
+      // v11.11.1: Get provider display info for better plan display
+      const providers = ctx.container.plugins.list();
+      const providerMap = new Map(providers.map((p) => [p.metadata.id, p]));
+
       const statusEmojis: Record<string, string> = {
         pending: "⏳",
         published: "✅",
@@ -47,22 +51,41 @@ export const planScreen: Screen = {
       const completed = plan.posts.filter((p) => p.status === "published" || p.status === "backup").length;
       const failed = plan.posts.filter((p) => p.status === "failed").length;
       const pending = plan.posts.filter((p) => p.status === "pending").length;
+      const dueNow = plan.posts.filter((p) => p.status === "pending" && p.epochMs <= now).length;
 
-      html += `<blockquote>📊 Total: ${plan.posts.length} | ✅ Done: ${completed} | ⏳ Pending: ${pending} | ❌ Failed: ${failed}</blockquote>\n`;
-      html += `<blockquote>🎯 Strategy: ${plan.strategy} | 📅 Date: ${plan.date}</blockquote>\n\n`;
+      html += `<blockquote>📊 Total: ${plan.posts.length} | ✅ ${completed} | ⏳ ${pending} | ⚠️ Due: ${dueNow} | ❌ ${failed}</blockquote>\n`;
+      html += `<blockquote>🎯 Strategy: ${plan.strategy}</blockquote>\n`;
 
-      html += `<b>#  Time  Cat  Provider     Status</b>\n`;
+      // v11.11.1: Show weekly theme if available
+      if (plan.theme) {
+        html += `<blockquote>📅 Theme: ${plan.theme.dayName} — ${plan.theme.topics.join(", ")}</blockquote>\n`;
+      }
+      html += `\n`;
+
+      // v11.11.1: Improved table format with display icons
       for (const post of plan.posts) {
         const overdue = post.epochMs <= now && post.status === "pending"
-          ? ` (${Math.round((now - post.epochMs) / 60000)}m overdue)`
+          ? ` ⚠️${Math.round((now - post.epochMs) / 60000)}m`
           : "";
         const emoji = statusEmojis[post.status] ?? "❓";
-        const provider = post.provider ? escapeHtml(post.provider).padEnd(12).slice(0, 12) : "—";
-        html += `<blockquote>${emoji} #${post.index}  ${post.time}  ${post.category}  ${provider}  ${post.status}${overdue}</blockquote>\n`;
+
+        // Get provider display info
+        const plugin = post.provider ? providerMap.get(post.provider) : null;
+        const displayIcon = plugin?.metadata.displayIcon ?? "🔌";
+        const providerName = post.provider
+          ? (plugin?.metadata.displaySource === null
+              ? plugin?.metadata.displaySource ?? post.provider
+              : plugin?.metadata.displaySource ?? post.provider)
+          : "—";
+
+        html += `<blockquote>${emoji} #${post.index} ${post.time} ${post.category} ${displayIcon} ${escapeHtml(providerName)}${overdue}</blockquote>\n`;
       }
 
       if (failed > 0) {
-        html += `\n<i>💡 Failed slots won't retry automatically. Use "Regenerate" to create a fresh plan.</i>`;
+        html += `\n<i>💡 Failed slots won't retry. Use "Regenerate" to create a fresh plan.</i>`;
+      }
+      if (dueNow > 0) {
+        html += `\n<b>⚠️ ${dueNow} slot(s) due now — will fire on next tick.</b>`;
       }
 
       return html;

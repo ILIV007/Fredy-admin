@@ -462,6 +462,8 @@ export class AdminOrchestrator {
       if (second === "ai") return "ai";
       if (second === "categories") return "categories";
       if (second === "editor") return "editor";
+      if (second === "telegram") return "settings";  // v11.11.1: linkPreviewMode
+      if (second === "tiers") return "tiers";
       return second || "main";
     }
 

@@ -148,7 +148,18 @@ export const manualScreen: Screen = {
               if (adminCoverUrl) {
                 await ctx.container.tg.sendPhoto(ctx.adminId, adminCoverUrl, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
               } else {
-                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+                // v11.11.1: Apply same link_preview_options as channel post
+              const _settings = await ctx.container.config.getSettings(ctx.adminId);
+              const _previewMode = _settings.telegram?.linkPreviewMode ?? "smart";
+              const _hasImage = !!adminCoverUrl;
+              const _previewOpts = _hasImage
+                ? { is_disabled: true }
+                : _previewMode === "disabled"
+                  ? { is_disabled: true }
+                  : _previewMode === "always"
+                    ? { is_disabled: false, show_above_text: true }
+                    : { is_disabled: true }; // smart: disable for admin PM
+              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML", link_preview_options: _previewOpts }).catch(() => {});
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
@@ -286,7 +297,18 @@ export const manualScreen: Screen = {
               if (adminCoverUrl) {
                 await ctx.container.tg.sendPhoto(ctx.adminId, adminCoverUrl, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
               } else {
-                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
+                // v11.11.1: Apply same link_preview_options as channel post
+              const _settings = await ctx.container.config.getSettings(ctx.adminId);
+              const _previewMode = _settings.telegram?.linkPreviewMode ?? "smart";
+              const _hasImage = !!adminCoverUrl;
+              const _previewOpts = _hasImage
+                ? { is_disabled: true }
+                : _previewMode === "disabled"
+                  ? { is_disabled: true }
+                  : _previewMode === "always"
+                    ? { is_disabled: false, show_above_text: true }
+                    : { is_disabled: true }; // smart: disable for admin PM
+              await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML", link_preview_options: _previewOpts }).catch(() => {});
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [

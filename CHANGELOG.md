@@ -2,6 +2,47 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.11.1] — 2026-07-20 — Bot Settings Fix + Admin PM Preview + Daily Plan UI
+
+### 🔴 Critical Fixes
+
+- **FIX: "unknown: telegram" error in bot settings** — `resolveScreenId()` in
+  `admin.ts` did NOT map `set:telegram:*` callbacks to the `settings` screen.
+  When user tapped a Link Preview mode button, the orchestrator couldn't find
+  a screen with ID "telegram" → error. Now maps to `settings`.
+
+- **FIX: Link preview not applied to admin PM** — Admin PM `sendMessage` calls
+  in `manual.ts` did not include `link_preview_options`. Now reads
+  `linkPreviewMode` from settings and applies the same preview options as the
+  channel post.
+
+### 🆕 Daily Plan Screen Improvements
+
+- Shows weekly theme (day name + topics)
+- Shows "Due Now" count in summary
+- Shows provider display icon (🐙, ☁️, etc.) instead of raw plugin ID
+- Shows provider display name (Cloudflare Blog, Dev.to, etc.)
+- Warns when slots are due now
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.11.0 → 11.11.1 |
+| `package.json` | version 11.11.1 |
+| `src/core/constants.ts` | APP_VERSION = "11.11.1" |
+| `src/orchestrators/admin.ts` | Added `telegram` and `tiers` to resolveScreenId |
+| `src/admin/screens/manual.ts` | Admin PM includes link_preview_options |
+| `src/admin/screens/plan.ts` | Improved daily plan with themes, display icons, due count |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.11.1
+
+---
+
 ## [11.11.0] — 2026-07-20 — Scheduler Architecture Refactor (Preserve Random Slots)
 
 ### 🔄 REVERTED v11.10.0
