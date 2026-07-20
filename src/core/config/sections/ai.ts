@@ -38,4 +38,19 @@ export const aiSection = {
   defaults: aiDefaults,
   description:
     "AI provider selection, temperature, max tokens, retry count, prompt profile, quality threshold, and timeout.",
+  /**
+   * v11.6.3: Migration — if maxTokens is < 3096, bump it to 3096.
+   * This fixes the "AI truncates posts" bug for existing deployments where
+   * the old maxTokens (2000/2500) was persisted in KV.
+   */
+  migrate(_from: number, input: unknown): unknown {
+    if (typeof input === "object" && input !== null) {
+      const obj = input as Record<string, unknown>;
+      const currentMaxTokens = obj["maxTokens"];
+      if (typeof currentMaxTokens === "number" && currentMaxTokens < 3096) {
+        obj["maxTokens"] = 3096;
+      }
+    }
+    return input;
+  },
 };

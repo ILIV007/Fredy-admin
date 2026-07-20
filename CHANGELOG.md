@@ -2,6 +2,51 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.6.3] — 2026-07-20 — Provider Logos for ALL + Post to Channel Redesign + maxTokens Migration
+
+### 🔴 Fixes
+
+- **FIX: Reddit (and other providers) have no images** — Expanded provider logo
+  fallbacks to cover ALL 20 providers. Now includes: reddit.com, dev.to, xkcd.com,
+  apod.nasa.gov, en.wikipedia.org, stackexchange.com, producthunt.com (both www
+  and non-www), old.reddit.com. Uses Clearbit logo API (works from CF Workers).
+
+- **FIX: maxTokens still 2500 in deployed config** — The v11.6.2 fix set defaults
+  to 3096, but existing KV-stored config still had 2500. Added a `migrate()`
+  function to the AI config section that automatically bumps maxTokens to 3096
+  if the stored value is lower. This runs on every config load.
+
+### 🆕 Post to Channel Page Redesign
+
+Complete redesign of the Manager dashboard "Post to Channel" page:
+- Providers grouped by **Tier** (S/A/B) with tier-colored headers and badges
+- Each provider is a **card** with hover effects (border color changes to tier color)
+- Shows **last item count** per provider (visible at a glance)
+- Loading state with **spinner animation** while publishing
+- Content preview with **quality-score-colored left border** (green/yellow/red)
+- Content metadata as **badge chips** (plugin, category, AI, score, tokens)
+- Source URL as clickable link
+- JSON report collapsed in `<details>` tag (less visual clutter)
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.6.2 → 11.6.3 |
+| `package.json` | version 11.6.3 |
+| `src/core/constants.ts` | APP_VERSION = "11.6.3" |
+| `src/services/final-publisher.ts` | Expanded provider logos (reddit, dev.to, xkcd, nasa, wikipedia, stackexchange) |
+| `src/core/config/sections/ai.ts` | Added migrate() to bump maxTokens < 3096 → 3096 |
+| `src/entry/manager.ts` | Complete redesign of loadPost() and postToChannel() |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.6.3
+
+---
+
 ## [11.6.2] — 2026-07-20 — GitHub Repo Extraction + AI Truncation Fix + github-events Fallback
 
 ### 🔴 Critical Fixes

@@ -335,15 +335,24 @@ export class FinalPublisher {
       }
 
       // v11.6.1: Case 5: Known provider logos (for sites that block CF Workers).
-      // These are hosted on Wikimedia Commons (doesn't block CF IPs).
-      // Using PNG/JPG versions (Telegram doesn't support SVG in sendPhoto).
+      // v11.6.3: Expanded to cover ALL providers. Clearbit logos work from CF Workers.
       const providerLogos: Record<string, string> = {
         "openai.com": "https://logo.clearbit.com/openai.com",
         "blog.cloudflare.com": "https://logo.clearbit.com/cloudflare.com",
         "huggingface.co": "https://logo.clearbit.com/huggingface.co",
         "news.ycombinator.com": "https://logo.clearbit.com/ycombinator.com",
         "stackoverflow.com": "https://logo.clearbit.com/stackoverflow.com",
+        "stackexchange.com": "https://logo.clearbit.com/stackexchange.com",
         "www.producthunt.com": "https://logo.clearbit.com/producthunt.com",
+        "producthunt.com": "https://logo.clearbit.com/producthunt.com",
+        "www.reddit.com": "https://logo.clearbit.com/reddit.com",
+        "reddit.com": "https://logo.clearbit.com/reddit.com",
+        "old.reddit.com": "https://logo.clearbit.com/reddit.com",
+        "dev.to": "https://logo.clearbit.com/dev.to",
+        "xkcd.com": "https://logo.clearbit.com/xkcd.com",
+        "apod.nasa.gov": "https://logo.clearbit.com/nasa.gov",
+        "en.wikipedia.org": "https://logo.clearbit.com/wikipedia.org",
+        "upload.wikimedia.org": "https://logo.clearbit.com/wikipedia.org",
       };
       for (const [domain, logo] of Object.entries(providerLogos)) {
         if (parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)) {

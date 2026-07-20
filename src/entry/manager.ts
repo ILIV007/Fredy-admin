@@ -1469,23 +1469,57 @@ function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;
 async function loadPost(){
   const d=await api("plugins");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error loading plugins</div>';return;}
-  // Only show enabled plugins
   const enabledPlugins=d.plugins.filter(p=>p.enabled);
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">📤 Post to Channel</h3><p style="color:var(--text2);margin-bottom:12px">Select a source API below to fetch content, process it through the AI pipeline, and publish immediately to the channel. The system tries up to 5 items per API until one passes quality. A detailed JSON report will appear at the bottom.</p></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">🔌 Available APIs ('+enabledPlugins.length+' enabled)</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
-  enabledPlugins.map(p=>'<button class="btn" style="text-align:left;padding:10px" onclick="postToChannel('+ "'" +p.id+ "'" +')"><div style="font-weight:600">'+p.name+'</div><div style="font-size:11px;color:var(--text2)">Cat '+p.category+'</div></button>').join("")+
-  '</div></div><div id="post-result"></div>';
+  // v11.6.3: Group by tier
+  const tierS=enabledPlugins.filter(p=>p.tier==="S");
+  const tierA=enabledPlugins.filter(p=>p.tier==="A");
+  const tierB=enabledPlugins.filter(p=>p.tier==="B");
+
+  function pluginCard(p){
+    const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":"var(--text2)";
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:all .2s" onclick="postToChannel('+ "'" +p.id+ "'" +')" onmouseover="this.style.borderColor=\''+tierColor+'\'" onmouseout="this.style.borderColor=\'var(--border)\'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+        '<span style="font-weight:600;font-size:13px">'+p.name+'</span>'+
+        '<span class="badge" style="background:'+tierColor+'20;color:'+tierColor+';font-size:9px">'+p.tier+'</span>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text2);display:flex;gap:8px">'+
+        '<span>📂 Cat '+p.category+'</span>'+
+        (p.lastItemCount!==null&&p.lastItemCount!==undefined?'<span>📦 '+p.lastItemCount+' items</span>':'')+
+      '</div>'+
+    '</div>';
+  }
+
+  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<h3 style="margin:0">📤 Post to Channel</h3>'+
+      '<button class="btn btn-ghost btn-sm" onclick="loadPost()">🔄 Refresh</button>'+
+    '</div>'+
+    '<p style="color:var(--text2);margin-bottom:0;font-size:13px">Select a provider to fetch, process with AI, and publish immediately. Tries up to 5 items per provider.</p>'+
+  '</div>';
+
+  if(tierS.length>0){
+    html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🥇</span><h4 style="margin:0;color:var(--accent)">Tier S — Core ('+tierS.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierS.map(pluginCard).join("")+'</div></div>';
+  }
+  if(tierA.length>0){
+    html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🥈</span><h4 style="margin:0;color:var(--blue)">Tier A — Important ('+tierA.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierA.map(pluginCard).join("")+'</div></div>';
+  }
+  if(tierB.length>0){
+    html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🥉</span><h4 style="margin:0;color:var(--text2)">Tier B — Supporting ('+tierB.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierB.map(pluginCard).join("")+'</div></div>';
+  }
+
+  html+='<div id="post-result"></div>';
+  c.innerHTML=html;
 }
 
 async function postToChannel(pluginId){
   const w=document.getElementById("post-result");
-  w.innerHTML='<div class="card">⏳ Fetching from '+pluginId+' and publishing to channel...</div>';
+  w.innerHTML='<div class="card" style="border:1px solid var(--accent)"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px;animation:spin 1s linear infinite">⏳</span><div><div style="font-weight:600">Publishing from '+pluginId+'</div><div style="color:var(--text2);font-size:12px">Fetching → AI processing → Publishing to channel...</div></div></div></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';
   toast("📤 Posting from "+pluginId+"...");
   try{
     const d=await api("post/channel","POST",{pluginId});
     const jsonStr=JSON.stringify(d,null,2);
     const ok=d.ok;
-    // Build stage summary
+
     let stageHtml="";
     if(d.stages){
       const st=d.stages;
@@ -1496,19 +1530,26 @@ async function postToChannel(pluginId){
       }
       if(st.publish)stageHtml+='<div class="test-result '+(st.publish.ok?'test-pass':'test-fail')+'"><span>'+(st.publish.ok?'✅':'❌')+'</span><span style="font-weight:600">Publish</span><span style="color:var(--text2);flex:1">'+(st.publish.ok?'Msg #'+st.publish.messageId:st.publish.error||'failed')+'</span><span style="color:var(--text2);font-size:11px">'+st.publish.durationMs+'ms</span></div>';
     }
-    // Content preview
     let contentHtml="";
     if(d.content){
-      contentHtml='<div class="card" style="margin-top:8px"><h4 style="margin-bottom:6px">📝 Content Published</h4>'+
-        '<div style="font-size:12px;color:var(--text2);margin-bottom:4px">🔌 <b>Plugin:</b> '+d.content.pluginId+' · 🏷️ <b>Category:</b> '+d.content.category+' · 🤖 <b>AI:</b> '+d.content.aiProvider+'/'+d.content.aiModel+' · '+(d.content.qualityScore>=80?'🟢':d.content.qualityScore>=60?'🟡':'🔴')+' <b>Score:</b> '+d.content.qualityScore+'/100 · 📊 <b>Tokens:</b> '+d.content.tokensUsed+'</div>'+
-        '<div style="background:var(--surface2);padding:8px;border-radius:4px;font-size:12px;max-height:200px;overflow-y:auto">'+escapeHtml(d.content.textPreview||'')+'</div></div>';
+      contentHtml='<div class="card" style="margin-top:8px;border-left:3px solid '+(d.content.qualityScore>=80?'var(--green)':d.content.qualityScore>=60?'var(--yellow)':'var(--red)')+'"><h4 style="margin-bottom:6px">📝 Content Published</h4>'+
+        '<div style="font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px">'+
+          '<span class="badge badge-gray">🔌 '+d.content.pluginId+'</span>'+
+          '<span class="badge badge-gray">🏷️ '+d.content.category+'</span>'+
+          '<span class="badge badge-gray">🤖 '+d.content.aiProvider+'/'+d.content.aiModel+'</span>'+
+          '<span class="badge '+(d.content.qualityScore>=80?'badge-green':d.content.qualityScore>=60?'badge-yellow':'badge-red')+'">'+d.content.qualityScore+'/100</span>'+
+          '<span class="badge badge-gray">📊 '+d.content.tokensUsed+' tokens</span>'+
+        '</div>'+
+        '<div style="background:var(--surface2);padding:12px;border-radius:6px;font-size:13px;max-height:300px;overflow-y:auto;line-height:1.6">'+escapeHtml(d.content.textPreview||'')+'</div>'+
+        (d.content.sourceUrl?'<div style="margin-top:6px;font-size:11px;color:var(--text2)"><b>Source:</b> <a href="'+d.content.sourceUrl+'" target="_blank" style="color:var(--accent)">'+d.content.sourceUrl+'</a></div>':'')+
+      '</div>';
     }
     w.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">'+(ok?'✅ Posted Successfully':'❌ Post Failed')+'</h3><span class="badge '+(ok?'badge-green':'badge-red')+'">'+pluginId+'</span></div>'+
       stageHtml+contentHtml+
-      '<div style="margin-top:12px"><h4 style="margin-bottom:6px">📋 Full JSON Report</h4><pre id="post-json" style="max-height:500px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm" onclick="copyElement('+ "'" +'post-json'+ "'" +')">📋 Copy Report</button></div></div>';
+      '<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:13px;color:var(--text2)">📋 Full JSON Report</summary><pre id="post-json" style="max-height:500px;margin-top:8px">'+escapeHtml(jsonStr)+'</pre><button class="btn btn-sm btn-ghost" onclick="copyElement('+ "'" +'post-json'+ "'" +')" style="margin-top:4px">📋 Copy Report</button></details></div>';
     toast(ok?"✅ Posted to channel!":"❌ Post failed");
   }catch(e){
-    w.innerHTML='<div class="card">❌ Error: '+escapeHtml(String(e))+'</div>';
+    w.innerHTML='<div class="card" style="border:1px solid var(--red)">❌ Error: '+escapeHtml(String(e))+'</div>';
     toast("❌ Error");
   }
 }
