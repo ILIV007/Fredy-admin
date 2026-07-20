@@ -2,6 +2,86 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.13.0] — 2026-07-20 — CRITICAL: Duplicate Detection Complete Refactor (3-Layer)
+
+### 🔴 CRITICAL FIX: Posts Published Again After 5-6 Days
+
+**Root Cause:** The old `DuplicateDetector` had three fatal flaws:
+
+1. **Content hash used `body`** — but body changes with AI rewrite! When AI
+   rewrites content, the body is different → hash is different → dedup fails.
+   This is why the same GitHub repo could be published again days later.
+
+2. **URL hash was raw (not normalized)** — `https://github.com/owner/repo`
+   and `https://github.com/owner/repo/` produced different hashes. URL
+   variations (trailing slash, query params, www. prefix) bypassed dedup.
+
+3. **No canonical ID check** — the system relied entirely on URL + body hash.
+   No stable, content-independent identifier was used.
+
+**Fix: Complete refactor with 3-layer dedup:**
+
+#### Layer 1: Canonical ID (NEW — most reliable)
+- Stable, content-independent identifier per provider
+- Format: `"provider:stableId"` (e.g., `"github:owner/repo"`)
+- Immune to AI rewrites, URL variations, star count changes, ranking changes
+- Extracted from provider metadata, URL patterns, or item IDs
+
+| Provider | Canonical ID |
+|----------|-------------|
+| GitHub | `github:owner/repo` |
+| GitHub Releases | `github-releases:owner/repo:tag` |
+| GitHub Events | `github-events:owner/repo:type:eventId` |
+| GitHub Security | `github-security:GHSA-xxx` |
+| GitHub Trending | `github-trending:owner/repo` |
+| HackerNews | `hackernews-algolia:12345` |
+| Dev.to | `devto:articleId` or `devto:user/slug` |
+| Reddit | `reddit-v2:postId` |
+| Product Hunt | `producthunt:slug` |
+| StackExchange | `stackexchange:questionId` |
+| Cloudflare Blog | `cloudflare-blog:slug` |
+| HuggingFace | `huggingface-blog:slug` |
+| OpenAI News | `openai-news:slug` |
+| NASA | `nasa:date` |
+| XKCD | `xkcd:comicId` |
+
+#### Layer 2: Normalized URL (IMPROVED)
+- URL normalized: trailing slash removed, query params stripped, www. removed, hostname lowercased
+- SHA-1 of normalized URL (was raw URL before)
+- Catches cross-provider duplicates
+
+#### Layer 3: Content Hash (FIXED)
+- Hash of `normalizedUrl + normalizedTitle` (was `body` before!)
+- Body was unreliable because AI rewrites change it
+- Title + URL is stable and content-independent
+
+### Storage: 3 KV entries per published item
+```
+fredy:dedup:canonical:<canonicalId>  → record (NEW)
+fredy:dedup:url:<urlHash>            → record (improved)
+fredy:dedup:hash:<hash>              → record (fixed)
+```
+
+### Logging
+Every duplicate block now logs: provider, canonicalId, hash, age, reason.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.12.0 → 11.13.0 |
+| `package.json` | version 11.13.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.13.0" |
+| `src/services/duplicate-detector.ts` | Complete rewrite — 3-layer dedup |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.13.0
+
+---
+
 ## [11.12.0] — 2026-07-20 — Optimization: KV Writes Reduced + Test Strengthened + Status Report
 
 ### 📊 Optimizations
