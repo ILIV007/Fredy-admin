@@ -2,6 +2,59 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.11.0] — 2026-07-20 — Scheduler Architecture Refactor (Preserve Random Slots)
+
+### 🔄 REVERTED v11.10.0
+
+v11.10.0 biased slot generation toward window start — this was WRONG because:
+- It destroyed randomness (a core Fredy feature)
+- It made posting times predictable
+- It was a workaround, not an architectural fix
+
+v11.11.0 reverts TimeGenerator to fully random (v7 behavior).
+
+### 🏗️ Architecture Fix: One Slot Per Tick
+
+**Root Cause:** v11.2.0 fired ALL due slots in one tick (burst publishing).
+v11.10.0 biased slots to compensate. Both were wrong.
+
+**Fix:** `findDueSlot()` (singular) returns the **OLDEST pending due slot** —
+one per tick. This means:
+- Random slot times are fully preserved
+- One post per cron tick (no burst)
+- Missed slots fire on the next tick (grace period)
+- No duplicate publishing
+
+### Timeline Example
+
+```
+Slot: 13:22 (random in 12:00-14:00 window)
+12:00 tick: not yet due → skip
+14:00 tick: due → fire (38min delay — inherent to 2h cron)
+```
+
+The "delay" is NOT a bug — it's inherent to the 2-hour cron architecture.
+Average delay: ~60 minutes. Range: 0-120 minutes.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.10.0 → 11.11.0 |
+| `package.json` | version 11.11.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.11.0" |
+| `src/services/time-generator.ts` | REVERTED bias — fully random (v7 behavior) |
+| `src/services/scheduler-service.ts` | findDueSlots→findDueSlot (one per tick, oldest first) |
+| `SCHEDULER_AUDIT_REPORT.md` | Updated with v11.11.0 architecture |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.11.0
+
+---
+
 ## [11.10.0] — 2026-07-20 — CRITICAL: Slot Generation Aligned to Cron Tick Boundaries
 
 ### 🔴 CRITICAL FIX: Scheduler Publishing Late

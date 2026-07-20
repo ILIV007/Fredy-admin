@@ -188,9 +188,10 @@ export class SchedulerService {
       };
     }
 
-    // 3. Find ALL due, unfired slots (v11.2.0: was findDueSlot returning ONE slot;
-    //    now findDueSlots returns ALL due-within-grace slots to prevent pile-up loss).
-    // v11.9.0: Add detailed timing log for debugging.
+    // 3. v11.11.0: Window-based scheduling — find the OLDEST pending due slot.
+    //    Only fire ONE slot per tick to prevent burst publishing.
+    //    If a slot was missed (cron gap), it fires on the next tick.
+    //    Random slot times are preserved — the scheduler adapts to them.
     this.deps.logger.info("scheduler.tick", {
       now: new Date(now).toISOString(),
       nowEpoch: now,
@@ -205,8 +206,8 @@ export class SchedulerService {
       message: "Scheduler tick — checking slots",
     });
 
-    const dueSlots = await this.findDueSlots(plan, now);
-    if (dueSlots.length === 0) {
+    const dueSlot = await this.findDueSlot(plan, now);
+    if (!dueSlot) {
       this.deps.logger.info("scheduler.skip", {
         reason: "no_due_slots",
         slotsChecked: plan.slots.length,
@@ -222,51 +223,37 @@ export class SchedulerService {
       };
     }
 
-    // 4. Fire ALL due slots (v11.2.0: previously only the FIRST due slot fired,
-    //    causing pile-up loss when multiple slots fell between two 2h ticks).
-    //    Now we loop through all due slots and fire each one.
-    let lastResult: PublishResult | null = null;
-    let lastSlot: SlotTime | null = null;
-    let firedCount = 0;
-    for (const slot of dueSlots) {
-      const result = await this.fireSlot(slot);
-      lastResult = result;
-      lastSlot = slot;
-      if (result.ok) firedCount++;
-    }
+    // 4. Fire the oldest pending due slot.
+    const publishResult = await this.fireSlot(dueSlot);
 
     return {
-      fired: firedCount > 0,
-      slot: lastSlot,
+      fired: publishResult.ok,
+      slot: dueSlot,
       job: null,
-      published: lastResult?.ok ? lastResult : null,
-      skipped: firedCount === 0,
-      skipReason: firedCount === 0 ? lastResult?.error : undefined,
+      published: publishResult.ok ? publishResult : null,
+      skipped: !publishResult.ok,
+      skipReason: publishResult.ok ? undefined : publishResult.error,
     };
   }
 
   /**
-   * Find ALL due, unfired slots within the grace period.
+   * v11.11.0: Find the OLDEST pending due slot within the grace period.
    *
-   * v11.2.0: CRITICAL FIX — previously findDueSlot returned only the FIRST due
-   * slot. If multiple slots fell between two 2h ticks, only one fired and the
-   * rest waited another 2h, potentially exceeding the grace period and being
-   * permanently marked "failed". Now returns ALL due-within-grace slots so
-   * tick() can fire them all in one pass.
+   * Architecture change:
+   * - v11.2.0 fired ALL due slots (could cause burst publishing)
+   * - v11.11.0 fires ONE slot per tick (oldest first)
    *
-   * v8.5.1: When using strategyEngine plan, check the post's `status` field
-   * directly (not dailyPlanner.isSlotFired). This ensures the Daily Plan
-   * status is the single source of truth — if a post is "published" or
-   * "failed" in the strategy plan, it's skipped.
+   * This ensures:
+   * - Random slot times are preserved (no bias needed)
+   * - One post per cron tick (no burst)
+   * - Missed slots fire on next tick (grace period)
+   * - No duplicate publishing
+   *
+   * The scheduler adapts to the random slot times, NOT the other way around.
    */
-  private async findDueSlots(plan: DailyPlan, now: number): Promise<readonly SlotTime[]> {
-    // v11.2.0: Increased from 3h to 4h — covers one missed cron cycle safely.
-    // External cron fires every 2h. If cron-job.org misses one cycle (4h gap),
-    // slots are still within grace. Previous 3h was borderline: 2h gap + 30min
-    // jitter = 2h30m, leaving only 30min margin.
-    const GRACE_PERIOD_MS = 240 * 60 * 1000; // 4 hours (v11.2.0)
+  private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
+    const GRACE_PERIOD_MS = 240 * 60 * 1000; // 4 hours
 
-    // v8.5.1: If using strategyEngine, get the plan to check post statuses.
     let stratPlan: import("../types/strategy").DailyPublishPlan | null = null;
     if (this.deps.strategyEngine) {
       try {
@@ -274,48 +261,31 @@ export class SchedulerService {
       } catch { /* non-fatal */ }
     }
 
-    const dueSlots: SlotTime[] = [];
-
+    // Iterate slots in chronological order (oldest first).
+    // Return the FIRST pending due slot — one per tick.
     for (const slot of plan.slots) {
-      // Check if slot is due (epochMs <= now).
+      // Skip slots not yet due.
       if (slot.epochMs > now) {
-        this.deps.logger.info("scheduler.skip", {
-          slotIndex: slot.index,
-          time: slot.time,
-          reason: "not_yet_due",
-          epochMs: slot.epochMs,
-          now,
-          message: `Slot ${slot.index} not yet due (scheduled ${slot.time}, now ${new Date(now).toISOString()})`,
-        });
         continue;
       }
 
-      // v8.5.1: Check if already fired — use strategy plan status if available,
-      // otherwise fall back to dailyPlanner.isSlotFired().
+      // Check if already fired.
       let alreadyFired = false;
       if (stratPlan) {
         const post = stratPlan.posts.find(p => p.index === slot.index);
         if (post && (post.status === "published" || post.status === "failed" || post.status === "backup" || post.status === "publishing")) {
           alreadyFired = true;
-          this.deps.logger.info("scheduler.skip", {
-            slotIndex: slot.index,
-            time: slot.time,
-            reason: "already_fired",
-            status: post.status,
-            message: `Slot ${slot.index} already ${post.status}`,
-          });
         }
       } else {
         alreadyFired = await this.deps.dailyPlanner.isSlotFired(slot);
       }
       if (alreadyFired) continue;
 
-      // v11.2.0: Grace period — if slot is too far overdue, mark as failed.
-      // Also send admin PM so the admin knows a slot was lost (previously silent).
+      // Grace period — if slot is too far overdue, mark as failed.
       if (now - slot.epochMs > GRACE_PERIOD_MS) {
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: `Slot >4h overdue — marked as passed (grace period). Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
+            error: `Slot >4h overdue — grace period exceeded. Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
             stage: "grace",
             plugin: null,
           }).catch(() => {});
@@ -330,12 +300,11 @@ export class SchedulerService {
           overdueHours: Math.round((now - slot.epochMs) / (60 * 60 * 1000) * 10) / 10,
           message: "Slot >4h overdue — marking as passed",
         });
-        // v11.2.0: Send admin PM for grace failures (previously silent).
         await this.notifyAdminOfGraceFailure(slot, now).catch(() => {});
         continue;
       }
 
-      // Slot is due, not fired, within grace — add to the fire list!
+      // Found the oldest pending due slot — return it.
       this.deps.logger.info("scheduler.slot_fired", {
         slotIndex: slot.index,
         time: slot.time,
@@ -343,9 +312,9 @@ export class SchedulerService {
         overdue: Math.round((now - slot.epochMs) / 60000) + "min",
         message: `Firing slot ${slot.index} (${slot.time}, ${Math.round((now - slot.epochMs) / 60000)}min overdue)`,
       });
-      dueSlots.push(slot);
+      return slot;
     }
-    return dueSlots;
+    return null;
   }
 
   /**
