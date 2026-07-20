@@ -32,19 +32,38 @@ export const planCommand: Command = {
       const completed = plan.posts.filter((p) => p.status === "published" || p.status === "backup").length;
       const failed = plan.posts.filter((p) => p.status === "failed").length;
       const pending = plan.posts.filter((p) => p.status === "pending").length;
-      const dueNow = plan.posts.filter((p) => p.status === "pending" && p.epochMs <= now).length;
 
-      let html = `<b>━━━ 📋 Daily Plan (${today}) ━━━</b>\n\n`;
+      // v12.0.2: Compute "due now" using exact scheduledTime (no tolerance).
+      const nowInTz = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date(now));
+      const [nowH, nowM] = nowInTz.split(":").map(Number);
+      const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+      const dueNow = plan.posts.filter((p) => {
+        if (p.status !== "pending") return false;
+        const schedTime = p.scheduledTime ?? p.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes >= schedMin;
+      }).length;
+
+      let html = `<b>━━━ 📋 Daily Plan (${today}) — v12 ━━━</b>\n\n`;
       html += `<blockquote>📊 Total: ${plan.posts.length} | ✅ ${completed} | ⏳ ${pending} | ⚠️ Due: ${dueNow} | ❌ ${failed}</blockquote>\n`;
       html += `<blockquote>🎯 Strategy: ${plan.strategy}</blockquote>\n\n`;
 
+      // v12: Show Window | 🎯 Scheduled | Cat | Provider per slot
       for (const post of plan.posts) {
-        const overdue = post.epochMs <= now && post.status === "pending"
-          ? ` (${Math.round((now - post.epochMs) / 60000)}m overdue)`
+        const schedTime = post.scheduledTime ?? post.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        const overdue = (post.status === "pending" && nowMinutes >= schedMin)
+          ? ` (${Math.max(0, nowMinutes - schedMin)}m overdue)`
           : "";
         const emoji = statusEmojis[post.status] ?? "❓";
         const provider = post.provider ?? "—";
-        html += `<blockquote>${emoji} #${post.index} ${post.time} ${post.category} ${escapeHtml(provider)}${overdue}</blockquote>\n`;
+        const window = `${post.time}-${post.windowEnd ?? post.time}`;
+        html += `<blockquote>${emoji} #${post.index} 🪟${window} 🎯${schedTime} ${post.category} ${escapeHtml(provider)}${overdue}</blockquote>\n`;
       }
 
       if (dueNow > 0) {

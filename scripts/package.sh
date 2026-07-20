@@ -1,7 +1,10 @@
 #!/bin/bash
-# package.sh — Bundle Fredy source into deliverables (zip + FULL.md)
+# package.sh — Bundle Fredy source into deliverables
+# Produces 2 ZIP files:
+#   1. Fredy-admin-v<ver>.zip      — source code (root folder = Fredy-admin/)
+#   2. Fredy-admin-v<ver>-FULL.zip — FULL.md bundle (single concatenated doc)
 # Usage: bash scripts/package.sh <version>
-# Example: bash scripts/package.sh 12.0.0
+# Example: bash scripts/package.sh 12.0.5
 
 set -e
 
@@ -13,29 +16,42 @@ STAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
 mkdir -p "$OUT_DIR"
 
 ZIP_NAME="Fredy-admin-v${VERSION}.zip"
-FULL_NAME="Fredy-admin-v${VERSION}-FULL.md"
+FULL_MD_NAME="Fredy-admin-v${VERSION}-FULL.md"
+FULL_ZIP_NAME="Fredy-admin-v${VERSION}-FULL.zip"
 
 echo "=== Packaging Fredy v${VERSION} ==="
 echo "Source: $PROJECT_DIR"
 echo "Output: $OUT_DIR"
 echo ""
 
-# ── 1. Create ZIP (source files only, no node_modules/.wrangler) ──
-echo ">>> Creating $ZIP_NAME ..."
-cd "$PROJECT_DIR"
-zip -r -q "$OUT_DIR/$ZIP_NAME" . \
-  -x "node_modules/*" \
-  -x ".wrangler/*" \
-  -x "*.tsbuildinfo" \
-  -x ".git/*" \
-  -x "package-lock.json" \
+# ════════════════════════════════════════════════════════════
+# 1. Source ZIP — root folder is "Fredy-admin/" (NOT flat)
+# ════════════════════════════════════════════════════════════
+echo ">>> Creating $ZIP_NAME (root: Fredy-admin/) ..."
+# Strategy: cd to parent, zip the Fredy-admin folder by name.
+# This ensures extracted files are under Fredy-admin/ — not dumped flat.
+cd "$PROJECT_DIR/.."
+rm -f "$OUT_DIR/$ZIP_NAME"
+zip -r -q "$OUT_DIR/$ZIP_NAME" "Fredy-admin" \
+  -x "Fredy-admin/node_modules/*" \
+  -x "Fredy-admin/.wrangler/*" \
+  -x "Fredy-admin/*.tsbuildinfo" \
+  -x "Fredy-admin/.git/*" \
+  -x "Fredy-admin/package-lock.json" \
+  -x "Fredy-admin/bun.lock" \
   2>/dev/null || true
 
 ZIP_SIZE=$(du -h "$OUT_DIR/$ZIP_NAME" | cut -f1)
-echo "    ✅ $ZIP_NAME ($ZIP_SIZE)"
+echo "    ✅ $ZIP_NAME ($ZIP_SIZE, root=Fredy-admin/)"
 
-# ── 2. Create FULL.md (concatenated source) ──
-echo ">>> Creating $FULL_NAME ..."
+# Verify the root folder structure
+echo -n "    Verify root: "
+unzip -l "$OUT_DIR/$ZIP_NAME" 2>/dev/null | head -5 | grep -o "Fredy-admin/" | head -1 && echo " ✅" || echo " ❌ NO ROOT FOLDER!"
+
+# ════════════════════════════════════════════════════════════
+# 2. Create FULL.md (concatenated source — single document)
+# ════════════════════════════════════════════════════════════
+echo ">>> Creating $FULL_MD_NAME ..."
 
 # Collect file list (sorted, excluding node_modules and binaries)
 FILES=$(cd "$PROJECT_DIR" && find . \
@@ -101,12 +117,22 @@ done | awk '{s+=$1} END {print s}')
       echo ""
     fi
   done
-} > "$OUT_DIR/$FULL_NAME"
+} > "$OUT_DIR/$FULL_MD_NAME"
 
-FULL_SIZE=$(du -h "$OUT_DIR/$FULL_NAME" | cut -f1)
-echo "    ✅ $FULL_NAME ($FULL_SIZE, ${FILE_COUNT} files, ${LINE_COUNT} lines)"
+FULL_MD_SIZE=$(du -h "$OUT_DIR/$FULL_MD_NAME" | cut -f1)
+echo "    ✅ $FULL_MD_NAME ($FULL_MD_SIZE, ${FILE_COUNT} files, ${LINE_COUNT} lines)"
+
+# ════════════════════════════════════════════════════════════
+# 3. FULL ZIP — the FULL.md wrapped in a zip (root = FULL.md)
+# ════════════════════════════════════════════════════════════
+echo ">>> Creating $FULL_ZIP_NAME ..."
+rm -f "$OUT_DIR/$FULL_ZIP_NAME"
+cd "$OUT_DIR"
+zip -q "$FULL_ZIP_NAME" "$FULL_MD_NAME"
+FULL_ZIP_SIZE=$(du -h "$OUT_DIR/$FULL_ZIP_NAME" | cut -f1)
+echo "    ✅ $FULL_ZIP_NAME ($FULL_ZIP_SIZE)"
 
 echo ""
 echo "=== Packaging complete ==="
-echo "Deliverables:"
-ls -lh "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$FULL_NAME"
+echo "Deliverables (3 files):"
+ls -lh "$OUT_DIR/$ZIP_NAME" "$OUT_DIR/$FULL_MD_NAME" "$OUT_DIR/$FULL_ZIP_NAME"

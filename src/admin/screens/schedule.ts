@@ -18,7 +18,7 @@ export const scheduleScreen: Screen = {
     const sched = ctx.settings.scheduler;
     const status = await ctx.container.scheduler.status();
 
-    // v8.4.0: Fetch strategy plan for Daily Plan table.
+    // v12: Fetch strategy plan for Daily Plan table (Window | Scheduled format).
     let dailyPlanHtml = "";
     try {
       const plan = await ctx.container.strategyEngine.getOrGeneratePlan();
@@ -30,32 +30,37 @@ export const scheduleScreen: Screen = {
             const firedSlot = status.today.slots.find(sl => sl.index === p.index);
             if (firedSlot && firedSlot.fired) s = "published";
           }
-          const icon = s === "published" ? "✅" : s === "failed" ? "⏭️" : "⏳";
-          return `${icon} ${p.time} | ${p.category} | ${p.provider || "—"}`;
+          const icon = s === "published" ? "✅" : s === "failed" ? "⏭️" : s === "backup" ? "♻️" : s === "publishing" ? "🔄" : "⏳";
+          // v12: Show Window | 🎯 Scheduled | Cat | Provider
+          const win = `${p.time}-${p.windowEnd ?? p.time}`;
+          const sched = p.scheduledTime ?? p.time;
+          return `${icon} #${p.index} 🪟${win} 🎯${sched} | ${p.category} | ${p.provider || "—"}`;
         });
-        dailyPlanHtml = `\n${header("Daily Plan", "📋")}\n${statusLines.join("\n")}\n`;
+        dailyPlanHtml = `\n${header("Daily Plan (v12)", "📋")}\n${statusLines.join("\n")}\n`;
       }
     } catch { /* non-fatal */ }
 
     return [
-      header("Scheduler", "📅"),
+      header("Scheduler (v12)", "📅"),
       "",
       kv("Enabled", statusBadge(sched.enabled)),
       kv("Timezone", sched.timezone),
-      kv("Slots", sched.slots.join(", ")),
+      kv("Posting windows", sched.postingWindows.length || "(any time)"),
+      kv("Quiet hours", sched.quietHours ? `${sched.quietHours.start}–${sched.quietHours.end}` : "(none)"),
+      kv("Legacy slots", sched.slots.join(", ")),
       kv("Jitter", `±${sched.jitterMinutes} min`),
+      kv("Min gap", `${sched.minGapMinutes} min`),
       kv("Burst posting", statusBadge(sched.burstPosting)),
       kv("Skip low quality", statusBadge(sched.skipIfLowQuality)),
-      kv("Posting windows", sched.postingWindows.length || "(any time)"),
       "",
       header("Status", "📊"),
-      kv("Next slot", status.nextSlot ? formatTime(status.nextSlot.epochMs) : "(none)"),
+      kv("Next slot", status.nextSlot ? `${status.nextSlot.scheduledTime ?? status.nextSlot.time}` : "(none)"),
       kv("Posts today", status.postsPublishedToday ?? 0),
       kv("Queue depth", status.queueDepth),
       kv("Last fired", formatTime(status.lastFiredAt)),
       dailyPlanHtml,
       divider(),
-      "<i>Tap toggles and steppers to configure.</i>",
+      "<i>v12: Window + Random Jitter + Three-Layer Cron. Tap toggles to configure.</i>",
     ].join("\n");
   },
 
