@@ -141,10 +141,11 @@ export interface PipelineResult {
   readonly stage: PipelineStage;
   readonly error?: string;
   readonly rejectedReason?: RejectionReason;
-  /** When the item is a duplicate, info about the previously-published item. */
+  /** When the item is a duplicate, info about the previously-published item.
+   *  v11.13.0: Added "canonical" reason (Layer 1 — canonical ID match). */
   readonly duplicateOf?: {
     readonly contentId: string;
-    readonly reason: "url" | "hash" | "title";
+    readonly reason: "canonical" | "url" | "hash" | "title";
   };
   /** AI debug info (when AI fails or format-only fallback is used). */
   readonly aiDebug?: {
@@ -197,10 +198,11 @@ export interface DedupRecord {
   readonly expiresAt: number;
 }
 
-/** Result of a duplicate check. */
+/** Result of a duplicate check.
+ *  v11.13.0: Added "canonical" reason (Layer 1 — canonical ID match). */
 export interface DuplicateCheckResult {
   readonly isDuplicate: boolean;
-  readonly reason: "url" | "hash" | "title" | null;
+  readonly reason: "canonical" | "url" | "hash" | "title" | null;
   readonly existingId: string | null;
 }
 

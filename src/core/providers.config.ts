@@ -62,15 +62,15 @@ export interface ProviderConfigEntry {
   /** Homepage URL. */
   readonly homepage: string;
 
-  // ─── v11.6.0: Provider Display Metadata ───
-  /** Icon emoji for the footer (e.g., "☁️", "🐙"). */
-  readonly displayIcon: string;
+  // ─── v11.6.0: Provider Display Metadata (v12.0.0: optional — resolved at runtime) ───
+  /** Icon emoji for the footer (e.g., "☁️", "🐙"). Defaults to "🔗" if omitted. */
+  readonly displayIcon?: string;
 
-  /** Display label (e.g., "Cloudflare Blog", "microsoft/vscode"). Null = extract from URL. */
-  readonly displaySource: string | null;
+  /** Display label (e.g., "Cloudflare Blog", "microsoft/vscode"). Null/omitted = extract from URL. */
+  readonly displaySource?: string | null;
 
-  /** Whether to extract owner/repo from URL (GitHub providers). */
-  readonly extractRepoFromUrl: boolean;
+  /** Whether to extract owner/repo from URL (GitHub providers). Defaults to false. */
+  readonly extractRepoFromUrl?: boolean;
   /** API docs URL. */
   readonly docsUrl: string;
 }

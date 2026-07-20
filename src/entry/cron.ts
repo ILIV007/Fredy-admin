@@ -1,33 +1,32 @@
 /**
  * src/entry/cron.ts
- * Cloudflare cron trigger handler (24-hour backup).
+ * v12.0.0 — Three-Layer Cron Router.
  *
- * Architecture:
- *   - Primary scheduler: external service (cron-job.org) calls /internal/tick
- *     every 2 hours. This is the main driver.
- *   - Backup scheduler: Cloudflare internal cron fires every 24 hours
- *     (`0 0 * * *`, midnight UTC). Runs the full tick as a safety net.
+ * Routes Cloudflare cron events to the appropriate layer handler:
  *
- * Stale-tick detection lives INSIDE tick.ts (not here) — see v9.2.2. Each
- * tick reads LAST_TICK_KEY before overwriting it; if the gap exceeds ~5h,
- * a single admin PM is sent. This adds zero extra triggers and zero extra
- * KV writes on the happy path.
+ *   ┌─────────────────────────────────────────────────────────────┐
+ *   │  every 20 min     →  Layer 1: Scheduler Watcher              │
+ *   │                     (check due posts, publish if ready)      │
+ *   ├─────────────────────────────────────────────────────────────┤
+ *   │  every 2 hours    →  Layer 2: Provider Refresh              │
+ *   │                     (fetch content, maintain queues)         │
+ *   ├─────────────────────────────────────────────────────────────┤
+ *   │  every 24 hours   →  Layer 3: Daily Maintenance             │
+ *   │                     (generate plan, cleanup, reset)          │
+ *   └─────────────────────────────────────────────────────────────┘
  *
- * Complementary (free, outside Cloudflare): cron-job.org has a built-in
- * "alert me if this job doesn't run" feature. Enable it on the dashboard
- * for instant failure detection with zero code.
+ * Each layer is independent and has a single responsibility.
+ * See V12_ARCHITECTURE.md for the full design.
  *
- * The handler also runs the silent scheduling fallback queue:
- *   List due messages from KV (fredy:sched:queue:...) and send them via
- *   TelegramService.publishToChannel. This catches messages that Telegram
- *   silently failed to schedule (returned ok:true but sent immediately).
- *
- * See ARCHITECTURE_RULES.md section 3.1, 21.8.
+ * BACKWARD COMPATIBILITY:
+ *   The `processScheduledQueue` function is still exported here for
+ *   use by the manual /internal/tick endpoint and the debug dashboard.
  */
 
 import type { Container, Env } from "../types/env";
-import { SchedulerOrchestrator } from "../orchestrators/scheduler";
-import { acquireTickLock } from "../services/tick-lock";
+import { cronSchedulerHandler } from "./cron-scheduler";
+import { cronProvidersHandler } from "./cron-providers";
+import { cronMaintenanceHandler } from "./cron-maintenance";
 
 export interface CronHandlerDeps {
   readonly env: Env;
@@ -35,42 +34,37 @@ export interface CronHandlerDeps {
   readonly ctx: ExecutionContext;
 }
 
+/**
+ * Main cron router. Dispatches to the correct layer based on the cron expression.
+ */
 export async function cronHandler(
   event: ScheduledEvent,
   deps: CronHandlerDeps,
 ): Promise<void> {
   const { env, container, ctx } = deps;
 
-  // 24-hour backup cron — runs the full tick as a safety net.
-  // v8.10.3: Fixed cron string from "0 */24 * * *" (invalid on Cloudflare)
-  // to "0 0 * * *" (midnight UTC daily).
-  if (event.cron === "0 0 * * *") {
-    ctx.waitUntil(processScheduledQueue(env, container));
-    ctx.waitUntil(
-      (async () => {
-        const lock = await acquireTickLock(container.kv, 90);
-        if (!lock.acquired) {
-          console.log("[cron] tick lock held — skipping");
-          return;
-        }
-        try {
-          const scheduler = new SchedulerOrchestrator(container);
-          const result = await scheduler.tick();
-          if (result.fired) {
-            console.log("[cron-24h] slot fired:", result.slot?.category);
-          } else if (result.skipped) {
-            console.log("[cron-24h] slot skipped:", result.skipReason);
-          }
-        } finally {
-          await lock.release();
-        }
-      })(),
-    );
+  // ── Layer 1: Scheduler Watcher (every 20 minutes) ────
+  // The primary publishing trigger. Lightweight — 0 KV writes on no-due path.
+  if (event.cron === "*/20 * * * *") {
+    await cronSchedulerHandler({ env, container, ctx });
     return;
   }
 
-  // v9.2.2: Removed the v9.2.1 */30 * * * * branch. Stale-tick detection
-  // moved into tick.ts (no extra trigger, no extra KV writes on happy path).
+  // ── Layer 2: Provider Refresh (every 2 hours) ────
+  // Fetches content, maintains queue depth. Does NOT publish.
+  if (event.cron === "0 */2 * * *") {
+    await cronProvidersHandler({ env, container, ctx });
+    return;
+  }
+
+  // ── Layer 3: Daily Maintenance (every 24 hours) ────
+  // Generates tomorrow's plan, cleans KV, resets counters.
+  if (event.cron === "0 0 * * *") {
+    await cronMaintenanceHandler({ env, container, ctx });
+    return;
+  }
+
+  // Unknown cron expression — log for debugging.
   console.warn(`[cron] unrecognised cron expression: ${event.cron}`);
 }
 
@@ -78,13 +72,14 @@ export async function cronHandler(
  * Process the silent scheduling fallback queue.
  * Sends messages that Telegram failed to schedule natively.
  *
- * This is a separate function so it can also be triggered manually
- * from the debug dashboard (POST /debug/api/test/cron).
+ * This is exported so it can be called from:
+ *   - Layer 1 scheduler watcher (every 20 min)
+ *   - The manual /internal/tick endpoint
+ *   - The debug dashboard (POST /debug/api/test/cron)
  */
 export async function processScheduledQueue(env: Env, container: Container): Promise<void> {
   const due = await container.kv.listDueScheduled();
   if (due.length === 0) return;
-
 
   for (const item of due) {
     try {
@@ -122,7 +117,7 @@ export async function processScheduledQueue(env: Env, container: Container): Pro
     }
   }
 
-  // Flush batched stats after the cron run.
+  // Flush batched stats after the run.
   await container.kv.flushAllStats();
   void env;
 }

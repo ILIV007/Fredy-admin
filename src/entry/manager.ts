@@ -650,7 +650,7 @@ export async function managerHandler(
       const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
 
       // v11.16.0: Window-based analysis — no epochMs comparison.
-      const tz = settings.scheduler.timezone || "UTC";
+      // v12.0.0: Fixed duplicate `const tz` — reuse the one declared above.
       const nowInTz = new Intl.DateTimeFormat("en-US", {
         timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
       }).format(new Date(now));
@@ -731,30 +731,59 @@ export async function managerHandler(
           dueNow: dueNow.length,
           failed: failed.length,
           publishing: publishing.length,
-          slots: slots.map((s) => ({
+          slots: slots.map((s) => {
+            // v12.0.0: Calculate overdue minutes for each slot.
+            const schedTime = s.scheduledTime ?? s.time;
+            const [sH, sM] = schedTime.split(":").map(Number);
+            const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+            const overdueMin = (s.status === "pending") ? Math.max(0, nowMinutes - schedMin) : 0;
+            return {
+              index: s.index,
+              window: `${s.time}-${s.windowEnd ?? s.time}`,
+              scheduledTime: schedTime,  // v12.0.0: the REAL publish trigger
+              time: s.time,
+              windowEnd: s.windowEnd ?? s.time,
+              category: s.category,
+              status: s.status,
+              provider: s.provider,
+              error: s.error ?? null,
+              overdueMinutes: overdueMin,
+            };
+          }),
+        } : null,
+        nextSlot: nextSlot ? (() => {
+          // v12.0.0: Calculate remaining minutes until scheduledTime.
+          const schedTime = nextSlot.scheduledTime ?? nextSlot.time;
+          const [sH, sM] = schedTime.split(":").map(Number);
+          const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+          const remainingMin = schedMin - nowMinutes;
+          return {
+            index: nextSlot.index,
+            window: `${nextSlot.time}-${nextSlot.windowEnd ?? nextSlot.time}`,
+            time: nextSlot.time,
+            windowEnd: nextSlot.windowEnd ?? nextSlot.time,
+            scheduledTime: schedTime,  // v12.0.0: the REAL publish trigger
+            category: nextSlot.category,
+            inMinutes: remainingMin,
+            remainingLabel: remainingMin > 0
+              ? (remainingMin >= 60 ? `${Math.floor(remainingMin / 60)}h ${remainingMin % 60}m` : `${remainingMin}m`)
+              : "due now",
+          };
+        })() : null,
+        dueSlots: dueNow.map((s) => {
+          // v12.0.0: Include scheduledTime + overdue in the due-slots list.
+          const schedTime = s.scheduledTime ?? s.time;
+          const [sH, sM] = schedTime.split(":").map(Number);
+          const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+          const overdueMin = nowMinutes - schedMin;
+          return {
             index: s.index,
             window: `${s.time}-${s.windowEnd ?? s.time}`,
-            scheduledTime: s.scheduledTime ?? s.time,  // v11.17.0: display-only
-            time: s.time,
-            windowEnd: s.windowEnd ?? s.time,
+            scheduledTime: schedTime,
             category: s.category,
-            status: s.status,
-            provider: s.provider,
-            error: s.error ?? null,
-          })),
-        } : null,
-        nextSlot: nextSlot ? {
-          index: nextSlot.index,
-          window: `${nextSlot.time}-${nextSlot.windowEnd ?? nextSlot.time}`,
-          time: nextSlot.time,
-          windowEnd: nextSlot.windowEnd ?? nextSlot.time,
-          category: nextSlot.category,
-        } : null,
-        dueSlots: dueNow.map((s) => ({
-          index: s.index,
-          window: `${s.time}-${s.windowEnd ?? s.time}`,
-          category: s.category,
-        })),
+            overdueMinutes: Math.max(0, overdueMin),
+          };
+        }),
         lock: {
           held: lockHeld,
           value: lockValue,
@@ -773,6 +802,27 @@ export async function managerHandler(
         providerEngine: engineSummary,
         gracePeriodHours: 4, // v11.2.0
         staleTickThresholdHours: 3, // v11.2.0
+        // v12.0.1: Cron Optimization — Quiet Hours Guard status.
+        // Computed synchronously from settings + current time (no extra KV read).
+        cronOptimization: (() => {
+          const qh = settings.scheduler.quietHours;
+          const isQuiet = container.quietHoursChecker?.isQuietHours(now, settings.scheduler) ?? false;
+          return {
+            enabled: true,
+            quietHoursGuard: true,
+            currentState: isQuiet ? "sleeping" : "active",
+            reason: isQuiet ? "quiet_hours" : null,
+            quietHours: qh ? `${qh.start}-${qh.end}` : null,
+            nextActiveTime: qh?.end ?? null,
+            localTime: localTime,
+            timezone: tz,
+          };
+        })(),
+        // v12.0.1: Last quiet-skip marker (written by cron-scheduler.ts during quiet hours).
+        lastQuietSkip: await container.kv.getJson<{
+          time: number; localTime: string; timezone: string;
+          quietHours: string; nextActiveTime: string;
+        }>("fredy:tick:lastQuietSkip").catch(() => null),
       });
     } catch (error) {
       return json({ ok: false, error: errMsg(error) }, 500);
@@ -1765,7 +1815,7 @@ async function loadSchedulerDebug(){
   const s=d.scheduler;
   const p=d.plan;
   const statusBadge=function(st){const m={"published":"badge-green","failed":"badge-red","backup":"badge-yellow","pending":"badge-blue","publishing":"badge-yellow","skipped":"badge-gray","due":"badge-blue"};return '<span class="badge '+(m[st]||"badge-gray")+'">'+st+'</span>';};
-  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🔬 Scheduler Debug (v11.2.0)</h3><button class="btn btn-ghost btn-sm" onclick="loadSchedulerDebug()">🔄 Refresh</button></div><p style="color:var(--text2);margin-top:8px">Real-time scheduler state. Use this to diagnose missed/late posts.</p></div>';
+  let html='<div class="card" style="border:1px solid var(--accent);background:linear-gradient(135deg,rgba(99,102,241,.1),rgba(129,140,248,.05))"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">🔬 Scheduler Debug (v12.0.1)</h3><button class="btn btn-ghost btn-sm" onclick="loadSchedulerDebug()">🔄 Refresh</button></div><p style="color:var(--text2);margin-top:8px">Three-Layer Cron + Random Jitter + Quiet Hours Guard. scheduledTime is the REAL publish trigger — the 20-min watcher fires on the first tick at or after it.</p></div>';
 
   // Current Time section
   html+='<div class="card"><h3 style="margin-bottom:8px">🕐 Current Time</h3><div class="card-grid">'+
@@ -1789,10 +1839,42 @@ async function loadSchedulerDebug(){
     '</div>';
 
   // Grace & Threshold section
-  html+='<div class="card"><h3 style="margin-bottom:8px">⏰ Grace & Thresholds (v11.2.0)</h3><div class="card-grid">'+
-    card("Grace Period",d.gracePeriodHours+"h")+
+  html+='<div class="card"><h3 style="margin-bottom:8px">⏰ Grace & Thresholds</h3><div class="card-grid">'+
+    card("Window Expiry",d.gracePeriodHours+"h")+
     card("Stale Tick Alert",d.staleTickThresholdHours+"h")+
-    '</div><div style="margin-top:8px;color:var(--text2);font-size:12px">Grace: slots overdue &lt; '+d.gracePeriodHours+'h still fire. Stale: admin alert if tick gap &gt; '+d.staleTickThresholdHours+'h.</div></div>';
+    '</div><div style="margin-top:8px;color:var(--text2);font-size:12px">Window Expiry: slots pending &gt; '+d.gracePeriodHours+'h past window end are marked failed. Stale: admin alert if tick gap &gt; '+d.staleTickThresholdHours+'h.</div></div>';
+
+  // v12.0.0: Three-Layer Cron Architecture
+  html+='<div class="card" style="border:1px solid var(--green)"><h3 style="margin-bottom:8px">🏗️ Three-Layer Cron (v12.0.0)</h3><table style="font-size:12px"><thead><tr><th>Layer</th><th>Schedule</th><th>Responsibility</th><th>KV/tick</th></tr></thead><tbody>'+
+    '<tr><td><b>1️⃣ Scheduler Watcher</b></td><td>every 20 min</td><td>Check due posts → publish</td><td style="color:var(--green)">1 read, 0 writes*</td></tr>'+
+    '<tr><td><b>2️⃣ Provider Refresh</b></td><td>every 2h</td><td>Fetch content, maintain queues</td><td style="color:var(--yellow)">~5 reads, ~3 writes</td></tr>'+
+    '<tr><td><b>3️⃣ Daily Maintenance</b></td><td>every 24h</td><td>Generate plan, cleanup KV</td><td style="color:var(--yellow)">~15 reads, ~10 writes</td></tr>'+
+    '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">* 0 writes on the no-due path — the key optimization. Only ~5 publishes/day trigger KV writes.</div></div>';
+
+  // v12.0.1: Quiet Hours Optimization card
+  if(d.cronOptimization){
+    const co=d.cronOptimization;
+    const isSleeping = co.currentState === 'sleeping';
+    const stateColor = isSleeping ? 'var(--blue)' : 'var(--green)';
+    const stateBg = isSleeping ? 'rgba(59,130,246,.1)' : 'rgba(34,197,94,.1)';
+    let qhHtml='<div class="card" style="border:1px solid '+stateColor+';background:'+stateBg+'"><h3 style="margin-bottom:8px">🌙 Quiet Hours Optimization (v12.0.1)</h3><div class="card-grid">'+
+      card("Status", isSleeping ? '<span class="badge badge-blue">SLEEPING 😴</span>' : '<span class="badge badge-green">ACTIVE ✅</span>')+
+      card("Guard", co.quietHoursGuard?'<span class="badge badge-green">ON</span>':'<span class="badge badge-gray">OFF</span>')+
+      card("Current Time", (co.localTime||'—')+' <span style="color:var(--text2);font-size:11px">'+(co.timezone||'')+'</span>')+
+      card("Quiet Hours", co.quietHours||'—')+
+      card("Scheduler Watcher", isSleeping ? '<span style="color:var(--blue);font-weight:bold">Sleeping</span>' : '<span style="color:var(--green);font-weight:bold">Running</span>')+
+      card("Next Active Time", co.nextActiveTime||'—')+
+      card("Cron", 'Every 20 min')+
+      card("KV Operations", isSleeping ? '<span style="color:var(--green);font-weight:bold">Skipped ✅</span>' : 'Normal')+
+      '</div>';
+    if(d.lastQuietSkip){
+      const ls=d.lastQuietSkip;
+      const skipAgo = Math.round((t.epoch - ls.time)/60000);
+      qhHtml+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🕒 Last skip: <b>'+ls.localTime+'</b> ('+skipAgo+' min ago) — quiet hours '+ls.quietHours+', next active '+ls.nextActiveTime+'</div>';
+    }
+    qhHtml+='<div style="margin-top:6px;color:var(--text2);font-size:11px">💡 During quiet hours, Layer 1 skips all KV operations (0 plan reads, 0 scheduler writes). Manual force-publish still works — it bypasses this guard.</div></div>';
+    html+=qhHtml;
+  }
 
   // Plan Summary section
   if(p){
@@ -1808,23 +1890,25 @@ async function loadSchedulerDebug(){
       '</div></div>';
   }
 
-  // Next Slot
+  // Next Slot (v12.0.0: shows scheduledTime + remaining countdown)
   if(d.nextSlot){
-    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Slot</h3><div class="card-grid">'+
-      card("Index","#"+d.nextSlot.index)+
-      card("Time",d.nextSlot.time)+
-      card("Category",d.nextSlot.category)+
-      card("In",d.nextSlot.inMinutes+"min")+
-      '</div></div>';
+    const ns=d.nextSlot;
+    const remainingColor = ns.inMinutes <= 0 ? 'var(--red)' : (ns.inMinutes <= 20 ? 'var(--yellow)' : 'var(--green)');
+    html+='<div class="card" style="border:1px solid var(--accent)"><h3 style="margin-bottom:8px">⏭️ Next Post</h3><div class="card-grid">'+
+      card("Window",ns.window)+
+      card("🎯 Scheduled",'<span style="color:var(--accent);font-weight:bold;font-size:16px">'+(ns.scheduledTime||ns.time)+'</span>')+
+      card("Category",ns.category)+
+      card("⏳ Remaining",'<span style="color:'+remainingColor+';font-weight:bold">'+(ns.remainingLabel||'—')+'</span>')+
+      '</div><div style="margin-top:8px;color:var(--text2);font-size:12px">The 20-min watcher will publish this on the first tick at or after <b>'+(ns.scheduledTime||ns.time)+'</b>. Expected delay: 0–20 min.</div></div>';
   } else {
-    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Slot</h3><p style="color:var(--text2)">No pending slots remaining today.</p></div>';
+    html+='<div class="card"><h3 style="margin-bottom:8px">⏭️ Next Post</h3><p style="color:var(--text2)">No pending slots remaining today. The 24h maintenance cron will generate tomorrow\'s plan at midnight UTC.</p></div>';
   }
 
-  // Due Slots (CRITICAL — these should fire on next tick)
+  // Due Slots (CRITICAL — these should fire on next 20-min tick)
   if(d.dueSlots&&d.dueSlots.length>0){
-    html+='<div class="card" style="border:1px solid var(--red)"><h3 style="margin-bottom:8px;color:var(--red)">⚠️ Due Slots (will fire on next tick)</h3><table><thead><tr><th>#</th><th>Time</th><th>Overdue</th><th>Category</th></tr></thead><tbody>';
+    html+='<div class="card" style="border:1px solid var(--red)"><h3 style="margin-bottom:8px;color:var(--red)">⚠️ Due Now (will fire on next 20-min watcher tick)</h3><table><thead><tr><th>#</th><th>Window</th><th>Scheduled</th><th>Overdue</th><th>Category</th></tr></thead><tbody>';
     for(const sl of d.dueSlots){
-      html+='<tr><td>#'+sl.index+'</td><td>'+sl.time+'</td><td style="color:'+(sl.overdueMinutes>180?'var(--red)':'var(--yellow)')+';font-weight:bold">'+sl.overdueMinutes+'min</td><td>'+sl.category+'</td></tr>';
+      html+='<tr><td>#'+sl.index+'</td><td>'+sl.window+'</td><td style="color:var(--accent);font-weight:bold">'+(sl.scheduledTime||'—')+'</td><td style="color:'+(sl.overdueMinutes>20?'var(--red)':'var(--yellow)')+';font-weight:bold">'+sl.overdueMinutes+'min</td><td>'+sl.category+'</td></tr>';
     }
     html+='</tbody></table></div>';
   }
@@ -1836,14 +1920,15 @@ async function loadSchedulerDebug(){
     card("Last Publish",d.lastPublish?d.lastPublish.agoMinutes+"min ago":"—")+
     '</div></div>';
 
-  // Full Slot Table
+  // Full Slot Table — v12.0.0: Window | Scheduled | Status columns
   if(p&&p.slots){
-    html+='<div class="card"><h3 style="margin-bottom:8px">📅 All Slots</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Time</th><th>Cat</th><th>Status</th><th>Overdue</th><th>Provider</th><th>Error</th></tr></thead><tbody>';
+    html+='<div class="card"><h3 style="margin-bottom:8px">📅 Daily Plan — Window / Scheduled / Status</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Status</th><th>Overdue</th><th>Provider</th><th>Error</th></tr></thead><tbody>';
     for(const sl of p.slots){
-      const od=sl.overdueMinutes>0?'<span style="color:'+(sl.overdueMinutes>180?'var(--red)':'var(--yellow)')+'">'+sl.overdueMinutes+'m</span>':'—';
-      html+='<tr><td>#'+sl.index+'</td><td>'+sl.time+'</td><td>'+sl.category+'</td><td>'+statusBadge(sl.status)+'</td><td>'+od+'</td><td>'+(sl.provider||"—")+'</td><td style="color:var(--red);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">'+(sl.error||"")+'</td></tr>';
+      const od=sl.overdueMinutes>0?'<span style="color:'+(sl.overdueMinutes>20?'var(--red)':'var(--yellow)')+'">'+sl.overdueMinutes+'m</span>':'—';
+      const schedHighlight = sl.status==='pending' ? 'style="color:var(--accent);font-weight:bold"' : '';
+      html+='<tr><td>#'+sl.index+'</td><td>'+sl.window+'</td><td '+schedHighlight+'>'+(sl.scheduledTime||sl.time)+'</td><td>'+sl.category+'</td><td>'+statusBadge(sl.status)+'</td><td>'+od+'</td><td>'+(sl.provider||"—")+'</td><td style="color:var(--red);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">'+(sl.error||"")+'</td></tr>';
     }
-    html+='</tbody></table></div>';
+    html+='</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = the random time within each window. The 20-min watcher fires on the first tick at or after this time. Different every day = human-like jitter.</div></div>';
   }
 
   // Queue depths

@@ -100,38 +100,10 @@ export class GitHubEventsPlugin implements Plugin {
   getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
-  /** v11.6.2: Extract "owner/repo" from GitHub data for display. */
-  private extractGithubRepo(raw: unknown): string {
-    try {
-      const obj = raw as Record<string, unknown>;
-      if (typeof obj["full_name"] === "string" && obj["full_name"].includes("/")) {
-        return obj["full_name"] as string;
-      }
-      const htmlUrl = obj["html_url"] as string | undefined;
-      if (htmlUrl) {
-        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(htmlUrl);
-        if (match && match[1] && match[2]) {
-          return `${match[1]}/${match[2]}`;
-        }
-      }
-      const url = obj["url"] as string | undefined;
-      if (url) {
-        const apiMatch = /api\.github\.com\/repos\/([^/]+)\/([^/?#]+)/i.exec(url);
-        if (apiMatch && apiMatch[1] && apiMatch[2]) {
-          return `${apiMatch[1]}/${apiMatch[2]}`;
-        }
-        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(url);
-        if (match && match[1] && match[2]) {
-          return `${match[1]}/${match[2]}`;
-        }
-      }
-      const repo = obj["repo"] as { name?: string } | undefined;
-      if (repo?.name && repo.name.includes("/")) {
-        return repo.name;
-      }
-    } catch { /* non-fatal */ }
-    return "GitHub";
-  }
+  /** v11.6.2: Extract "owner/repo" from GitHub data for display.
+   *  v12.0.0: Removed dead code — github-events was refactored to a Discovery
+   *  Provider in v11.14.0 and no longer calls this method. The repo name is
+   *  now extracted inline during fetch() via the repo detail API response. */
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "github-events" });

@@ -517,7 +517,7 @@ export class ContentManager {
     reason: RejectionReason,
     error: string,
     existingId: string,
-    dupReason: "url" | "hash" | "title",
+    dupReason: "canonical" | "url" | "hash" | "title",
   ): PipelineResult {
     this.deps.logger.warn("quality.reject", {
       contentId: item?.id,

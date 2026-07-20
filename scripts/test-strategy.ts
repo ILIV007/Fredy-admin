@@ -105,17 +105,33 @@ describe("getActiveStrategy — custom uses customDistribution", () => {
 });
 
 describe("getThemeForDate — returns correct theme for each day", () => {
+  // v12.0.0: Updated to match v11.1.0 theme config.
+  // Monday (day=1): topics = ["Web Development", "Frameworks", "React", "Next.js"]
+  // Sunday (day=0): topics = ["Cloud", "Backend", "Cloudflare", "DevOps"]
+  // Saturday (day=6): topics = ["AI", "Open Source", "Hugging Face", "GitHub"]
+  // Friday (day=5): topics = ["Community", "Space", "NASA", "XKCD"]
+
   // 2026-07-13 is a Monday (day=1)
   const monday = engine.getThemeForDate("2026-07-13", true);
   assert(monday !== null, "Monday has a theme");
   assert(monday!.dayName === "Monday", "Monday theme dayName is Monday");
-  assert(monday!.topics.includes("AI"), "Monday includes AI topic");
+  assert(monday!.topics.includes("React"), "Monday includes React topic");
 
   // 2026-07-19 is a Sunday (day=0)
   const sunday = engine.getThemeForDate("2026-07-19", true);
   assert(sunday !== null, "Sunday has a theme");
   assert(sunday!.dayName === "Sunday", "Sunday theme dayName is Sunday");
-  assert(sunday!.topics.includes("XKCD"), "Sunday includes XKCD topic");
+  assert(sunday!.topics.includes("Cloudflare"), "Sunday includes Cloudflare topic");
+
+  // 2026-07-18 is a Saturday (day=6) — has AI topic
+  const saturday = engine.getThemeForDate("2026-07-18", true);
+  assert(saturday !== null, "Saturday has a theme");
+  assert(saturday!.topics.includes("AI"), "Saturday includes AI topic");
+
+  // 2026-07-17 is a Friday (day=5) — has XKCD topic
+  const friday = engine.getThemeForDate("2026-07-17", true);
+  assert(friday !== null, "Friday has a theme");
+  assert(friday!.topics.includes("XKCD"), "Friday includes XKCD topic");
 
   // Disabled returns null
   const disabled = engine.getThemeForDate("2026-07-13", false);

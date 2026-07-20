@@ -148,13 +148,18 @@ export class SchedulerService {
     try {
       if (this.deps.strategyEngine) {
         const stratPlan = await this.deps.strategyEngine.getOrGeneratePlan();
-        // Convert DailyPublishPlan to DailyPlan format for the scheduler.
+        // v12.0.0: FIXED slot conversion — now passes windowEnd + scheduledTime.
+        // Previously these were dropped, causing findDueSlot to fall back to
+        // "23:59" for windowEnd and windowStart for scheduledTime, breaking
+        // the random-jitter trigger and the window expiry calculation.
         plan = {
           date: stratPlan.date,
           slots: stratPlan.posts.map(p => ({
             index: p.index,
             date: p.date,
-            time: p.time,
+            time: p.time,                         // Window START
+            windowEnd: p.windowEnd ?? p.time,     // v12.0.0: Window END (was missing!)
+            scheduledTime: p.scheduledTime ?? p.time, // v12.0.0: Random trigger (was missing!)
             epochMs: p.epochMs,
             category: p.category,
             jitterMinutes: 0,
@@ -380,12 +385,20 @@ export class SchedulerService {
       const adminId = Number(settings.telegram.adminId || 0);
       if (adminId <= 0) return;
 
+      // v12.0.0: Use `now` to show the current time when the expiry was detected.
+      const nowInTz = new Intl.DateTimeFormat("en-US", {
+        timeZone: settings.scheduler.timezone || "UTC",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date(now));
+
       const msg = [
         ``,
         `<b>━━━ ⚠️ WINDOW EXPIRED ━━━</b>`,
         ``,
         `<blockquote>📅 <b>Window:</b> #${slot.index} ${slot.time}-${slot.windowEnd}</blockquote>`,
+        `<blockquote>🎯 <b>Scheduled:</b> ${slot.scheduledTime ?? slot.time}</blockquote>`,
         `<blockquote>📂 <b>Category:</b> ${slot.category}</blockquote>`,
+        `<blockquote>🕐 <b>Detected at:</b> ${nowInTz} (${settings.scheduler.timezone})</blockquote>`,
         `<blockquote>💡 <b>Cause:</b> Window expired (6h+ past end, cron may have missed multiple ticks)</blockquote>`,
       ].join("\n");
 

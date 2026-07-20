@@ -176,15 +176,15 @@ describe("TimeGenerator — one slot per window", () => {
   assert(slots.length <= 5, "At most 5 slots (one per window)");
 
   // Each slot should be in a different window
+  // v12.0.0: slot.time is always the window START, so match exactly.
+  // (Previously used range check with `<=` which caused adjacent windows
+  //  sharing a boundary — e.g., 16:00-18:00 and 18:00-20:00 — to both
+  //  match a slot at 18:00, falsely failing the test.)
   const windowIndices = new Set<number>();
   for (const slot of slots) {
-    const [hh, mm] = slot.time.split(":").map(Number);
-    const minutes = hh! * 60 + mm!;
     for (let i = 0; i < defaultConfig.postingWindows.length; i++) {
       const w = defaultConfig.postingWindows[i]!;
-      const start = parseInt(w.start.split(":")[0]!) * 60 + parseInt(w.start.split(":")[1]!);
-      const end = parseInt(w.end.split(":")[0]!) * 60 + parseInt(w.end.split(":")[1]!);
-      if (minutes >= start && minutes <= end) {
+      if (slot.time === w.start) {
         windowIndices.add(i);
         break;
       }
@@ -253,6 +253,95 @@ describe("TickLogBuilder — builds correct TickLog", () => {
   assert(log.errors.length === 1, "One error recorded");
   assert(log.errors[0]!.step === "publish", "Error step is 'publish'");
   assert(log.durationMs >= 0, "Duration is non-negative");
+});
+
+// ────────────────────────────────────────────────────────────
+// v12.0.1: Quiet Hours Guard — simulation tests
+// ────────────────────────────────────────────────────────────
+
+describe("v12.0.1: Quiet Hours Guard — Test 1: inside quiet hours (02:30)", () => {
+  const checker = new QuietHoursChecker();
+  const config: SchedulerConfig = {
+    ...defaultConfig,
+    timezone: "UTC",
+    quietHours: { start: "00:00", end: "07:30" },
+  };
+
+  // Simulate a tick at 02:30 UTC — inside quiet hours.
+  const now = timeAt(2, 30);
+  const isQuiet = checker.isQuietHours(now, config);
+
+  assert(isQuiet === true, "02:30 is inside quiet hours (00:00-07:30)");
+  // Expected behavior: scheduler skipped, 0 KV writes, no publish.
+  // (The cron-scheduler.ts guard checks this BEFORE any KV operation.)
+});
+
+describe("v12.0.1: Quiet Hours Guard — Test 2: after quiet hours (07:40)", () => {
+  const checker = new QuietHoursChecker();
+  const config: SchedulerConfig = {
+    ...defaultConfig,
+    timezone: "UTC",
+    quietHours: { start: "00:00", end: "07:30" },
+  };
+
+  // Simulate a tick at 07:40 UTC — just after quiet hours end.
+  const now = timeAt(7, 40);
+  const isQuiet = checker.isQuietHours(now, config);
+
+  assert(isQuiet === false, "07:40 is NOT in quiet hours (ended at 07:30)");
+  // Expected behavior: scheduler runs normally, checks for due slots.
+});
+
+describe("v12.0.1: Quiet Hours Guard — Test 3: midnight crossing (23:00-07:30)", () => {
+  const checker = new QuietHoursChecker();
+  const config: SchedulerConfig = {
+    ...defaultConfig,
+    timezone: "UTC",
+    quietHours: { start: "23:00", end: "07:30" },
+  };
+
+  // 23:30 — inside quiet hours (pre-midnight part)
+  assert(checker.isQuietHours(timeAt(23, 30), config) === true, "23:30 is quiet (spanning, pre-midnight)");
+  // 03:00 — inside quiet hours (post-midnight part)
+  assert(checker.isQuietHours(timeAt(3, 0), config) === true, "03:00 is quiet (spanning, post-midnight)");
+  // 07:00 — inside quiet hours (just before end)
+  assert(checker.isQuietHours(timeAt(7, 0), config) === true, "07:00 is quiet (spanning, near end)");
+  // 08:00 — NOT in quiet hours
+  assert(checker.isQuietHours(timeAt(8, 0), config) === false, "08:00 is NOT quiet (after spanning end)");
+  // 22:59 — NOT in quiet hours (just before start)
+  assert(checker.isQuietHours(timeAt(22, 59), config) === false, "22:59 is NOT quiet (before spanning start)");
+});
+
+describe("v12.0.1: Quiet Hours Guard — Test 4: deferPastQuietHours returns next active time", () => {
+  const checker = new QuietHoursChecker();
+  const config: SchedulerConfig = {
+    ...defaultConfig,
+    timezone: "UTC",
+    quietHours: { start: "00:00", end: "07:30" },
+  };
+
+  // 02:30 → deferred to 07:30 (same day)
+  const deferred = checker.deferPastQuietHours(timeAt(2, 30), config);
+  assert(deferred === timeAt(7, 30), "02:30 deferred to 07:30 (next active time)");
+
+  // 12:00 → not deferred (already past quiet hours)
+  const notDeferred = checker.deferPastQuietHours(timeAt(12, 0), config);
+  assert(notDeferred === timeAt(12, 0), "12:00 not deferred (not in quiet hours)");
+});
+
+describe("v12.0.1: Quiet Hours Guard — Test 5: disabled guard (no quietHours config)", () => {
+  const checker = new QuietHoursChecker();
+  const config: SchedulerConfig = {
+    ...defaultConfig,
+    timezone: "UTC",
+    quietHours: { start: "00:00", end: "00:00" }, // start === end → empty range
+  };
+
+  // When start === end, the range is empty (00:00 to 00:00 = nothing).
+  // 02:00 should NOT be in quiet hours.
+  const isQuiet = checker.isQuietHours(timeAt(2, 0), config);
+  // start=0, end=0 → start <= end → returns currentMin >= 0 && currentMin < 0 → false
+  assert(isQuiet === false, "02:00 is NOT quiet when range is 00:00-00:00 (empty)");
 });
 
 // ────────────────────────────────────────────────────────────

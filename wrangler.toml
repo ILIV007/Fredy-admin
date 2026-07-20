@@ -49,26 +49,40 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 # ============================================================
-# Cron Triggers
+# Cron Triggers — v12.0.0 Three-Layer Architecture
 # ============================================================
-# Single internal Cloudflare cron trigger:
-#   "0 0 * * *" — 24-hour backup tick. Runs the full scheduler pipeline
-#                 as a safety net in case cron-job.org stops working.
+# Fredy v12.0.0 uses THREE independent Cloudflare cron triggers,
+# each with a single responsibility. This replaces the old single-
+# trigger + external cron-job.org design.
 #
-# Main driver: external cron-job.org calls /internal/tick every 2 hours.
-# Stale-tick detection is performed INSIDE tick.ts (compares against
-# the previous LAST_TICK_KEY timestamp before overwriting it). This adds
-# zero extra triggers and zero extra KV writes on the happy path — the
-# admin PM fires only in the rare case of a real gap (>5h).
+# Layer 1 — SCHEDULER WATCHER (every 20 minutes):
+#   "*/20 * * * *"
+#   Lightweight: loads daily plan (1 KV read), checks if a post's
+#   scheduledTime has been reached. If yes → full publish pipeline.
+#   If no → returns immediately (0 KV writes on the no-due path).
+#   This is the ONLY trigger that publishes posts. Expected delay
+#   between scheduledTime and actual publish: 0-20 minutes.
 #
-# v9.2.2: Reverted the v9.2.1 */30 * * * * cron. Adding a third trigger
-# violated the minimal-trigger design philosophy. Stale detection now
-# happens inside the existing 2-hourly tick — alerts on service recovery,
-# not on the moment of failure, with at most 1 cycle (~2h) of additional
-# latency. Zero extra KV writes when the system is healthy.
+# Layer 2 — PROVIDER REFRESH (every 2 hours):
+#   "0 */2 * * *"
+#   Fetches content from providers (GitHub, Dev.to, Reddit, News),
+#   maintains queue depth, applies adaptive backoff. Does NOT
+#   publish posts — only content preparation. Respects queue depth
+#   (skips providers whose queue is already full).
+#
+# Layer 3 — DAILY MAINTENANCE (every 24 hours):
+#   "0 0 * * *"
+#   Generates tomorrow's daily plan (with fresh random scheduledTime
+#   per window), cleans expired KV data, resets daily counters,
+#   updates statistics. Runs at midnight UTC.
+#
+# Cloudflare Free Plan: 5 cron triggers max — we use 3. ✓
+# KV limits: 100K reads/day, 1K writes/day — well under. ✓
+# The /internal/tick endpoint is retained for manual triggers and
+# backward compatibility with cron-job.org (optional fallback).
 
 [triggers]
-crons = ["0 0 * * *"]
+crons = ["*/20 * * * *", "0 */2 * * *", "0 0 * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

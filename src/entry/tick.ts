@@ -1,45 +1,27 @@
 /**
  * src/entry/tick.ts
- * Internal tick endpoint — POST/GET /internal/tick
+ * v12.0.0 — Manual Tick Endpoint (POST/GET /internal/tick)
+ *
+ * This endpoint is retained for backward compatibility with cron-job.org
+ * and for manual triggering from the dashboard. In the v12.0.0 architecture,
+ * Cloudflare's internal cron triggers handle the three layers automatically:
+ *
+ *   Layer 1 (every 20 min)  →  Scheduler Watcher  →  cron-scheduler.ts
+ *   Layer 2 (every 2h)      →  Provider Refresh    →  cron-providers.ts
+ *   Layer 3 (every 24h)     →  Daily Maintenance   →  cron-maintenance.ts
+ *
+ * This endpoint runs Layer 1 by default. Add ?full=true to run all three
+ * layers sequentially (useful for manual debugging / dashboard "Force Tick").
  *
  * Auth: Authorization: Bearer <CRON_KEY> or X-Cron-Key: <CRON_KEY> or ?key=<CRON_KEY>
  *
  * DESIGN: Non-blocking. Authenticates → acquires lock → returns 200 immediately.
- * All actual work runs in ctx.waitUntil() so external cron-job.org never times out.
- *
- * Pipeline (runs in background):
- *   1. Authenticate (synchronous, fast)
- *   2. Acquire KV lock (prevent concurrent execution)
- *   3. Return 200 OK immediately with "tick started" log
- *   4. [background] Stale-tick check (v9.2.2 — see below)
- *   5. [background] Publish due posts
- *   6. [background] Maintain queue (refill if below minimum)
- *   7. [background] Cleanup + release lock
- *
- * v9.2.1: refreshSources() / refreshSourcesIfNeeded() removed — the stub
- * paid a KV write every ~2h for `fredy:tick:lastRefresh` while doing zero
- * work. Source fetching is already covered by content.processForCategory()
- * inside maintainQueue().
- *
- * v9.2.2: Stale-tick detection moved here from cron.ts (no extra trigger).
- * Before overwriting LAST_TICK_KEY, we read its previous value. If the gap
- * exceeds STALE_TICK_GAP_HOURS, a single admin PM is sent and a cooldown
- * timestamp is written so we don't spam. Cost on the happy path: 1 extra
- * KV READ per tick (zero extra writes). The KV-write only happens in the
- * rare case of a real gap (>5h) — once per cooldown window.
- *
- * Detection latency: alerts fire when the service RECOVERS, not at the
- * moment of failure. Worst case: cron-job.org goes down for 3h, comes
- * back, and the admin gets the alert ~3h late. This is acceptable for a
- * free-tier project that values minimal triggers over real-time alerts.
- * For instant failure detection, enable cron-job.org's built-in "alert me
- * if this job doesn't run" feature on their dashboard — zero code, zero KV.
+ * All actual work runs in ctx.waitUntil() so external callers never time out.
  */
 
 import type { Env, Container } from "../types/env";
 import { processScheduledQueue } from "./cron";
 import { SchedulerOrchestrator } from "../orchestrators/scheduler";
-import type { Category } from "../types/category";
 import type { FredySettings } from "../types/config";
 import { acquireTickLock } from "../services/tick-lock";
 
@@ -52,18 +34,10 @@ export interface TickHandlerDeps {
 const LAST_TICK_KEY = "fredy:tick:lastTick";
 const LAST_LOG_KEY = "fredy:tick:lastLog";
 
-/** v11.2.0: Stale-tick threshold lowered from 5h to 3h.
- *  The external cron fires every ~2h. A gap >3h means at least 1 cycle was
- *  missed — strong signal something is wrong (cron-job.org down, network
- *  partition, deploy misconfig). Previous 5h threshold was too wide: slots
- *  could be permanently lost (grace=4h) before the alert fired.
- *
- *  v9.2.2: originally 5h.
- *  v11.2.0: lowered to 3h so the alert fires BEFORE grace expires (4h). */
+/** v11.2.0: Stale-tick threshold — lowered from 5h to 3h. */
 const STALE_TICK_GAP_HOURS = 3;
-/** v9.2.2: Cooldown to avoid repeating the alert on every tick after a gap.
- *  Once alerted, subsequent ticks within this window are silent. */
-const STALE_TICK_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+/** v9.2.2: Cooldown to avoid repeating the alert on every tick after a gap. */
+const STALE_TICK_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const STALE_TICK_LAST_ALERT_KEY = "fredy:tick:lastStaleAlert";
 
 export async function tickHandler(
@@ -74,7 +48,7 @@ export async function tickHandler(
   const { env, container, ctx } = deps;
   const startTime = Date.now();
 
-  // ── 1. Authentication (header-based + query fallback) ───
+  // ── 1. Authentication ───
   if (!env.CRON_KEY) {
     return json({ ok: false, error: "CRON_KEY not set" }, 500);
   }
@@ -86,7 +60,10 @@ export async function tickHandler(
     return json({ ok: false, error: "Unauthorized" }, 403);
   }
 
-  // ── 2. Acquire KV lock (timeout from runtime config) ───
+  // v12.0.0: ?full=true runs all three layers (manual debugging).
+  const fullMode = url.searchParams.get("full") === "true";
+
+  // ── 2. Acquire KV lock ───
   const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
   const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
   const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
@@ -101,10 +78,7 @@ export async function tickHandler(
   // ── 3. Return 200 immediately and run work in background ───
   const startedAt = new Date().toISOString();
 
-  // v9.2.2: Stale-tick check — read the PREVIOUS lastTick BEFORE overwriting.
-  // If the gap is unusually long (cron-job.org was down), fire one admin PM.
-  // Cost on the happy path: 1 KV READ per tick (no writes). The write + TG
-  // send only happen in the rare case of a real gap. Runs in background.
+  // Stale-tick check — read the PREVIOUS lastTick BEFORE overwriting.
   const previousTickStr = await container.kv.get(LAST_TICK_KEY).catch(() => null);
   const now = Date.now();
   if (ctx && previousTickStr) {
@@ -116,26 +90,24 @@ export async function tickHandler(
       }
     }
   }
-  // v11.12.0: lastTick is now embedded in LAST_LOG_KEY (saved at end of tick).
-  // This removes one KV write per tick.
-  // Still read the old LAST_TICK_KEY for backward compat with stale-tick detection.
   await container.kv.set(LAST_TICK_KEY, String(now)).catch(() => {});
 
-  // If ctx is available, run in background. Otherwise run synchronously (legacy mode).
   if (ctx) {
-    ctx.waitUntil(runTickWork(container, env, tickLock, settings));
+    ctx.waitUntil(runTickWork(container, env, tickLock, settings, now, fullMode));
     return json({
       ok: true,
+      mode: fullMode ? "full" : "scheduler-watch",
       time: startedAt,
       durationMs: Date.now() - startTime,
       log: ["tick started: running in background"],
     });
   }
 
-  // Fallback: synchronous execution (older Cloudflare environments without ctx)
-  const log = await runTickWork(container, env, tickLock, settings);
+  // Fallback: synchronous execution (older environments without ctx)
+  const log = await runTickWork(container, env, tickLock, settings, now, fullMode);
   return json({
     ok: true,
+    mode: fullMode ? "full" : "scheduler-watch",
     time: new Date().toISOString(),
     durationMs: Date.now() - startTime,
     log,
@@ -143,11 +115,9 @@ export async function tickHandler(
 }
 
 // ────────────────────────────────────────────────────────────
-// v9.2.2: Stale-tick notification (background)
+// Stale-tick notification (background)
 // ────────────────────────────────────────────────────────────
 
-/** Send a single admin PM if the gap since the last tick exceeds the threshold.
- *  Suppresses repeats within STALE_TICK_ALERT_COOLDOWN_MS via a KV cooldown key. */
 async function notifyStaleTick(
   env: Env,
   container: Container,
@@ -156,11 +126,10 @@ async function notifyStaleTick(
   currentTick: number,
 ): Promise<void> {
   try {
-    // Check cooldown to avoid spamming the admin on every tick after a gap.
     const lastAlertStr = await container.kv.get(STALE_TICK_LAST_ALERT_KEY).catch(() => null);
     const lastAlert = lastAlertStr ? Number(lastAlertStr) : 0;
     if (lastAlert && currentTick - lastAlert < STALE_TICK_ALERT_COOLDOWN_MS) {
-      return; // Already alerted recently — suppress.
+      return;
     }
 
     const adminId = Number(env.ADMIN_ID ?? "0");
@@ -171,16 +140,14 @@ async function notifyStaleTick(
           ``,
           `<b>━━━ ⚠️ STALE TICK ALERT ━━━</b>`,
           ``,
-          ``,
           `<blockquote>⏰ <b>Gap since last tick:</b> ${gapHours.toFixed(1)} hours</blockquote>`,
           `<blockquote>🕐 <b>Last tick:</b> ${new Date(previousTick).toISOString()}</blockquote>`,
           `<blockquote>🔄 <b>This tick:</b> ${new Date(currentTick).toISOString()}</blockquote>`,
-          `<blockquote>💡 <b>External cron (cron-job.org) may have been down.</b></blockquote>`,
+          `<blockquote>💡 <b>Cloudflare cron may have missed cycles.</b></blockquote>`,
         ].join("\n"),
         { parse_mode: "HTML" },
       ).catch(() => {});
     }
-    // Record the alert time so we don't spam.
     await container.kv.set(STALE_TICK_LAST_ALERT_KEY, String(currentTick), 24 * 60 * 60).catch(() => {});
   } catch (error) {
     console.error("[tick] stale-tick notification failed:", error instanceof Error ? error.message : error);
@@ -191,41 +158,37 @@ async function notifyStaleTick(
 // Background work
 // ────────────────────────────────────────────────────────────
 
-async function runTickWork(container: Container, env: Env, tickLock: { release: () => Promise<void> }, cachedSettings: FredySettings | null): Promise<string[]> {
+/**
+ * v12.0.0: Tick work — runs Layer 1 (scheduler watch) by default.
+ * If fullMode is true, also runs Layer 2 (provider refresh) + queue maintenance.
+ * Layer 3 (daily maintenance) is NOT run here — it's too heavy and only
+ * runs once per day via the 24h cron.
+ */
+async function runTickWork(
+  container: Container,
+  env: Env,
+  tickLock: { release: () => Promise<void> },
+  cachedSettings: FredySettings | null,
+  tickStartTime: number,
+  fullMode: boolean,
+): Promise<string[]> {
   const log: string[] = [];
 
   try {
-    // v11.12.0: Reuse settings from lock acquisition (already cached in memory).
     const settings = cachedSettings ?? await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
-    log.push("config loaded");
+    log.push(`config loaded (mode: ${fullMode ? "full" : "scheduler-watch"})`);
 
     // ════════════════════════════════════════════════════════════
-    // v11.5.0: CRITICAL FIX — Scheduler.tick() runs FIRST!
-    //
-    // Previously (v11.1.0–v11.4.0), providerEngine.refreshDueProviders(3)
-    // ran FIRST and could take 15-45 seconds. Cloudflare Workers Free Plan
-    // has a 30s wall time limit for ctx.waitUntil(). The Worker would be
-    // killed BEFORE scheduler.tick() ever ran, so scheduled posts were
-    // NEVER published automatically.
-    //
-    // Now the order is:
-    //   1. Scheduler tick (fire due slots) — CRITICAL, must run first
-    //   2. Process scheduled queue (silent scheduling fallback)
-    //   3. Maintain queue (refill if below minimum)
-    //   4. Provider engine refresh (staggered, for NEXT tick)
+    // Layer 1: SCHEDULER WATCH — fire due slots (ALWAYS runs)
     // ════════════════════════════════════════════════════════════
-
-    // ── 1. SCHEDULER TICK — fire due slots (CRITICAL) ────
     try {
-      // Process silent scheduling queue first (Telegram schedule_date fallback).
       await processScheduledQueue(env, container);
       log.push("scheduled queue processed");
 
-      // Scheduler tick — fires ALL due slots from the daily plan.
       const scheduler = new SchedulerOrchestrator(container);
       const tickResult = await scheduler.tick();
       if (tickResult.fired) {
-        log.push(`✅ slot fired: category=${tickResult.slot?.category ?? "?"}`);
+        log.push(`✅ slot fired: #${tickResult.slot?.index} scheduled=${tickResult.slot?.scheduledTime ?? tickResult.slot?.time} cat=${tickResult.slot?.category ?? "?"}`);
       } else if (tickResult.skipped) {
         log.push(`⚠️ slot skipped: ${tickResult.skipReason ?? "unknown"}`);
       } else {
@@ -235,45 +198,48 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
       log.push(`❌ publish error: ${errMsg(error)}`);
     }
 
-    // ── 2. MAINTAIN QUEUE (refill if below minimum) ────
-    try {
-      await maintainQueue(container, settings, log);
-    } catch (error) {
-      log.push(`queue maintenance error: ${errMsg(error)}`);
+    // ════════════════════════════════════════════════════════════
+    // Layer 2: PROVIDER REFRESH + QUEUE MAINTENANCE (only in full mode)
+    // ════════════════════════════════════════════════════════════
+    if (fullMode) {
+      try {
+        await maintainQueue(container, settings, log);
+      } catch (error) {
+        log.push(`queue maintenance error: ${errMsg(error)}`);
+      }
+
+      try {
+        const refreshResult = await container.providerEngine.refreshDueProviders(2);
+        if (refreshResult.refreshed.length > 0) {
+          log.push(`providers refreshed: ${refreshResult.refreshed.join(", ")}`);
+        }
+        if (refreshResult.skipped.length > 0) {
+          log.push(`providers skipped: ${refreshResult.skipped.join(", ")}`);
+        }
+        if (refreshResult.failed.length > 0) {
+          log.push(`providers failed: ${refreshResult.failed.join(", ")}`);
+        }
+        if (refreshResult.refreshed.length === 0 && refreshResult.skipped.length === 0 && refreshResult.failed.length === 0) {
+          log.push("no providers due for refresh");
+        }
+      } catch (error) {
+        log.push(`provider engine error: ${errMsg(error)}`);
+      }
     }
 
-    // ── 3. PROVIDER ENGINE REFRESH (for NEXT tick) ────
-    // v11.5.0: Moved to LAST — this is the least time-sensitive operation.
-    // It refreshes provider caches for the NEXT tick, not the current one.
-    // If the Worker runs out of time, this is safely skipped.
-    try {
-      const refreshResult = await container.providerEngine.refreshDueProviders(2);
-      if (refreshResult.refreshed.length > 0) {
-        log.push(`providers refreshed: ${refreshResult.refreshed.join(", ")}`);
-      }
-      if (refreshResult.skipped.length > 0) {
-        log.push(`providers skipped: ${refreshResult.skipped.join(", ")}`);
-      }
-      if (refreshResult.failed.length > 0) {
-        log.push(`providers failed: ${refreshResult.failed.join(", ")}`);
-      }
-      if (refreshResult.refreshed.length === 0 && refreshResult.skipped.length === 0 && refreshResult.failed.length === 0) {
-        log.push("no providers due for refresh");
-      }
-    } catch (error) {
-      log.push(`provider engine error: ${errMsg(error)}`);
-    }
-
-    // ── Cleanup ────────────────────────────────────────
+    // ── Cleanup ────
     await container.kv.flushAllStats().catch(() => {});
     log.push("cleanup done");
 
   } finally {
-    // ── Release lock ───────────────────────────────────
     await tickLock.release();
-    // v11.12.0: Combine lastTick + lastLog into ONE KV write (was 2 separate writes).
-    // lastTick timestamp is now embedded in the lastLog object.
-    await container.kv.setJson(LAST_LOG_KEY, { time: Date.now(), tickTime: now, log }, 3600).catch(() => {});
+    await container.kv.setJson(LAST_LOG_KEY, {
+      time: Date.now(),
+      tickTime: tickStartTime,
+      layer: fullMode ? "manual-full" : "manual-scheduler-watch",
+      durationMs: Date.now() - tickStartTime,
+      log,
+    }, 3600).catch(() => {});
   }
 
   return log;
@@ -288,20 +254,18 @@ async function maintainQueue(
   settings: FredySettings,
   log: string[],
 ): Promise<void> {
-  const categories: Category[] = ["A", "B", "C"];
-  const minMap: Record<Category, number> = {
+  const categories: import("../types/category").Category[] = ["A", "B", "C"];
+  const minMap: Record<import("../types/category").Category, number> = {
     A: settings.content.queueMinA,
     B: settings.content.queueMinB,
     C: settings.content.queueMinC,
   };
-  const targetMap: Record<Category, number> = {
+  const targetMap: Record<import("../types/category").Category, number> = {
     A: settings.content.queueTargetA,
     B: settings.content.queueTargetB,
     C: settings.content.queueTargetC,
   };
 
-  // v8.1.1: Batch depth checks — use depth() once instead of depthFor() per category.
-  // This reduces 3 KV reads to 1.
   const allDepths = await container.queue.depth();
   const depthMap: Record<string, number> = {};
   for (const d of allDepths) {
@@ -319,7 +283,6 @@ async function maintainQueue(
       const needed = target - depth;
       log.push(`queue ${cat}: ${depth}/${min} — generating ${needed} items`);
 
-      // Generate content to fill the queue.
       for (let i = 0; i < needed; i++) {
         try {
           const result = await container.content.processForCategory(cat, null, settings.language.default);
@@ -327,7 +290,7 @@ async function maintainQueue(
             log.push(`  ${cat}: generated ${result.content?.id ?? "?"}`);
           } else {
             log.push(`  ${cat}: generation failed — ${result.error ?? result.rejectedReason ?? "unknown"}`);
-            break; // Stop if generation fails (likely no more content).
+            break;
           }
         } catch (error) {
           log.push(`  ${cat}: generation error — ${errMsg(error)}`);

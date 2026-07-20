@@ -184,30 +184,30 @@ describe("1. check() returns not-duplicate for first-seen item", async () => {
   assertEqual(result.existingId, null, "existingId is null for first-seen");
 });
 
-describe("2. record() then check() by URL → duplicate (URL match wins)", async () => {
+describe("2. record() then check() by canonical ID (GitHub URL) → duplicate", async () => {
   const { detector } = makeDetector();
   const item1 = makeItem({ id: "post-1", url: "https://github.com/foo/bar", body: "Body alpha — completely unique text." });
   await detector.record(item1);
 
-  // Same URL, different body and id — should still be flagged by URL.
+  // Same GitHub URL, different body and id — should be flagged by CANONICAL ID (Layer 1).
+  // v11.13.0: GitHub URLs extract canonical ID "github:foo/bar" which fires before URL check.
   const item2 = makeItem({ id: "post-2", url: "https://github.com/foo/bar", body: "Body beta — completely different text." });
   const result = await detector.check(item2);
   assert(result.isDuplicate, "same-URL different-body is flagged");
-  assertEqual(result.reason, "url", "reason is 'url'");
+  assertEqual(result.reason, "canonical", "reason is 'canonical' (Layer 1 — GitHub owner/repo)");
   assertEqual(result.existingId, "post-1", "existingId points to the recorded item");
 });
 
-describe("3. record() then check() by hash (different URL, same body) → duplicate", async () => {
+describe("3. v11.13.0: different URL + different body → NOT a duplicate (hash is URL+title, not body)", async () => {
   const { detector } = makeDetector();
   const item1 = makeItem({ id: "post-1", url: "https://github.com/foo/bar", body: "Identical body content for hash test." });
   await detector.record(item1);
 
-  // Different URL, same body — hash should catch it.
+  // Different URL, same body — v11.13.0: hash is now URL+title (NOT body).
+  // Different URL → different hash → NOT a duplicate.
   const item2 = makeItem({ id: "post-2", url: "https://different.example.com/x", body: "Identical body content for hash test." });
   const result = await detector.check(item2);
-  assert(result.isDuplicate, "different-URL same-body is flagged by hash");
-  assertEqual(result.reason, "hash", "reason is 'hash'");
-  assertEqual(result.existingId, "post-1", "existingId points to the recorded item");
+  assert(!result.isDuplicate, "different-URL same-body is NOT flagged (hash is URL+title, not body)");
 });
 
 describe("4. URL match wins over hash when both differ", async () => {
@@ -227,7 +227,9 @@ describe("5. record() is idempotent — calling twice doesn't corrupt state", as
 
   await detector.record(item);
   const writesAfterFirst = kv.count();
-  assert(writesAfterFirst === 2, "first record() writes exactly 2 entries (hash + url)");
+  // v12.0.0: example.com URL with github pluginId → no canonical ID extracted
+  // (URL doesn't match github.com pattern) → only 2 entries (url + hash).
+  assert(writesAfterFirst === 2, "first record() writes exactly 2 entries (url + hash, no canonical for non-GitHub URL)");
 
   await detector.record(item);
   const writesAfterSecond = kv.count();
@@ -238,26 +240,28 @@ describe("5. record() is idempotent — calling twice doesn't corrupt state", as
   assert(result.isDuplicate, "still detected as duplicate after double-record");
 });
 
-describe("6. Empty-body items use URL+title fallback hash (no false positives)", async () => {
+describe("6. Empty-body items use URL+title hash (no false positives)", async () => {
   const { detector } = makeDetector();
 
   // HackerNews-style: no body, just title + URL.
+  // v12.0.0: Use truly different URLs (different paths, not just query params).
+  // normalizeUrl() strips query params, so ?id=1 and ?id=2 normalize to the same URL.
   const hn1 = makeItem({
     id: "hn-1",
     pluginId: "hackernews",
     title: "Show HN: Cool project",
     body: "",
-    url: "https://news.ycombinator.com/item?id=1",
+    url: "https://news.ycombinator.com/item/1",
   });
   const hn2 = makeItem({
     id: "hn-2",
     pluginId: "hackernews",
     title: "Totally different HN post",
     body: "",
-    url: "https://news.ycombinator.com/item?id=2",
+    url: "https://news.ycombinator.com/item/2",
   });
 
-  // Both have empty body. The fallback hash uses URL+title, so they should
+  // Both have empty body. The hash uses URL+title, so they should
   // hash to different values and NOT be falsely flagged as duplicates.
   await detector.record(hn1);
   const result = await detector.check(hn2);
@@ -297,7 +301,7 @@ describe("8. v9.3.1: recordPublished() records a ReadyContent after publish", as
     sourceUrl: "https://github.com/test/repo",
   };
   await detector.recordPublished(readyContent);
-  assert(kv.count() === 2, "recordPublished() writes 2 entries (hash + url)");
+  assert(kv.count() === 3, "recordPublished() writes 3 entries (canonical + url + hash)");
 
   // The equivalent ContentItem should now be detected as a duplicate.
   const equivItem = makeItem({
@@ -314,12 +318,13 @@ describe("8. v9.3.1: recordPublished() records a ReadyContent after publish", as
 describe("9. v9.3.1: recordPublished() with empty body uses fallback hash", async () => {
   const { detector } = makeDetector();
   // HackerNews-style ReadyContent: no text body, just headline + URL.
+  // v12.0.0: Use truly different URLs (different paths, not query params).
   const hnContent = {
     id: "hn-pub-1",
     pluginId: "hackernews",
     headline: "Show HN: Cool project",
     text: "",
-    sourceUrl: "https://news.ycombinator.com/item?id=999",
+    sourceUrl: "https://news.ycombinator.com/item/999",
   };
   await detector.recordPublished(hnContent);
 
@@ -329,7 +334,7 @@ describe("9. v9.3.1: recordPublished() with empty body uses fallback hash", asyn
     pluginId: "hackernews",
     title: "Different HN post",
     body: "",
-    url: "https://news.ycombinator.com/item?id=1000",
+    url: "https://news.ycombinator.com/item/1000",
   });
   const result = await detector.check(otherHn);
   assert(!result.isDuplicate, "different empty-body HN post is NOT a duplicate");

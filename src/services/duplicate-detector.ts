@@ -84,7 +84,7 @@ export class DuplicateDetector {
     }
 
     // Layer 3: Content hash (URL + title, NOT body — body changes with AI).
-    const hash = this.computeContentHash(item);
+    const hash = await this.computeContentHash(item);
     const hashRecord = await this.findByHash(hash);
     if (hashRecord) {
       this.deps.logger.info("quality.reject", {
@@ -155,7 +155,7 @@ export class DuplicateDetector {
       raw: item.raw,
     } as unknown as SourceItem);
     const normalizedUrl = this.normalizeUrl(item.url);
-    const hash = this.computeContentHash({
+    const hash = await this.computeContentHash({
       url: item.url,
       title: item.title,
       body: item.body,
@@ -177,8 +177,9 @@ export class DuplicateDetector {
       await this.deps.kv.setJson(`fredy:dedup:canonical:${canonicalId}`, record, this.ttlSeconds);
     }
     if (normalizedUrl) {
-      const urlHash = sha1(normalizedUrl);
-      void this.deps.kv.setJson(`fredy:dedup:url:${urlHash}`, record, this.ttlSeconds);
+      // v12.0.0: CRITICAL FIX — await sha1() (was not awaited, broke URL dedup).
+      const urlHash = await sha1(normalizedUrl);
+      await this.deps.kv.setJson(`fredy:dedup:url:${urlHash}`, record, this.ttlSeconds);
     }
     void this.deps.kv.setJson(dedupKey(hash), record, this.ttlSeconds);
   }
@@ -363,7 +364,10 @@ export class DuplicateDetector {
   }
 
   private async findByUrl(normalizedUrl: string): Promise<DedupRecord | null> {
-    const urlHash = sha1(normalizedUrl);
+    // v12.0.0: CRITICAL FIX — sha1() is async (uses crypto.subtle.digest).
+    // Previously not awaited, causing all URL entries to be stored under
+    // "fredy:dedup:url:[object Promise]" — making every URL match every other.
+    const urlHash = await sha1(normalizedUrl);
     return this.deps.kv.getJson<DedupRecord>(`fredy:dedup:url:${urlHash}`);
   }
 
@@ -375,7 +379,7 @@ export class DuplicateDetector {
    * making dedup useless for AI-processed content.
    * Now hashes: normalizedUrl + normalizedTitle
    */
-  private computeContentHash(item: { url?: string; title?: string; body?: string }): string {
+  private async computeContentHash(item: { url?: string; title?: string; body?: string }): Promise<string> {
     const normalizedUrl = this.normalizeUrl(item.url ?? "") ?? "";
     const normalizedTitle = normalizeForDedup(item.title ?? "");
     // If both are empty, this won't match anything useful — but won't false-positive either.
