@@ -135,13 +135,16 @@ HARD RULE: total text must be ≤150 chars. If you can't fit it in 2 lines, cut 
  */
 const PROFILE_PROMPTS: Readonly<Record<PromptProfile, string>> = {
   default: `PROFILE: default
-Write naturally. 2-4 paragraphs for category A/B, shorter for C.`,
+Write naturally. 2-4 paragraphs for category A/B, shorter for C.
+IMPORTANT: Always write COMPLETE content. Never end mid-sentence. Never use "..." or "…" to indicate truncation. If including code blocks, always include the COMPLETE code — never cut a code block short.`,
 
   concise: `PROFILE: concise
-Be brief. Cut every unnecessary word. Prefer 1-2 paragraphs. Keep all technical details.`,
+Be brief. Cut every unnecessary word. Prefer 1-2 paragraphs. Keep all technical details.
+IMPORTANT: Always write COMPLETE content. Never end mid-sentence. Never use "..." or "…".`,
 
   detailed: `PROFILE: detailed
-Be thorough. Add context and explanation where it helps. 3-5 paragraphs for A/B. Still keep C short.`,
+Be thorough. Add context and explanation where it helps. 3-5 paragraphs for A/B. Still keep C short.
+IMPORTANT: Always write COMPLETE content. Never end mid-sentence. Never use "..." or "…". If including code blocks, always include the COMPLETE code.`,
 };
 
 /**

@@ -50,14 +50,41 @@ export class GitHubSecurityPlugin implements Plugin {
   getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
-  /** v11.6.0: Extract "owner/repo" from a GitHub URL for display. */
+  /** v11.6.2: Extract "owner/repo" from GitHub data for display.
+   *  Handles: html_url, full_name, api url, and regular github.com URLs. */
   private extractGithubRepo(raw: unknown): string {
     try {
-      const url = (raw as { url?: string; html_url?: string })?.url ?? (raw as { html_url?: string })?.html_url ?? "";
-      const match = /github\.com\/([^/]+)\/([^/]+)/i.exec(url);
-      if (match && match[1] && match[2]) {
-        const repo = match[2].split(/[?#]/)[0] ?? "";
-        return `${match[1]}/${repo}`;
+      const obj = raw as Record<string, unknown>;
+      // Priority 1: full_name field (already "owner/repo")
+      if (typeof obj["full_name"] === "string" && obj["full_name"].includes("/")) {
+        return obj["full_name"] as string;
+      }
+      // Priority 2: html_url (https://github.com/owner/repo)
+      const htmlUrl = obj["html_url"] as string | undefined;
+      if (htmlUrl) {
+        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(htmlUrl);
+        if (match && match[1] && match[2]) {
+          return `${match[1]}/${match[2]}`;
+        }
+      }
+      // Priority 3: url field (could be API URL or HTML URL)
+      const url = obj["url"] as string | undefined;
+      if (url) {
+        // API URL: https://api.github.com/repos/owner/repo
+        const apiMatch = /api\.github\.com\/repos\/([^/]+)\/([^/?#]+)/i.exec(url);
+        if (apiMatch && apiMatch[1] && apiMatch[2]) {
+          return `${apiMatch[1]}/${apiMatch[2]}`;
+        }
+        // Regular URL: https://github.com/owner/repo
+        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(url);
+        if (match && match[1] && match[2]) {
+          return `${match[1]}/${match[2]}`;
+        }
+      }
+      // Priority 4: repo field (events have { repo: { name: "owner/repo" } })
+      const repo = obj["repo"] as { name?: string } | undefined;
+      if (repo?.name && repo.name.includes("/")) {
+        return repo.name;
       }
     } catch { /* non-fatal */ }
     return "GitHub";

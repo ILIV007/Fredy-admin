@@ -24,7 +24,7 @@ export const aiDefaults: AIConfig = {
   primaryProvider: "gemini",
   fallbackProvider: "openrouter",
   temperature: 0.7,
-  maxTokens: 2000,
+  maxTokens: 3096,
   retryCount: 0,
   promptProfile: "default",
   qualityThreshold: 60,

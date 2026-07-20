@@ -2,6 +2,55 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.6.2] — 2026-07-20 — GitHub Repo Extraction + AI Truncation Fix + github-events Fallback
+
+### 🔴 Critical Fixes
+
+- **FIX: GitHub extractGithubRepo extracts wrong URL** — Previously, the method
+  looked at `raw.url` which is the API URL (`api.github.com/repos/owner/repo`),
+  producing "repos/owner" instead of "owner/repo". Now checks `full_name` first,
+  then `html_url`, then `url` (with API URL pattern matching), then `repo.name`.
+
+- **FIX: AI truncates posts with "..."** — Three issues fixed:
+  1. `maxTokens` increased from 2000 → 3096 (more room for complete content)
+  2. Prompt profiles now explicitly say "Never use ... or … to indicate truncation"
+  3. `summarizeText()` no longer appends "…" marker — cuts at paragraph/sentence
+     boundary without any truncation indicator
+  4. `summarizeText()` now detects code blocks and never cuts inside one
+
+- **FIX: github-events still returns 0 items** — Search API fallback was using
+  a complex query (`stars:>100+pushed:>date`) that sometimes returned 0 results
+  or was rate-limited. Now:
+  1. Uses simpler query (`stars:>500+language:typescript&sort=stars`)
+  2. If search API fails (403/rate-limit), falls back to fetching individual
+     repo details from a curated list (microsoft/vscode, vercel/next.js, etc.)
+  3. This three-tier fallback (events API → search API → curated repos) ensures
+     github-events ALWAYS returns content
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.6.1 → 11.6.2 |
+| `package.json` | version 11.6.2 |
+| `src/core/constants.ts` | APP_VERSION = "11.6.2" |
+| `src/plugins/sources/github/index.ts` | Fixed extractGithubRepo (full_name/html_url priority) |
+| `src/plugins/sources/github-releases/index.ts` | Same fix |
+| `src/plugins/sources/github-trending/index.ts` | Same fix |
+| `src/plugins/sources/github-events/index.ts` | Same fix + search API + popular repos fallback |
+| `src/plugins/sources/github-security/index.ts` | Same fix |
+| `src/core/config/sections/ai.ts` | maxTokens 2000 → 3096 |
+| `src/core/ai/prompt-templates.ts` | Added "never truncate" instructions to all profiles |
+| `src/services/ux-layer.ts` | Removed "…" marker, added code-block-aware truncation |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.6.2
+
+---
+
 ## [11.6.1] — 2026-07-20 — Bug Fixes: extractGithubRepo + Random Emoji + Provider Logos
 
 ### 🔴 Critical Fixes

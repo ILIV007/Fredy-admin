@@ -306,12 +306,33 @@ export class UXLayerImpl implements UXLayer {
 
   /** Summarize text to fit within maxLen.
    *  Truncates at paragraph boundary first, then sentence, then word.
-   *  Appends "…" marker if truncated. */
+   *  v11.6.2: Never cuts inside a code block. No "…" marker (user doesn't want it). */
   private summarizeText(text: string, maxLen: number): string {
     if (text.length <= maxLen) return text;
 
-    const MARKER = "…";
-    const target = Math.max(20, maxLen - MARKER.length);
+    const target = Math.max(20, maxLen);
+
+    // v11.6.2: Check if we're inside a code block at the target position.
+    // If so, extend to the end of the code block or skip it entirely.
+    const beforeTarget = text.slice(0, target);
+    const codeBlockStarts = (beforeTarget.match(/```/g) ?? []).length;
+    // Odd number of ``` means we're inside a code block — find the closing ```
+    if (codeBlockStarts % 2 === 1) {
+      const closingIndex = text.indexOf("```", target);
+      if (closingIndex !== -1 && closingIndex < maxLen + 2000) {
+        // Include the full code block
+        const fullBlockEnd = text.indexOf("\n", closingIndex + 3);
+        if (fullBlockEnd !== -1) {
+          return text.slice(0, fullBlockEnd);
+        }
+      }
+      // Can't fit the code block — cut before it starts
+      const lastCodeBlockStart = beforeTarget.lastIndexOf("```");
+      if (lastCodeBlockStart > 0) {
+        const beforeCode = text.slice(0, lastCodeBlockStart).trimEnd();
+        if (beforeCode.length > 50) return beforeCode;
+      }
+    }
 
     // Try paragraph boundary first (double newline).
     const paragraphs = text.split(/\n\n+/);
@@ -326,27 +347,27 @@ export class UXLayerImpl implements UXLayer {
         }
       }
       if (result.length > 0 && result.length < text.length) {
-        return result + MARKER;
+        return result;
       }
     }
 
-    // Try sentence boundary (period, exclamation, question mark followed by space).
+    // Try sentence boundary.
     const sentenceEnd = text.lastIndexOf(". ", target);
     const exclEnd = text.lastIndexOf("! ", target);
     const questEnd = text.lastIndexOf("? ", target);
     const bestSentence = Math.max(sentenceEnd, exclEnd, questEnd);
     if (bestSentence > target * 0.5) {
-      return text.slice(0, bestSentence + 1) + MARKER;
+      return text.slice(0, bestSentence + 1);
     }
 
     // Fall back to word boundary.
     const wordEnd = text.lastIndexOf(" ", target);
     if (wordEnd > target * 0.5) {
-      return text.slice(0, wordEnd) + MARKER;
+      return text.slice(0, wordEnd);
     }
 
     // Last resort: hard cut.
-    return text.slice(0, target) + MARKER;
+    return text.slice(0, target);
   }
 
   /** Check if a URL has a meaningful path (not just "/"). */

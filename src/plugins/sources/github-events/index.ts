@@ -95,14 +95,41 @@ export class GitHubEventsPlugin implements Plugin {
   getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
-  /** v11.6.0: Extract "owner/repo" from a GitHub URL for display. */
+  /** v11.6.2: Extract "owner/repo" from GitHub data for display.
+   *  Handles: html_url, full_name, api url, and regular github.com URLs. */
   private extractGithubRepo(raw: unknown): string {
     try {
-      const url = (raw as { url?: string; html_url?: string })?.url ?? (raw as { html_url?: string })?.html_url ?? "";
-      const match = /github\.com\/([^/]+)\/([^/]+)/i.exec(url);
-      if (match && match[1] && match[2]) {
-        const repo = match[2].split(/[?#]/)[0] ?? "";
-        return `${match[1]}/${repo}`;
+      const obj = raw as Record<string, unknown>;
+      // Priority 1: full_name field (already "owner/repo")
+      if (typeof obj["full_name"] === "string" && obj["full_name"].includes("/")) {
+        return obj["full_name"] as string;
+      }
+      // Priority 2: html_url (https://github.com/owner/repo)
+      const htmlUrl = obj["html_url"] as string | undefined;
+      if (htmlUrl) {
+        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(htmlUrl);
+        if (match && match[1] && match[2]) {
+          return `${match[1]}/${match[2]}`;
+        }
+      }
+      // Priority 3: url field (could be API URL or HTML URL)
+      const url = obj["url"] as string | undefined;
+      if (url) {
+        // API URL: https://api.github.com/repos/owner/repo
+        const apiMatch = /api\.github\.com\/repos\/([^/]+)\/([^/?#]+)/i.exec(url);
+        if (apiMatch && apiMatch[1] && apiMatch[2]) {
+          return `${apiMatch[1]}/${apiMatch[2]}`;
+        }
+        // Regular URL: https://github.com/owner/repo
+        const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(url);
+        if (match && match[1] && match[2]) {
+          return `${match[1]}/${match[2]}`;
+        }
+      }
+      // Priority 4: repo field (events have { repo: { name: "owner/repo" } })
+      const repo = obj["repo"] as { name?: string } | undefined;
+      if (repo?.name && repo.name.includes("/")) {
+        return repo.name;
       }
     } catch { /* non-fatal */ }
     return "GitHub";
@@ -210,18 +237,27 @@ export class GitHubEventsPlugin implements Plugin {
     }
 
     try {
-      // Search for repos pushed in the last 24h with 100+ stars.
-      const yesterday = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
-      const url = `${GH_API}/search/repositories?q=stars:>100+pushed:>${yesterday}&sort=updated&per_page=10`;
+      // v11.6.2: Use a simpler query that always returns results.
+      // The previous query (stars:>100+pushed:>date) sometimes returned 0
+      // or was rate-limited. "stars:>500&sort=stars" is more reliable.
+      const url = `${GH_API}/search/repositories?q=stars:>500+language:typescript&sort=stars&order=desc&per_page=10`;
 
       const res = await fetch(url, { headers });
       if (!res.ok) {
         this.deps.logger.warn("source.fetch_error", { plugin: "github-events", fallback: "search", status: res.status });
-        return [];
+
+        // v11.6.2: If search API fails, try a simple /repositories endpoint
+        // (doesn't require search API quota).
+        return this.fetchPopularRepos(headers);
       }
 
       const data = await res.json() as { items?: readonly GHSearchRepo[] };
       const repos = data.items ?? [];
+
+      if (repos.length === 0) {
+        // Search returned nothing — try fallback.
+        return this.fetchPopularRepos(headers);
+      }
 
       const items = repos.slice(0, 10).map((repo) => this.normalizeSearchRepo(repo));
 
@@ -239,6 +275,42 @@ export class GitHubEventsPlugin implements Plugin {
         plugin: "github-events", fallback: "search",
         error: error instanceof Error ? error.message : String(error),
       });
+      return [];
+    }
+  }
+
+  /** v11.6.2: Last-resort fallback — fetch repos from curated list. */
+  private async fetchPopularRepos(headers: Record<string, string>): Promise<readonly SourceItem[]> {
+    const POPULAR_REPOS = [
+      "microsoft/vscode", "vercel/next.js", "facebook/react",
+      "rust-lang/rust", "golang/go", "nodejs/node",
+      "python/cpython", "tailwindlabs/tailwindcss",
+    ];
+
+    try {
+      // Pick 5 random repos and fetch their details.
+      const shuffled = [...POPULAR_REPOS].sort(() => Math.random() - 0.5).slice(0, 5);
+      const items: SourceItem[] = [];
+
+      for (const repo of shuffled) {
+        try {
+          const res = await fetch(`${GH_API}/repos/${repo}`, { headers });
+          if (!res.ok) continue;
+          const data = await res.json() as GHSearchRepo;
+          items.push(this.normalizeSearchRepo(data));
+        } catch { /* try next */ }
+      }
+
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+      }
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "github-events", fallback: "popular-repos", returned: items.length,
+      });
+
+      return items;
+    } catch {
       return [];
     }
   }
