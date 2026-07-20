@@ -57,7 +57,24 @@ export async function managerHandler(
   // ── Plugins ──
   if (apiPath === "plugins" && request.method === "GET") {
     try {
-      const plugins = container.plugins.list().map(p => ({ id: p.metadata.id, name: p.metadata.name, version: p.metadata.version, category: p.metadata.category, priority: p.metadata.priority, enabled: container.plugins.isEnabled(p.metadata.id), supportsImages: p.metadata.supportsImages, rateLimit: p.metadata.rateLimit, homepage: p.metadata.homepage }));
+      const plugins = container.plugins.list().map(p => {
+        const status = container.plugins.getStatus(p.metadata.id);
+        return {
+          id: p.metadata.id,
+          name: p.metadata.name,
+          version: p.metadata.version,
+          category: p.metadata.category,
+          tier: p.getTier(),  // v11.7.1: Added tier field for Post to Channel grouping
+          priority: p.metadata.priority,
+          enabled: container.plugins.isEnabled(p.metadata.id),
+          supportsImages: p.metadata.supportsImages,
+          rateLimit: p.metadata.rateLimit,
+          homepage: p.metadata.homepage,
+          displayIcon: p.metadata.displayIcon ?? "",  // v11.7.1: Added display fields
+          displaySource: p.metadata.displaySource ?? "",
+          lastItemCount: status.lastItemCount ?? null,  // v11.7.1: Added last item count
+        };
+      });
       let statuses: Record<string, unknown> = {};
       try { statuses = container.plugins.getAllStatuses() as unknown as Record<string, unknown>; } catch { /* non-fatal */ }
       return json({ ok: true, plugins, statuses });

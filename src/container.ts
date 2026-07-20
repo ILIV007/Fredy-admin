@@ -270,6 +270,7 @@ export function buildContainer(env: Env): Container {
     quietHoursChecker,
     schedulerConfig: async () => (await config.getSettings(Number(env.ADMIN_ID))).scheduler,
     strategyConfig: async () => (await config.getSettings(Number(env.ADMIN_ID))).strategy,
+    pluginManager: plugins,  // v11.7.1: For filtering disabled providers
   });
   const dailyPlanner = new DailyPlanner({
     kv,

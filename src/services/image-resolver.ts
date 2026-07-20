@@ -44,16 +44,10 @@ export class ImageResolver {
    * Returns null if no real image is found (no fallback logos).
    */
   async resolve(item: SourceItem): Promise<ResolvedImage | null> {
-    // 1. Check cache first.
+    // 1. Check cache first. v11.7.1: No logging on cache hit (avoid verbose).
     const cacheKey = `${CACHE_PREFIX}${this.hashUrl(item.url)}`;
     const cached = await this.deps.kv.getJson<ResolvedImage>(cacheKey).catch(() => null);
     if (cached?.url) {
-      this.deps.logger.info("pipeline.start", {
-        stage: "image_resolver",
-        source: cached.source,
-        cached: true,
-        message: "Image resolved from cache",
-      });
       return cached;
     }
 
@@ -108,6 +102,7 @@ export class ImageResolver {
     }
 
     // No image found — return null (text-only post, no ugly fallback).
+    // v11.7.1: Only log when no image found (per spec: avoid verbose logging).
     this.deps.logger.info("pipeline.start", {
       stage: "image_resolver",
       url: item.url,

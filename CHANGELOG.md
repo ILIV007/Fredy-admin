@@ -2,6 +2,54 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.7.1] — 2026-07-20 — Post to Channel Fix + Disabled Provider Selection Fix + Image Optimization
+
+### 🔴 Critical Fixes
+
+- **FIX: Post to Channel page completely empty** — The plugins API endpoint
+  (`GET /Manager/api/plugins`) was NOT returning the `tier` field. The v11.6.3
+  `loadPost()` function groups providers by tier (S/A/B), but since `tier` was
+  missing from the API response, all tier arrays were empty — resulting in a
+  blank page. Now the API returns `tier`, `displayIcon`, `displaySource`, and
+  `lastItemCount` for each plugin.
+
+- **FIX: Strategy engine assigns disabled providers to slots** — The
+  `selectProvider()` method in `strategy-engine.ts` was picking from
+  `CATEGORY_PROVIDERS` which includes legacy disabled providers (news, wikimedia,
+  hackernews, reddit). The strategy engine could assign "news" (disabled) to a
+  slot, and the scheduler would then fail when trying to fetch from it.
+  Now `selectProvider()` filters to only ENABLED providers via
+  `pluginManager.isEnabled(id)`. Added `pluginManager` to StrategyEngineDeps.
+
+### Image Pipeline Optimization (per spec)
+
+- Reduced logging: only log when no image found or Telegram rejects image
+- Cache hit no longer logs (avoids verbose output)
+- Provider image check stops immediately (no unnecessary HTML fetch)
+- og:image checked before twitter:image (already implemented)
+- Stop on first valid image found (already implemented)
+- No placeholder images (already implemented — text-only if no image)
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.7.0 → 11.7.1 |
+| `package.json` | version 11.7.1 |
+| `src/core/constants.ts` | APP_VERSION = "11.7.1" |
+| `src/entry/manager.ts` | Plugins API returns tier, displayIcon, displaySource, lastItemCount |
+| `src/services/strategy-engine.ts` | selectProvider() filters disabled providers, added pluginManager to deps |
+| `src/container.ts` | Passes pluginManager to StrategyEngine |
+| `src/services/image-resolver.ts` | Reduced logging (only log failures, not cache hits) |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.7.1
+
+---
+
 ## [11.7.0] — 2026-07-20 — Unified Image Pipeline + No Fallback Logos + Manager Syntax Fix
 
 ### 🔴 Critical Fixes

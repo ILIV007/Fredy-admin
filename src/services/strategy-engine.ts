@@ -46,6 +46,8 @@ export interface StrategyEngineDeps {
   readonly quietHoursChecker: QuietHoursChecker;
   readonly schedulerConfig: () => Promise<SchedulerConfig>;
   readonly strategyConfig: () => Promise<StrategyConfig>;
+  /** v11.7.1: Used to filter out disabled providers during plan generation. */
+  readonly pluginManager: import("./plugin-manager").PluginManager;
 }
 
 /** KV key for storing the daily publish plan. */
@@ -304,10 +306,19 @@ export class StrategyEngine {
    * Select a provider for a category, influenced by the weekly theme.
    * If the theme has topics that match a provider's keywords, that
    * provider is preferred. Otherwise, a random provider is selected.
+   *
+   * v11.7.1: CRITICAL FIX — filters out DISABLED providers. Previously, the
+   * strategy engine could assign "news" (legacy, disabled) or "wikimedia"
+   * (legacy, disabled) to slots, causing the scheduler to fail when trying
+   * to fetch from a disabled provider.
    */
   private selectProvider(category: Category, theme: DailyTheme | null): string | null {
-    const providers = CATEGORY_PROVIDERS[category];
-    if (!providers || providers.length === 0) return null;
+    const allProviders = CATEGORY_PROVIDERS[category];
+    if (!allProviders || allProviders.length === 0) return null;
+
+    // v11.7.1: Filter to only ENABLED providers.
+    const providers = allProviders.filter((id) => this.deps.pluginManager.isEnabled(id));
+    if (providers.length === 0) return null;
 
     // If no theme, pick random.
     if (!theme || theme.topics.length === 0) {
