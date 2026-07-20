@@ -39,6 +39,8 @@ export interface FinalPublisherDeps {
   readonly settings: () => Promise<FredySettings>;
   /** v11.7.0: Unified image resolver */
   readonly imageResolver?: import("./image-resolver").ImageResolver;
+  /** v11.9.0: Dedup detector — EVERY publish records dedup automatically. */
+  readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
 }
 
 /** Max retries (0 = no retries, just 1 attempt). */
@@ -132,6 +134,43 @@ export class FinalPublisher {
     const startTime = Date.now();
     const settings = await this.deps.settings();
     const minScore = settings.ai.qualityThreshold;
+
+    // v11.9.0: CRITICAL — Pre-publish dedup check.
+    // Even if the pipeline already checked dedup, we check AGAIN here right
+    // before publishing. This catches the case where a manual publish happened
+    // BETWEEN the pipeline's dedup check and this publish call.
+    if (this.deps.duplicateDetector && content.sourceUrl) {
+      try {
+        const dupCheck = await this.deps.duplicateDetector.check({
+          id: content.id,
+          source: content.pluginId,
+          category: content.category,
+          title: content.headline ?? "",
+          body: content.text ?? "",
+          url: content.sourceUrl,
+          fetchedAt: Date.now(),
+        } as import("../types/api").SourceItem);
+        if (dupCheck.isDuplicate) {
+          this.deps.logger.warn("quality.reject", {
+            contentId: content.id,
+            reason: "duplicate_pre_publish",
+            duplicateOf: dupCheck.existingId,
+            url: content.sourceUrl,
+            message: "Pre-publish dedup check: content already published",
+          });
+          return {
+            ok: false,
+            contentId: content.id,
+            category: content.category,
+            telegramMessageId: null,
+            telegramChatId: null,
+            publishedAt: Date.now(),
+            error: `Duplicate content (already published as ${dupCheck.existingId ?? "unknown"})`,
+            attempts: 0,
+          };
+        }
+      } catch { /* non-fatal — proceed with publish */ }
+    }
 
     // ── Quality Gate (HARD RULE) ────────────────────────────
     if (content.quality.overallScore < minScore) {
@@ -248,6 +287,20 @@ export class FinalPublisher {
 
     // ── Record success in history ───────────────────────────
     await this.deps.history.recordPublished(content, messageId, chatId);
+
+    // v11.9.0: CRITICAL FIX — Record dedup INSIDE publish() so EVERY publish
+    // path (manual, scheduler, force, test) automatically records dedup.
+    // Previously this was the caller's responsibility, and any path that
+    // forgot to call recordPublished() created a dedup gap — causing
+    // duplicate posts when the scheduler later fetched the same content.
+    if (this.deps.duplicateDetector) {
+      await this.deps.duplicateDetector.recordPublished(content).catch((e: unknown) => {
+        this.deps.logger.warn("pipeline.error", {
+          error: e instanceof Error ? e.message : String(e),
+          message: "recordPublished failed (non-fatal)",
+        });
+      });
+    }
 
     this.deps.logger.info("telegram.send", {
       contentId: content.id,

@@ -309,6 +309,7 @@ export function buildContainer(env: Env): Container {
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
     imageResolver,
+    duplicateDetector,  // v11.9.0: Auto-record dedup on every publish
   });
   const scheduler = new SchedulerService({
     logger,

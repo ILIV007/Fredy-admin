@@ -2,6 +2,51 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.9.0] — 2026-07-20 — CRITICAL: Unified Dedup in PublishService + Scheduler Timing Logs
+
+### 🔴 CRITICAL FIX: Duplicate Posts Between Manual and Automatic Publish
+
+**Root Cause:** `finalPublisher.publish()` recorded history but NOT dedup entries.
+Dedup recording was the caller's responsibility — any publish path that forgot
+to call `recordPublished()` created a gap, allowing the scheduler to re-publish
+the same content.
+
+**Fix:**
+1. `recordPublished()` is now called INSIDE `finalPublisher.publish()` — automatically
+   for ALL publish paths (manual, scheduler, force, test, manager).
+2. Added **pre-publish dedup check** in `publish()` — checks dedup right before
+   sending to Telegram, catching duplicates even if the pipeline's check missed them.
+3. Added `duplicateDetector` to `FinalPublisherDeps`.
+4. Wired in `container.ts`.
+
+### Scheduler Timing Debug
+
+The scheduler logic was already correct (`slot.epochMs <= now` — fires on first
+tick after slot time). The late publishing was caused by cron-job.org not firing
+at the expected time. Added detailed timing logs:
+- Current time, timezone, all slot times, which are due, overdue minutes
+- "no_due_slots" log when no slots are due
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.8.1 → 11.9.0 |
+| `package.json` | version 11.9.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.9.0" |
+| `src/services/final-publisher.ts` | Pre-publish dedup check + auto recordPublished |
+| `src/container.ts` | Passes duplicateDetector to FinalPublisher |
+| `src/services/scheduler-service.ts` | Detailed timing logs in tick() |
+| **`DEBUG_REPORT.md`** | **NEW** — Full root cause analysis |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.9.0
+
+---
+
 ## [11.8.1] — 2026-07-20 — Link Preview in Bot Settings + Manager Dashboard
 
 ### 🆕 Settings Integration

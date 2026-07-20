@@ -190,8 +190,28 @@ export class SchedulerService {
 
     // 3. Find ALL due, unfired slots (v11.2.0: was findDueSlot returning ONE slot;
     //    now findDueSlots returns ALL due-within-grace slots to prevent pile-up loss).
+    // v11.9.0: Add detailed timing log for debugging.
+    this.deps.logger.info("scheduler.tick", {
+      now: new Date(now).toISOString(),
+      nowEpoch: now,
+      timezone: settings.scheduler.timezone,
+      slots: plan.slots.map((s) => ({
+        index: s.index,
+        time: s.time,
+        epochMs: s.epochMs,
+        isDue: s.epochMs <= now,
+        overdueMin: s.epochMs <= now ? Math.round((now - s.epochMs) / 60000) : 0,
+      })),
+      message: "Scheduler tick — checking slots",
+    });
+
     const dueSlots = await this.findDueSlots(plan, now);
     if (dueSlots.length === 0) {
+      this.deps.logger.info("scheduler.skip", {
+        reason: "no_due_slots",
+        slotsChecked: plan.slots.length,
+        message: "No due slots found",
+      });
       return {
         fired: false,
         slot: null,
