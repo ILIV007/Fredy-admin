@@ -1197,7 +1197,8 @@ export class SchedulerService {
             date: p.date,
             time: p.time,
             epochMs: p.epochMs,
-            windowEnd: p.windowEnd ?? p.time,  // v11.16.0: carry window end
+            windowEnd: p.windowEnd ?? p.time,
+            scheduledTime: p.scheduledTime,  // v11.17.0: display-only
             category: p.category,
             jitterMinutes: 0,
             fired: p.status === "published" || p.status === "failed" || p.status === "backup",

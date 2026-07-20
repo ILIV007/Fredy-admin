@@ -143,7 +143,8 @@ export class StrategyEngine {
         index,
         date: targetDate,
         time: slot.time,
-        windowEnd: slot.windowEnd ?? slot.time,  // v11.15.0: window end
+        windowEnd: slot.windowEnd ?? slot.time,
+        scheduledTime: slot.scheduledTime,  // v11.17.0: display-only random time
         epochMs: slot.epochMs,
         category: slot.category,
         provider,

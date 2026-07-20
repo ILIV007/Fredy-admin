@@ -20,17 +20,30 @@ export interface PostingWindow {
 }
 
 /** A generated slot time for a day.
- *  v11.15.0: Window-based — no exact epochMs. The scheduler fires when
- *  the cron tick falls within the window's time range. */
+ *  v11.17.0: Domain Separation — Window fields drive scheduling, time fields are display-only.
+ *
+ *  SCHEDULING FIELDS (used by scheduler to make publish decisions):
+ *  - time (windowStart)
+ *  - windowEnd
+ *
+ *  DISPLAY-ONLY FIELDS (for UI/analytics, NOT for scheduling):
+ *  - scheduledTime (random time within window, for display)
+ *  - epochMs (window start epoch, for ordering only)
+ *  - publishedAt (actual publish time, set after publish)
+ */
 export interface SlotTime {
   readonly index: number;
   readonly date: string; // YYYY-MM-DD
-  /** Window start time "HH:MM" */
+  /** Window start time "HH:MM" — SCHEDULING FIELD */
   readonly time: string;
-  /** Window end time "HH:MM" (v11.15.0) */
+  /** Window end time "HH:MM" — SCHEDULING FIELD */
   readonly windowEnd: string;
-  /** Epoch ms for window START (for ordering, not exact firing) */
+  /** v11.17.0: Scheduled time "HH:MM" — DISPLAY ONLY (random within window) */
+  readonly scheduledTime?: string;
+  /** Epoch ms for window START — DISPLAY ONLY (for ordering, NOT for firing) */
   readonly epochMs: number;
+  /** v11.17.0: Actual publish time (epoch ms) — set after successful publish */
+  readonly publishedAt?: number;
   readonly category: Category;
   readonly jitterMinutes: number;
   /** v8.0.0: True if the slot has been fired (set by status()). */

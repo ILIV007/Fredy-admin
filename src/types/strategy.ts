@@ -77,12 +77,16 @@ export interface PlannedPost {
   readonly index: number;
   /** Date in YYYY-MM-DD format. */
   readonly date: string;
-  /** Time in HH:MM format — window START (v11.15.0). */
+  /** Time in HH:MM format — window START (v11.15.0). SCHEDULING FIELD. */
   readonly time: string;
-  /** v11.15.0: Window end time "HH:MM". */
+  /** v11.15.0: Window end time "HH:MM". SCHEDULING FIELD. */
   readonly windowEnd?: string;
-  /** Epoch milliseconds for the window start (used for ordering, not exact firing). */
+  /** v11.17.0: Scheduled time "HH:MM" — DISPLAY ONLY (random within window). */
+  readonly scheduledTime?: string;
+  /** Epoch milliseconds for the window start — DISPLAY ONLY (for ordering). */
   readonly epochMs: number;
+  /** v11.17.0: Actual publish time (epoch ms) — set after successful publish. */
+  readonly publishedAt?: number;
   /** Category for this post. */
   readonly category: Category;
   /** Preferred provider ID (influenced by weekly theme). */

@@ -731,7 +731,8 @@ export async function managerHandler(
           publishing: publishing.length,
           slots: slots.map((s) => ({
             index: s.index,
-            window: `${s.time}-${s.windowEnd ?? s.time}`,  // v11.16.0: show as window
+            window: `${s.time}-${s.windowEnd ?? s.time}`,
+            scheduledTime: s.scheduledTime ?? s.time,  // v11.17.0: display-only
             time: s.time,
             windowEnd: s.windowEnd ?? s.time,
             category: s.category,

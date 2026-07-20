@@ -102,11 +102,22 @@ export class DailyPlanner {
     return this.generate(targetDate);
   }
 
-  /** Get the next unfired slot from today's plan. */
+  /** Get the next unfired slot from today's plan.
+   *  v11.17.0: Window-based — uses time string comparison, not epochMs. */
   async getNextSlot(now = Date.now()): Promise<{ slot: SlotTime; plan: DailyPlan } | null> {
     const plan = await this.getOrGenerate();
+    // v11.17.0: Compare using window start time string, not epochMs.
+    const nowInTz = new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(now));
+    const [nowH, nowM] = nowInTz.split(":").map(Number);
+    const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
     for (const s of plan.slots) {
-      if (s.epochMs <= now) continue;
+      // Parse window start as minutes-since-midnight.
+      const [sH, sM] = s.time.split(":").map(Number);
+      const startMin = (sH ?? 0) * 60 + (sM ?? 0);
+      if (nowMinutes >= startMin) continue;  // Window already started — skip.
       const fired = await this.isSlotFired(s);
       if (!fired) {
         return { slot: s, plan };

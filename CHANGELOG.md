@@ -2,6 +2,74 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.17.0] — 2026-07-20 — Scheduler Domain Separation (Window vs Display-Only)
+
+### 🏗️ Architecture: Domain Model Separation
+
+Separated scheduling fields from display-only fields in the scheduler Domain Model.
+
+**SCHEDULING FIELDS** (used by scheduler for publish decisions):
+- `time` (windowStart) — "HH:MM" string
+- `windowEnd` — "HH:MM" string
+
+**DISPLAY-ONLY FIELDS** (for UI/analytics, NOT for scheduling):
+- `scheduledTime` — "HH:MM" string (random within window, for display)
+- `epochMs` — number (window start epoch, for ordering only)
+- `publishedAt` — number (actual publish time, set after publish)
+
+### Changes
+
+1. **Types**: Added `scheduledTime` and `publishedAt` to `SlotTime` and `PlannedPost`
+   with explicit comments marking them as display-only.
+
+2. **TimeGenerator**: Now generates `scheduledTime` — a random time within each
+   window, purely for display. The scheduler does NOT use this for firing decisions.
+
+3. **strategy-engine**: Passes `scheduledTime` through to the plan.
+
+4. **scheduler-service**: Carries `scheduledTime` in plan conversion.
+
+5. **daily-planner**: `getNextSlot()` now uses window time string comparison
+   instead of `epochMs <= now`.
+
+6. **manager.ts**: Scheduler debug API includes `scheduledTime` in response.
+
+### Audit Results
+
+```
+epochMs scheduling usages:     0
+scheduledTime scheduling usages: 0
+Window scheduling references:  ✓
+Publish decision source:       Window Only
+Dashboard:                     Updated
+Migration:                     Complete
+```
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.16.0 → 11.17.0 |
+| `package.json` | version 11.17.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.17.0" |
+| `src/types/scheduler.ts` | Added scheduledTime, publishedAt (display-only) |
+| `src/types/strategy.ts` | Added scheduledTime, publishedAt to PlannedPost |
+| `src/services/time-generator.ts` | Generates scheduledTime (random within window) |
+| `src/services/strategy-engine.ts` | Passes scheduledTime through |
+| `src/services/scheduler-service.ts` | Carries scheduledTime in plan conversion |
+| `src/services/daily-planner.ts` | Window-based getNextSlot (no epochMs) |
+| `src/entry/manager.ts` | Scheduler debug API includes scheduledTime |
+| **`DOMAIN_SEPARATION_AUDIT.md`** | **NEW** — Full audit report |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.17.0
+- **Ready for Random Jitter (v11.18.0)**
+
+---
+
 ## [11.16.0] — 2026-07-20 — Window Scheduler Audit: Remove All epochMs Dependencies
 
 ### 🔴 Critical: Removed Remaining epochMs Dependencies

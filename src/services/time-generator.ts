@@ -109,9 +109,10 @@ export class TimeGenerator {
     generatedTimes.sort((a, b) => a.minutes - b.minutes);
 
     // Build SlotTime objects.
-    // v11.15.0: Window-based — each slot represents a posting WINDOW, not an exact time.
-    // The slot.time is the window START, windowEnd is the window END.
-    // The scheduler fires when the cron tick falls within [start, end].
+    // v11.17.0: Domain Separation — Window fields drive scheduling, scheduledTime is display-only.
+    // - time/windowEnd: SCHEDULING — when the scheduler should consider this slot due
+    // - scheduledTime: DISPLAY ONLY — a random time within the window for UI/analytics
+    // - epochMs: DISPLAY ONLY — window start epoch for ordering
     const slots: SlotTime[] = generatedTimes.map((entry, index) => {
       const range = minuteRanges[entry.windowIndex]!;
       const startHh = Math.floor(range.start / 60).toString().padStart(2, "0");
@@ -120,14 +121,22 @@ export class TimeGenerator {
       const endMm = (range.end % 60).toString().padStart(2, "0");
       const time = `${startHh}:${startMm}`;
       const windowEnd = `${endHh}:${endMm}`;
-      // epochMs is the window START — used for ordering, NOT exact firing.
       const epochMs = this.minutesToEpochMs(date, range.start, config.timezone);
+
+      // v11.17.0: Generate a random scheduledTime within the window for display.
+      // This is NOT used for scheduling — only for UI/analytics.
+      const schedMinutes = randomInt(range.start, range.end);
+      const schedHh = Math.floor(schedMinutes / 60).toString().padStart(2, "0");
+      const schedMm = (schedMinutes % 60).toString().padStart(2, "0");
+      const scheduledTime = `${schedHh}:${schedMm}`;
+
       return {
         index,
         date,
-        time,
-        windowEnd,
-        epochMs,
+        time,         // Window START — SCHEDULING
+        windowEnd,    // Window END — SCHEDULING
+        scheduledTime, // Random time — DISPLAY ONLY
+        epochMs,      // Window start epoch — DISPLAY ONLY (ordering)
         category: entry.category,
         jitterMinutes: config.jitterMinutes,
       };
