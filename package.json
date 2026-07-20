@@ -1,7 +1,7 @@
 {
   "name": "fredy-admin",
-  "version": "11.15.0",
-  "description": "Fredy v11.15 — Editorial Engine with Tier-Based Providers, Adaptive Refresh, Rotation, Breaking Content. Cloudflare Workers, serverless.",
+  "version": "11.16.0",
+  "description": "Fredy v11.16 — Editorial Engine with Tier-Based Providers, Adaptive Refresh, Rotation, Breaking Content. Cloudflare Workers, serverless.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

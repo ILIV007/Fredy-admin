@@ -2,6 +2,60 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.16.0] — 2026-07-20 — Window Scheduler Audit: Remove All epochMs Dependencies
+
+### 🔴 Critical: Removed Remaining epochMs Dependencies
+
+v11.15.0 introduced window-based scheduling but left many `epochMs` references
+that caused the dashboard to show exact times and the status() method to use
+timestamp comparison.
+
+### Fixes
+
+1. **scheduler-service.ts `status()`**: Replaced `p.epochMs > now` with window-based
+   minute comparison (parses `p.time` as minutes-since-midnight, uses 10min tolerance)
+
+2. **scheduler-service.ts `findDueSlot()`**: Added 10-minute cron tolerance
+   (`nowMinutes < startMin - 10`), exclusive end boundary (`>=` instead of `>`)
+
+3. **manager.ts scheduler debug API**: Replaced all `epochMs` comparisons with
+   window-based logic. Shows `window: "08:00-10:00"` instead of `time: "08:00"`.
+   Removed `overdueMinutes` and `inMinutes` (not meaningful in window system).
+
+4. **strategy-engine.ts quiet hours**: Uses `timeStringToEpoch()` helper instead
+   of `post.epochMs` — converts window start time string to epoch for quiet hours check
+
+5. **strategy-engine.ts gap validation**: Uses `windowEnd` and `time` strings
+   (minutes-since-midnight) instead of `epochMs` difference
+
+6. **Plan conversion**: Carries `windowEnd` through to DailyPlan for dashboard
+
+### Boundary Conditions
+
+- Windows use **exclusive end**: `[start, end)` — 16:00-18:00 means 16:00 ≤ now < 18:00
+- **Cron tolerance**: 10 minutes before window start (allows early cron execution)
+- **Window expiry**: 6 hours after end (3 missed cron ticks)
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.15.0 → 11.16.0 |
+| `package.json` | version 11.16.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.16.0" |
+| `src/services/scheduler-service.ts` | Window-based status(), cron tolerance, exclusive end |
+| `src/services/strategy-engine.ts` | Window-based validation, timeStringToEpoch helper |
+| `src/entry/manager.ts` | Window-based scheduler debug API |
+| **`WINDOW_SCHEDULER_AUDIT_REPORT.md`** | **NEW** — Full audit report |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.16.0
+
+---
+
 ## [11.15.0] — 2026-07-20 — CRITICAL: Window-Based Scheduler (Remove Exact Timestamps)
 
 ### 🏗️ Architecture: Time-Based → Window-Based Scheduler

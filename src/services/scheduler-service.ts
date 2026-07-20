@@ -303,16 +303,19 @@ export class SchedulerService {
       }
       if (alreadyFired) continue;
 
-      // v11.15.0: Window is "due" if current time >= window start.
-      // This means ANY tick after the window starts will fire it.
-      if (nowMinutes < startMin) {
-        // Window hasn't started yet — skip.
+      // v11.16.0: Window is "due" with CRON TOLERANCE.
+      // Allow firing up to 10 minutes BEFORE window start (cron can be early).
+      const CRON_TOLERANCE_MINUTES = 10;
+      if (nowMinutes < startMin - CRON_TOLERANCE_MINUTES) {
+        // Window hasn't started yet (with tolerance) — skip.
         continue;
       }
 
-      // v11.15.0: Check if window is expired (too far past end).
+      // v11.16.0: Window expiry — 6 hours after window END (exclusive).
+      // Windows use exclusive end: [start, end) so 18:00-20:00 means
+      // 18:00 <= now < 20:00. At exactly 20:00, the next window takes over.
       const expiryMin = endMin + WINDOW_EXPIRY_HOURS * 60;
-      const isExpired = nowMinutes > expiryMin;
+      const isExpired = nowMinutes >= expiryMin;
 
       if (isExpired) {
         // Window is expired — mark as failed.
@@ -1194,6 +1197,7 @@ export class SchedulerService {
             date: p.date,
             time: p.time,
             epochMs: p.epochMs,
+            windowEnd: p.windowEnd ?? p.time,  // v11.16.0: carry window end
             category: p.category,
             jitterMinutes: 0,
             fired: p.status === "published" || p.status === "failed" || p.status === "backup",
@@ -1215,18 +1219,31 @@ export class SchedulerService {
       // dailyPlanner.getNextSlot() which reads a DIFFERENT plan than the
       // scheduler uses. Now reads from the strategy plan (the same plan
       // the scheduler fires from) so the dashboard matches reality.
+      // v11.16.0: Window-based next slot — find next PENDING window
+      // whose start time hasn't been reached yet.
       if (this.deps.strategyEngine) {
         try {
           const stratPlan = await this.deps.strategyEngine.getOrGeneratePlan();
-          const now = Date.now();
-          const nextPost = stratPlan.posts.find((p) =>
-            p.status === "pending" && p.epochMs > now,
-          );
+          const tz = (await this.deps.settings()).scheduler.timezone || "UTC";
+          const nowInTz = new Intl.DateTimeFormat("en-US", {
+            timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+          }).format(new Date());
+          const [nowH, nowM] = nowInTz.split(":").map(Number);
+          const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+          // Find the first pending window whose start is still in the future.
+          const nextPost = stratPlan.posts.find((p) => {
+            if (p.status !== "pending") return false;
+            const [sH, sM] = p.time.split(":").map(Number);
+            const startMin = (sH ?? 0) * 60 + (sM ?? 0);
+            return nowMinutes < startMin;
+          });
           if (nextPost) {
             nextSlot = {
               index: nextPost.index,
               date: nextPost.date,
               time: nextPost.time,
+              windowEnd: nextPost.windowEnd ?? nextPost.time,
               epochMs: nextPost.epochMs,
               category: nextPost.category,
               jitterMinutes: 0,

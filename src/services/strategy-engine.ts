@@ -372,6 +372,28 @@ export class StrategyEngine {
     }
   }
 
+  /** v11.16.0: Convert date + HH:MM + timezone to epoch ms (for quiet hours check). */
+  private timeStringToEpoch(date: string, hhmm: string, timezone: string): number {
+    const [year, month, day] = date.split("-").map(Number);
+    const [hour, min] = hhmm.split(":").map(Number);
+    const utcMidnight = Date.UTC(year!, month! - 1, day!, 0, 0, 0);
+    // Use Intl to get timezone offset.
+    try {
+      const dtf = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      });
+      const parts = dtf.formatToParts(new Date(utcMidnight));
+      const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? "0");
+      const asIfUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") === 24 ? 0 : get("hour"), get("minute"), get("second"));
+      const offsetMin = Math.round((asIfUtc - utcMidnight) / 60_000);
+      return utcMidnight + ((hour ?? 0) * 60 + (min ?? 0) - offsetMin) * 60_000;
+    } catch {
+      return utcMidnight + ((hour ?? 0) * 60 + (min ?? 0)) * 60_000;
+    }
+  }
+
   // ────────────────────────────────────────────────────────
   // Internal: Validation
   // ────────────────────────────────────────────────────────
@@ -419,23 +441,32 @@ export class StrategyEngine {
       }
     }
 
-    // Check quiet hours — posts should not be inside quiet hours.
+    // v11.16.0: Check quiet hours using window START time (not epochMs).
     const qh = config.quietHours;
     if (qh) {
       for (const post of posts) {
-        const isQuiet = this.deps.quietHoursChecker.isQuietHours(post.epochMs, config);
+        // Use the window start time string for quiet hours check.
+        const isQuiet = this.deps.quietHoursChecker.isQuietHours(
+          this.timeStringToEpoch(post.date, post.time, config.timezone),
+          config,
+        );
         if (isQuiet) {
-          warnings.push(`Post ${post.index} (${post.time}) falls inside quiet hours (${qh.start}–${qh.end})`);
+          warnings.push(`Window ${post.index} (${post.time}-${post.windowEnd ?? post.time}) falls inside quiet hours (${qh.start}–${qh.end})`);
         }
       }
     }
 
-    // Check minimum gap between posts.
+    // v11.16.0: Check minimum gap between windows using time strings.
     for (let i = 1; i < posts.length; i++) {
-      const gapMs = posts[i]!.epochMs - posts[i - 1]!.epochMs;
-      const gapMin = gapMs / (60 * 1000);
+      const prevEnd = posts[i - 1]!.windowEnd ?? posts[i - 1]!.time;
+      const currStart = posts[i]!.time;
+      const [pH, pM] = prevEnd.split(":").map(Number);
+      const [cH, cM] = currStart.split(":").map(Number);
+      const prevEndMin = (pH ?? 0) * 60 + (pM ?? 0);
+      const currStartMin = (cH ?? 0) * 60 + (cM ?? 0);
+      const gapMin = currStartMin - prevEndMin;
       if (gapMin < config.minGapMinutes) {
-        warnings.push(`Gap between posts ${posts[i - 1]!.index} and ${posts[i]!.index} is ${gapMin.toFixed(0)} min (min: ${config.minGapMinutes})`);
+        warnings.push(`Gap between windows ${posts[i - 1]!.index} and ${posts[i]!.index} is ${gapMin} min (min: ${config.minGapMinutes})`);
       }
     }
 

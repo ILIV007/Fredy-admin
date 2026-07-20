@@ -649,15 +649,34 @@ export async function managerHandler(
       // Strategy plan (the one the scheduler actually uses)
       const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
 
-      // Slot analysis
+      // v11.16.0: Window-based analysis — no epochMs comparison.
+      const tz = settings.scheduler.timezone || "UTC";
+      const nowInTz = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date(now));
+      const [nowH, nowM] = nowInTz.split(":").map(Number);
+      const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
       const slots = plan?.posts ?? [];
       const completed = slots.filter((s) => s.status === "published" || s.status === "backup");
-      const pending = slots.filter((s) => s.status === "pending" && s.epochMs > now);
-      const dueNow = slots.filter((s) => s.status === "pending" && s.epochMs <= now);
+      // v11.16.0: Pending = window start is still in the future (with 10min tolerance)
+      const pending = slots.filter((s) => {
+        if (s.status !== "pending") return false;
+        const [sH, sM] = s.time.split(":").map(Number);
+        const startMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes < startMin - 10; // 10min cron tolerance
+      });
+      // v11.16.0: Due NOW = window has started but not yet published
+      const dueNow = slots.filter((s) => {
+        if (s.status !== "pending") return false;
+        const [sH, sM] = s.time.split(":").map(Number);
+        const startMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes >= startMin - 10;
+      });
       const failed = slots.filter((s) => s.status === "failed");
       const publishing = slots.filter((s) => s.status === "publishing");
 
-      // Next slot
+      // Next window (first pending whose start is in the future)
       const nextSlot = pending.length > 0 ? pending[0] : null;
 
       // Last tick
@@ -712,26 +731,25 @@ export async function managerHandler(
           publishing: publishing.length,
           slots: slots.map((s) => ({
             index: s.index,
+            window: `${s.time}-${s.windowEnd ?? s.time}`,  // v11.16.0: show as window
             time: s.time,
-            epochMs: s.epochMs,
+            windowEnd: s.windowEnd ?? s.time,
             category: s.category,
             status: s.status,
             provider: s.provider,
-            overdueMinutes: s.epochMs <= now ? Math.round((now - s.epochMs) / 60000) : 0,
             error: s.error ?? null,
           })),
         } : null,
         nextSlot: nextSlot ? {
           index: nextSlot.index,
+          window: `${nextSlot.time}-${nextSlot.windowEnd ?? nextSlot.time}`,
           time: nextSlot.time,
-          epochMs: nextSlot.epochMs,
+          windowEnd: nextSlot.windowEnd ?? nextSlot.time,
           category: nextSlot.category,
-          inMinutes: Math.round((nextSlot.epochMs - now) / 60000),
         } : null,
         dueSlots: dueNow.map((s) => ({
           index: s.index,
-          time: s.time,
-          overdueMinutes: Math.round((now - s.epochMs) / 60000),
+          window: `${s.time}-${s.windowEnd ?? s.time}`,
           category: s.category,
         })),
         lock: {
