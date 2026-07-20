@@ -8,7 +8,7 @@
  *  Bump together with VERSION file and CHANGELOG.md entry.
  *  All "version" strings in API responses should read from here, not be
  *  hardcoded inline (otherwise they drift, like the v6.2.0 strings did). */
-export const APP_VERSION = "12.0.5" as const;
+export const APP_VERSION = "12.0.6" as const;
 
 /** Build date — bump with each release. */
 export const APP_BUILD_DATE = "2026-07-20" as const;

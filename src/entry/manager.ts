@@ -2405,6 +2405,8 @@ async function loadScheduler(){
   const d=await api("scheduler");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.settings||{};const st=d.status||{};
+  // v12.0.6: Cache scheduler status for toggleScheduler() (avoids temporal dead zone bug).
+  window._lastSchedStatus=st;
   // v8.2.0: Fetch strategy plan too — unify with Strategy page's Daily Plan.
   let stratPlan=null;
   try{const sp=await api("strategy");if(sp.ok&&sp.plan){stratPlan=sp.plan;}}catch{}
@@ -2462,8 +2464,8 @@ async function loadScheduler(){
   '<div class="card"><h3 style="margin-bottom:8px">⚙️ Legacy Slots (for reference)</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.slots||[]).map(t=>'<span class="badge badge-gray">'+t+"</span>").join("")+'</div><div style="margin-top:8px;color:var(--text2);font-size:11px">Legacy fixed slot times — superseded by posting windows in v12.</div></div>'+
   historyHtml;
 }
-async function toggleScheduler(){const d=await api((d.scheduler?.status?.enabled?"scheduler/pause":"scheduler/resume"),"POST");toast(d.ok?(d.enabled?"▶️ Scheduler resumed":"⏸️ Scheduler paused"):"❌ Failed");loadScheduler();}
-async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.ok?"✅ "+d.message:"❌ "+d.message):"❌ Failed");loadScheduler();}
+async function toggleScheduler(){var st=window._lastSchedStatus;var ep=st&&st.enabled?"scheduler/pause":"scheduler/resume";const d=await api(ep,"POST");toast(d.ok?(st&&st.enabled?"⏸️ Scheduler paused":"▶️ Scheduler resumed"):"❌ Failed");loadScheduler();}
+async function forcePublish(){if(!confirm("Force publish now?"))return;toast("⚡ Triggering publish...");const d=await api("scheduler/force-publish","POST");toast(d.ok?("✅ "+(d.message||"Published")):"❌ "+(d.error||"Failed"));loadScheduler();}
 
 async function loadLogs(){
   const d=await api("logs");const c=document.getElementById("content");

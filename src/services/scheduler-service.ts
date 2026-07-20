@@ -846,33 +846,20 @@ export class SchedulerService {
                 await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
               }
 
-              // Send admin backup notification.
+              // v12.0.6: Send admin backup notification — summary only (no post copy).
               const adminId = this.deps.adminId?.() ?? 0;
               if (adminId > 0 && this.deps.tg) {
-                try {
-                  if (this.deps.uxLayer) {
-                    const backupPost = await this.deps.uxLayer.transform(fbResult.content);
-                    if (backupPost.media && backupPost.media.type === "image" && backupPost.media.url) {
-                      await this.deps.tg.sendPhoto(adminId, backupPost.media.url, backupPost.caption, {
-                        parse_mode: "HTML",
-                      }).catch(() => {});
-                    } else {
-                      await this.deps.tg.sendMessage(adminId, backupPost.fullText, {
-                        parse_mode: "HTML",
-                      }).catch(() => {});
-                    }
-                  }
-                } catch { /* non-fatal */ }
                 await this.deps.tg.sendMessage(adminId, [
                   ``,
                   reportBanner("🔄", "BACKUP POST PUBLISHED"),
                   ``,
                   ``,
-                  reportRow("📅", "Slot", `${slot.date} at ${slot.scheduledTime ?? slot.time}`),
+                  reportRow("📅", "Slot", `${slot.date} at ${slot.scheduledTime ?? slot.time} (window ${slot.time}-${slot.windowEnd ?? slot.time})`),
                   reportRow("🏷️", "Category", slot.category),
                   reportRow("❌", "Original failed", lastResult.error ?? "unknown"),
                   reportRow("🔌", "Original plugin", lastContent.pluginId),
                   reportRow("✅", "Backup plugin", fbPlugin),
+                  reportRow("📰", "Backup headline", escapeHtml(fbResult.content.headline ?? "(none)")),
                   qualityRow(fbResult.content.quality.overallScore),
                   reportRow("📤", "Channel Msg ID", String(fbPubResult.telegramMessageId)),
                   reportRow("🔖", "Content ID", fbResult.content.id),
@@ -997,65 +984,13 @@ export class SchedulerService {
     slot: SlotTime,
   ): Promise<void> {
     const adminId = this.deps.adminId?.() ?? 0;
-    if (adminId <= 0 || !this.deps.tg || !this.deps.uxLayer) return;
+    if (adminId <= 0 || !this.deps.tg) return;
 
-    // 1. Build the formatted post.
-    let finalPost;
-    try {
-      finalPost = await this.deps.uxLayer.transform(content);
-    } catch (err) {
-      // If even the transform fails, send a minimal plain-text notice.
-      this.deps.logger.warn("scheduler.transform_failed", {
-        contentId: content.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.deps.tg.sendMessage(adminId, [
-        ``,
-        `<b>━━━ 🤖 AUTO-PUBLISH NOTICE ━━━</b>`,
-        ``,
-        ``,
-        `<blockquote>📅 <b>Scheduled:</b> ${slot.date} at ${slot.time}</blockquote>`,
-        `<blockquote>🏷️ <b>Category:</b> ${slot.category}</blockquote>`,
-        `<blockquote>📰 <b>Headline:</b> ${escapeHtml(content.headline ?? "(none)")}</blockquote>`,
-        `<blockquote>🔗 <b>Source:</b> ${escapeHtml(content.sourceUrl ?? "(none)")}</blockquote>`,
-        pubResult.ok
-          ? `<blockquote>✅ <b>Channel Message ID:</b> <code>${pubResult.telegramMessageId}</code></blockquote>`
-          : `<blockquote>❌ <b>Error:</b> ${escapeHtml(pubResult.error ?? "unknown")}</blockquote>`,
-      ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
-      return;
-    }
+    // v12.0.6: Removed the formatted-post copy (was sending the channel post
+    // to admin PM). The admin already sees the post in the channel — sending
+    // a duplicate copy in PM is unnecessary noise. Now we send ONLY the
+    // summary report with status + key details.
 
-    // 2. Send the formatted post (photo or text). Fall back to text-only
-    //    if sendPhoto fails.
-    const sentPostNotice = pubResult.ok
-      ? "<b>━━━ 🤖 📤 AUTO-PUBLISHED POST ━━━</b>\n\n<i>Copy of the channel post:</i>"
-      : "<b>━━━ ⚠️ AUTO-PUBLISH FAILED ━━━</b>\n\n<i>Formatted post for manual forwarding:</i>";
-
-    try {
-      if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-        await this.deps.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, {
-          parse_mode: "HTML",
-        });
-      } else {
-        await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
-          parse_mode: "HTML",
-        });
-      }
-    } catch (err) {
-      this.deps.logger.warn("scheduler.send_formatted_failed", {
-        contentId: content.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      try {
-        if (finalPost.media && finalPost.media.type === "image") {
-          await this.deps.tg.sendMessage(adminId, `${sentPostNotice}\n\n${finalPost.fullText}`, {
-            parse_mode: "HTML",
-          });
-        }
-      } catch { /* non-fatal */ }
-    }
-
-    // 3. Send the summary report with professional UI.
     const statusBanner = pubResult.ok
       ? reportBanner("✅", "AUTO-PUBLISHED")
       : reportBanner("❌", "AUTO-PUBLISH FAILED");
@@ -1063,9 +998,11 @@ export class SchedulerService {
     await this.deps.tg.sendMessage(adminId, [
       statusBanner,
       ``,
-      reportRow("📅", "Scheduled", `${slot.date} at ${slot.time}`),
+      reportRow("📅", "Scheduled", `${slot.date} at ${slot.scheduledTime ?? slot.time} (window ${slot.time}-${slot.windowEnd ?? slot.time})`),
       reportRow("🏷️", "Category", slot.category),
       reportRow("🔌", "Source Plugin", content.pluginId),
+      reportRow("📰", "Headline", escapeHtml(content.headline ?? "(none)")),
+      reportRow("🔗", "Source URL", escapeHtml(content.sourceUrl ?? "(none)")),
       reportRow("🤖", "AI Model", `${content.aiProvider}/${content.aiModel}`),
       qualityRow(content.quality.overallScore),
       reportRow("📊", "Tokens Used", String(content.tokensUsed)),
