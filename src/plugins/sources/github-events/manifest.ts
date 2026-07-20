@@ -1,22 +1,23 @@
 /**
  * src/plugins/sources/github-events/manifest.ts
- * GitHub Events plugin — Tier S.
- * Fetches recent public events from the GitHub Activity API.
- * https://docs.github.com/en/rest/activity/events
+ * v11.14.0: Refactored from "GitHub Events" to "GitHub Discovery".
+ * No longer publishes raw events — discovers repositories from events,
+ * validates quality, then feeds them into the pipeline as repo items.
  */
+
 import type { PluginManifest } from "../../../types/plugin";
 
 export const githubEventsManifest: PluginManifest = {
   id: "github-events",
-  name: "GitHub Events",
-  version: "1.0.0",
+  name: "GitHub Discovery",
+  version: "2.0.0",
   enabled: true,
   category: "A",
   tier: "S",
-  priority: 3,
+  priority: 5,
   rateLimit: 60,
   supportsImages: false,
-  description: "Recent public events from popular GitHub repositories (releases, pushes, watches).",
+  description: "Discovers high-quality repositories from GitHub Events API. Validates stars, forks, and activity before feeding into pipeline.",
   author: "Fredy",
   docsUrl: "https://docs.github.com/en/rest/activity/events",
   homepage: "https://github.com",

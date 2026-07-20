@@ -2,6 +2,65 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.14.0] — 2026-07-20 — GitHub Events → Discovery Provider Refactor
+
+### 🏗️ Architecture: GitHub Events converted to Discovery Provider
+
+**Problem:** GitHub Events API frequently returns 0 items or low-quality events
+(PushEvent, WatchEvent, etc.) that aren't worth publishing.
+
+**Solution:** Complete refactor — the plugin no longer publishes raw events.
+Instead, it:
+
+1. Fetches events from GitHub Events API
+2. Filters to useful types only (ReleaseEvent, PushEvent, CreateEvent, PublicEvent)
+3. Extracts unique repository names (owner/repo)
+4. Fetches repository details via `GET /repos/{owner}/{repo}`
+5. Applies quality filters (stars ≥ 500, forks ≥ 50, not archived, has description, active within 180 days, older than 30 days)
+6. Returns validated repositories as SourceItems
+
+The published post describes the **repository**, not the event.
+
+### Quality Filters
+
+| Filter | Threshold |
+|--------|-----------|
+| Stars | ≥ 500 |
+| Forks | ≥ 50 |
+| Archived | false |
+| Disabled | false |
+| Description | Required (≥ 10 chars) |
+| Language | Required |
+| Repo age | ≥ 30 days |
+| Last push | ≤ 180 days |
+
+### Fallback
+
+If no repos pass quality filters (or events API returns nothing), falls back to
+GitHub Search API (`stars:>500+language:typescript`).
+
+### Canonical ID
+
+Dedup identity: `github-events:owner/repo` — stable, content-independent.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.13.0 → 11.14.0 |
+| `package.json` | version 11.14.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.14.0" |
+| `src/plugins/sources/github-events/manifest.ts` | Renamed to "GitHub Discovery", priority 5 |
+| `src/plugins/sources/github-events/index.ts` | Complete rewrite — discovery + repo validation |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.14.0
+
+---
+
 ## [11.13.0] — 2026-07-20 — CRITICAL: Duplicate Detection Complete Refactor (3-Layer)
 
 ### 🔴 CRITICAL FIX: Posts Published Again After 5-6 Days

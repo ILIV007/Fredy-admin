@@ -1,15 +1,18 @@
 /**
  * src/plugins/sources/github-events/index.ts
- * GitHub Events content source plugin — Tier S.
+ * v11.14.0: Complete refactor — GitHub Discovery Provider.
  *
- * Fetches recent public events from the GitHub Activity API.
- * Filters to: ReleaseEvent, PushEvent, WatchEvent, CreateEvent only.
- * Quality filter (v11 Phase 2): repo stars >= 500, age <= 24h.
+ * Instead of publishing raw events, this plugin:
+ * 1. Fetches events from GitHub Events API
+ * 2. Extracts repository names from useful events
+ * 3. Fetches repository details via GET /repos/{owner}/{repo}
+ * 4. Applies quality filters (stars, forks, activity, etc.)
+ * 5. Returns validated repositories as SourceItems
  *
- * https://docs.github.com/en/rest/activity/events
+ * The published post describes the REPOSITORY, not the event.
  */
 
-import type { Plugin, PluginStatus, ProviderQualityResult } from "../../../types/plugin";
+import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
 import type { Tier } from "../../../types/tier";
@@ -20,22 +23,18 @@ import { githubEventsManifest } from "./manifest";
 export { githubEventsManifest } from "./manifest";
 
 const GH_API = "https://api.github.com";
-const CACHE_KEY = "fredy:source:github-events:recent";
+const CACHE_KEY = "fredy:source:github-events:discovered";
 const CACHE_TTL_SECONDS = 2 * 3600; // 2 hours (Tier S)
 
-/** Event types we care about (v11 Phase 2 spec).
- *  v11.3.0: Added PublicEvent and ForkEvent for more variety. */
-const ACCEPTED_EVENT_TYPES = new Set([
+/** Only these event types are useful for discovery. */
+const USEFUL_EVENT_TYPES = new Set([
   "ReleaseEvent",
   "PushEvent",
-  "WatchEvent",
   "CreateEvent",
   "PublicEvent",
-  "ForkEvent",
 ]);
 
-/** Curated list of popular orgs/repos to poll for events.
- *  v11.3.0: Expanded list with more active orgs. */
+/** Orgs to poll for events. */
 const WATCHED_ORGS = [
   "microsoft", "vercel", "facebook", "rust-lang", "golang",
   "nodejs", "python", "tailwindlabs", "prisma", "cloudflare",
@@ -44,11 +43,12 @@ const WATCHED_ORGS = [
   "nuxt", "sveltejs", "vuetifyjs", "quasarframework",
 ];
 
-export interface GitHubEventsPluginDeps {
-  readonly env: Env;
-  readonly kv: KVStore;
-  readonly logger: PluginLogger;
-}
+/** Minimum quality thresholds. */
+const MIN_STARS = 500;
+const MIN_FORKS = 50;
+const MIN_DESCRIPTION_LENGTH = 10;
+const MAX_INACTIVE_DAYS = 180;
+const MIN_REPO_AGE_DAYS = 30;
 
 interface GHEvent {
   id: string;
@@ -59,30 +59,35 @@ interface GHEvent {
     action?: string;
     ref?: string;
     ref_type?: string;
-    release?: { tag_name?: string; name?: string; html_url?: string };
-    commits?: readonly { message?: string }[];
+    release?: { tag_name?: string };
   };
-  actor?: { login?: string };
 }
 
-interface GHRepoInfo {
-  stargazers_count?: number;
-  forks_count?: number;
-  archived?: boolean;
-  pushed_at?: string;
-  description?: string | null;
+interface GHRepo {
+  id: number;
+  full_name: string;
+  name: string;
+  html_url: string;
+  description: string | null;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  watchers_count: number;
+  open_issues_count: number;
+  default_branch: string;
+  homepage: string | null;
+  archived: boolean;
+  disabled: boolean;
+  created_at: string;
+  updated_at: string;
+  pushed_at: string;
+  topics?: string[];
 }
 
-/** v11.5.0: GitHub search API repo shape. */
-interface GHSearchRepo {
-  id?: number;
-  full_name?: string;
-  html_url?: string;
-  description?: string | null;
-  stargazers_count?: number;
-  forks_count?: number;
-  language?: string | null;
-  pushed_at?: string;
+export interface GitHubEventsPluginDeps {
+  readonly env: Env;
+  readonly kv: KVStore;
+  readonly logger: PluginLogger;
 }
 
 export class GitHubEventsPlugin implements Plugin {
@@ -95,16 +100,13 @@ export class GitHubEventsPlugin implements Plugin {
   getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
-  /** v11.6.2: Extract "owner/repo" from GitHub data for display.
-   *  Handles: html_url, full_name, api url, and regular github.com URLs. */
+  /** v11.6.2: Extract "owner/repo" from GitHub data for display. */
   private extractGithubRepo(raw: unknown): string {
     try {
       const obj = raw as Record<string, unknown>;
-      // Priority 1: full_name field (already "owner/repo")
       if (typeof obj["full_name"] === "string" && obj["full_name"].includes("/")) {
         return obj["full_name"] as string;
       }
-      // Priority 2: html_url (https://github.com/owner/repo)
       const htmlUrl = obj["html_url"] as string | undefined;
       if (htmlUrl) {
         const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(htmlUrl);
@@ -112,21 +114,17 @@ export class GitHubEventsPlugin implements Plugin {
           return `${match[1]}/${match[2]}`;
         }
       }
-      // Priority 3: url field (could be API URL or HTML URL)
       const url = obj["url"] as string | undefined;
       if (url) {
-        // API URL: https://api.github.com/repos/owner/repo
         const apiMatch = /api\.github\.com\/repos\/([^/]+)\/([^/?#]+)/i.exec(url);
         if (apiMatch && apiMatch[1] && apiMatch[2]) {
           return `${apiMatch[1]}/${apiMatch[2]}`;
         }
-        // Regular URL: https://github.com/owner/repo
         const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(url);
         if (match && match[1] && match[2]) {
           return `${match[1]}/${match[2]}`;
         }
       }
-      // Priority 4: repo field (events have { repo: { name: "owner/repo" } })
       const repo = obj["repo"] as { name?: string } | undefined;
       if (repo?.name && repo.name.includes("/")) {
         return repo.name;
@@ -134,7 +132,6 @@ export class GitHubEventsPlugin implements Plugin {
     } catch { /* non-fatal */ }
     return "GitHub";
   }
-
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "github-events" });
@@ -145,18 +142,6 @@ export class GitHubEventsPlugin implements Plugin {
       return cached;
     }
 
-    // v11.5.0: Try events API first, then fallback to GitHub search API
-    // (which is more reliable and returns repos with recent activity).
-    const eventsItems = await this.fetchEvents();
-    if (eventsItems.length > 0) return eventsItems;
-
-    // v11.5.0: Fallback — search for recently pushed repos.
-    return this.fetchRecentlyPushed();
-  }
-
-  /** v11.5.0: Original events API fetch. */
-  private async fetchEvents(): Promise<readonly SourceItem[]> {
-
     const headers: Record<string, string> = {
       "User-Agent": "FredyBot/1.0",
       "Accept": "application/vnd.github+json",
@@ -165,273 +150,190 @@ export class GitHubEventsPlugin implements Plugin {
       headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
     }
 
-    // v11.3.0: Poll 5 random orgs (was 3) to increase hit rate.
-    // Without GITHUB_TOKEN, rate limit is 60/hour — 5 requests is safe.
+    // Step 1: Fetch events from random orgs.
     const shuffled = [...WATCHED_ORGS].sort(() => Math.random() - 0.5).slice(0, 5);
-    const allEvents: GHEvent[] = [];
+    const discoveredRepos = new Set<string>();
+
+    this.deps.logger.info("source.fetch_start", {
+      plugin: "github-events",
+      orgsChecked: shuffled.length,
+      message: "Fetching events from orgs",
+    });
 
     for (const org of shuffled) {
       try {
         const url = `${GH_API}/users/${org}/events/public?per_page=30`;
         const res = await fetch(url, { headers });
-        if (!res.ok) {
-          this.deps.logger.warn("source.fetch_org_error", { plugin: "github-events", org, status: res.status });
-          continue;
-        }
+        if (!res.ok) continue;
         const events = await res.json() as GHEvent[];
-        allEvents.push(...events);
-      } catch (error) {
-        this.deps.logger.warn("source.fetch_org_error", {
-          plugin: "github-events", org,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
 
-    // v11.3.0: Extended age filter from 24h to 72h — GitHub Events API
-    // only returns the last 90 days of public events, but many orgs don't
-    // have events every day. 72h gives a wider window.
-    const now = Date.now();
-    const cutoff = now - 72 * 3600 * 1000; // 72 hours
-    const filtered = allEvents
-      .filter((e) => ACCEPTED_EVENT_TYPES.has(e.type))
-      .filter((e) => {
-        const ts = Date.parse(e.created_at) || 0;
-        return ts >= cutoff;
-      })
-      // v11.3.0: Deduplicate by repo+type+createdAt to avoid duplicates.
-      .filter((e, idx, arr) => {
-        const key = `${e.repo?.name}-${e.type}-${e.created_at}`;
-        return arr.findIndex((o) => `${o.repo?.name}-${o.type}-${o.created_at}` === key) === idx;
-      });
-
-    const items = filtered.map((e) => this.normalize(e)).slice(0, 10);
-
-    if (items.length > 0) {
-      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+        for (const event of events) {
+          if (!USEFUL_EVENT_TYPES.has(event.type)) continue;
+          const repoName = event.repo?.name;
+          if (!repoName || !repoName.includes("/")) continue;
+          discoveredRepos.add(repoName);
+        }
+      } catch { /* try next org */ }
     }
 
     this.deps.logger.info("source.fetch_success", {
       plugin: "github-events",
-      orgsChecked: shuffled.length,
-      eventsFound: allEvents.length,
-      filtered: filtered.length,
-      returned: items.length,
+      eventsFetched: true,
+      reposDiscovered: discoveredRepos.size,
+      message: `Discovered ${discoveredRepos.size} unique repos from events`,
     });
 
+    if (discoveredRepos.size === 0) {
+      // Fallback: search for popular repos.
+      return this.fetchPopularRepos(headers);
+    }
+
+    // Step 2: Fetch repo details and filter.
+    const repoList = Array.from(discoveredRepos).slice(0, 10);
+    const items: SourceItem[] = [];
+    let accepted = 0;
+    let rejected = 0;
+
+    for (const repoName of repoList) {
+      try {
+        const repoRes = await fetch(`${GH_API}/repos/${repoName}`, { headers });
+        if (!repoRes.ok) { rejected++; continue; }
+        const repo = await repoRes.json() as GHRepo;
+
+        // Step 3: Quality filters.
+        if (!this.passesQualityFilters(repo)) {
+          rejected++;
+          continue;
+        }
+
+        items.push(this.normalizeRepo(repo));
+        accepted++;
+      } catch { rejected++; }
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "github-events",
+      reposDiscovered: discoveredRepos.size,
+      reposChecked: repoList.length,
+      accepted,
+      rejected,
+      message: `Discovery: ${accepted} accepted, ${rejected} rejected`,
+    });
+
+    if (items.length === 0) {
+      // Fallback if all discovered repos failed quality filters.
+      return this.fetchPopularRepos(headers);
+    }
+
+    // Cache and return.
+    await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
     return items;
   }
 
-  /**
-   * v11.5.0: Fallback — search for recently pushed repos.
-   * When the events API returns nothing (orgs with no recent events),
-   * this searches for popular repos pushed in the last 24h.
-   */
-  private async fetchRecentlyPushed(): Promise<readonly SourceItem[]> {
-    const headers: Record<string, string> = {
-      "User-Agent": "FredyBot/1.0",
-      "Accept": "application/vnd.github+json",
-    };
-    if (this.deps.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
+  /** Quality filter — only high-quality repos pass. */
+  private passesQualityFilters(repo: GHRepo): boolean {
+    if (repo.stargazers_count < MIN_STARS) return false;
+    if (repo.forks_count < MIN_FORKS) return false;
+    if (repo.archived) return false;
+    if (repo.disabled) return false;
+    if (!repo.description || repo.description.length < MIN_DESCRIPTION_LENGTH) return false;
+    if (!repo.language) return false;
+
+    // Repository age — must be older than 30 days.
+    const createdAt = Date.parse(repo.created_at);
+    if (Number.isFinite(createdAt)) {
+      const ageDays = (Date.now() - createdAt) / (24 * 3600 * 1000);
+      if (ageDays < MIN_REPO_AGE_DAYS) return false;
     }
 
-    try {
-      // v11.6.2: Use a simpler query that always returns results.
-      // The previous query (stars:>100+pushed:>date) sometimes returned 0
-      // or was rate-limited. "stars:>500&sort=stars" is more reliable.
-      const url = `${GH_API}/search/repositories?q=stars:>500+language:typescript&sort=stars&order=desc&per_page=10`;
-
-      const res = await fetch(url, { headers });
-      if (!res.ok) {
-        this.deps.logger.warn("source.fetch_error", { plugin: "github-events", fallback: "search", status: res.status });
-
-        // v11.6.2: If search API fails, try a simple /repositories endpoint
-        // (doesn't require search API quota).
-        return this.fetchPopularRepos(headers);
-      }
-
-      const data = await res.json() as { items?: readonly GHSearchRepo[] };
-      const repos = data.items ?? [];
-
-      if (repos.length === 0) {
-        // Search returned nothing — try fallback.
-        return this.fetchPopularRepos(headers);
-      }
-
-      const items = repos.slice(0, 10).map((repo) => this.normalizeSearchRepo(repo));
-
-      if (items.length > 0) {
-        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
-      }
-
-      this.deps.logger.info("source.fetch_success", {
-        plugin: "github-events", fallback: "search", returned: items.length,
-      });
-
-      return items;
-    } catch (error) {
-      this.deps.logger.warn("source.fetch_error", {
-        plugin: "github-events", fallback: "search",
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return [];
+    // Recent activity — must have been pushed within 180 days.
+    const pushedAt = Date.parse(repo.pushed_at);
+    if (Number.isFinite(pushedAt)) {
+      const inactiveDays = (Date.now() - pushedAt) / (24 * 3600 * 1000);
+      if (inactiveDays > MAX_INACTIVE_DAYS) return false;
     }
+
+    return true;
   }
 
-  /** v11.6.2: Last-resort fallback — fetch repos from curated list. */
+  /** Normalize a repo into a SourceItem that describes the REPOSITORY, not the event. */
+  private normalizeRepo(repo: GHRepo): SourceItem {
+    const topics = repo.topics ?? [];
+    const stars = repo.stargazers_count;
+    const forks = repo.forks_count;
+
+    // Build a description-rich body for AI.
+    const bodyParts = [
+      repo.description ?? "",
+      `Language: ${repo.language ?? "Unknown"}`,
+      `Stars: ${stars.toLocaleString()}`,
+      `Forks: ${forks.toLocaleString()}`,
+      topics.length > 0 ? `Topics: ${topics.join(", ")}` : "",
+      repo.homepage ? `Homepage: ${repo.homepage}` : "",
+    ].filter(Boolean);
+
+    return {
+      id: `repo-${repo.full_name}`,
+      source: this.metadata.id,
+      category: this.metadata.category,
+      title: repo.full_name,
+      body: bodyParts.join("\n"),
+      url: repo.html_url,
+      language: "en",
+      publishedAt: Date.parse(repo.pushed_at) || undefined,
+      metadata: {
+        repo: repo.full_name,
+        stars,
+        forks,
+        language: repo.language,
+        topics,
+        homepage: repo.homepage,
+        openIssues: repo.open_issues_count,
+        defaultBranch: repo.default_branch,
+      },
+      displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: repo.full_name,
+      fetchedAt: Date.now(),
+    };
+  }
+
+  /** Fallback: search for popular TypeScript repos. */
   private async fetchPopularRepos(headers: Record<string, string>): Promise<readonly SourceItem[]> {
-    const POPULAR_REPOS = [
-      "microsoft/vscode", "vercel/next.js", "facebook/react",
-      "rust-lang/rust", "golang/go", "nodejs/node",
-      "python/cpython", "tailwindlabs/tailwindcss",
-    ];
-
     try {
-      // Pick 5 random repos and fetch their details.
-      const shuffled = [...POPULAR_REPOS].sort(() => Math.random() - 0.5).slice(0, 5);
-      const items: SourceItem[] = [];
+      const url = `${GH_API}/search/repositories?q=stars:>500+language:typescript&sort=stars&order=desc&per_page=10`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) return [];
 
-      for (const repo of shuffled) {
-        try {
-          const res = await fetch(`${GH_API}/repos/${repo}`, { headers });
-          if (!res.ok) continue;
-          const data = await res.json() as GHSearchRepo;
-          items.push(this.normalizeSearchRepo(data));
-        } catch { /* try next */ }
-      }
+      const data = await res.json() as { items?: readonly GHRepo[] };
+      const repos = data.items ?? [];
+
+      const items = repos
+        .filter((repo) => this.passesQualityFilters(repo))
+        .slice(0, 10)
+        .map((repo) => this.normalizeRepo(repo));
 
       if (items.length > 0) {
         await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
       }
 
       this.deps.logger.info("source.fetch_success", {
-        plugin: "github-events", fallback: "popular-repos", returned: items.length,
+        plugin: "github-events",
+        fallback: "search",
+        returned: items.length,
       });
-
       return items;
     } catch {
       return [];
     }
   }
 
-  /** v11.5.0: Normalize a search API repo into a SourceItem. */
-  private normalizeSearchRepo(repo: GHSearchRepo): SourceItem {
-    const repoName = repo.full_name ?? "unknown";
-    return {
-      id: `evt-search-${repo.id ?? repoName}`,
-      source: this.metadata.id,
-      category: this.metadata.category,
-      title: `${repoName} — recent activity`,
-      body: String(repo.description ?? "").slice(0, 500),
-      url: repo.html_url ?? `https://github.com/${repoName}`,
-      language: "en",
-      publishedAt: repo.pushed_at ? Date.parse(repo.pushed_at) || undefined : undefined,
-      metadata: {
-        eventType: "SearchResult",
-        repo: repoName,
-        stars: repo.stargazers_count,
-        forks: repo.forks_count,
-        language: repo.language,
-      },
-            displayIcon: this.metadata.displayIcon ?? "🐙",
-      displaySource: this.extractGithubRepo(raw),
-      fetchedAt: Date.now(),
-    };
-  }
-
   normalize(raw: unknown): SourceItem {
-    const event = raw as GHEvent;
-    const repoName = event.repo?.name ?? "unknown";
-    const eventType = event.type.replace("Event", "");
-
-    let title = `${repoName} — ${eventType}`;
-    let body = "";
-    let url = `https://github.com/${repoName}`;
-
-    if (event.type === "ReleaseEvent" && event.payload?.release) {
-      const rel = event.payload.release;
-      title = `${repoName} released ${rel.tag_name ?? ""}`.trim();
-      body = rel.name ?? rel.tag_name ?? "";
-      url = rel.html_url ?? url;
-    } else if (event.type === "PushEvent" && event.payload?.commits?.length) {
-      const commitCount = event.payload.commits.length;
-      const lastMsg = event.payload.commits[event.payload.commits.length - 1]?.message ?? "";
-      title = `${repoName} — ${commitCount} new commit(s)`;
-      body = lastMsg.slice(0, 500);
-    } else if (event.type === "WatchEvent") {
-      title = `${repoName} gained a new star`;
-      body = `Repository ${repoName} was just starred.`;
-    } else if (event.type === "CreateEvent") {
-      title = `${repoName} — ${event.payload?.ref_type ?? "creation"}`;
-      body = event.payload?.ref ? `New ${event.payload.ref_type}: ${event.payload.ref}` : "New repository created";
-    }
-
-    return {
-      id: `evt-${event.id}`,
-      source: this.metadata.id,
-      category: this.metadata.category,
-      title,
-      body,
-      url,
-      language: "en",
-      publishedAt: event.created_at ? Date.parse(event.created_at) || undefined : undefined,
-      metadata: {
-        eventType: event.type,
-        repo: repoName,
-        actor: event.actor?.login,
-      },
-      fetchedAt: Date.now(),
-    };
+    const repo = raw as GHRepo;
+    return this.normalizeRepo(repo);
   }
 
   validate(item: SourceItem): boolean {
     return !!item.title && !!item.url && item.url.includes("github.com");
-  }
-
-  /**
-   * Per-provider quality filter (v11 Phase 2).
-   * Requirements: repo stars >= 500, age <= 24h, not archived.
-   */
-  async qualityFilter(item: SourceItem): Promise<ProviderQualityResult | null> {
-    const repoName = (item.metadata as { repo?: string } | undefined)?.repo;
-    if (!repoName) return null;
-
-    const headers: Record<string, string> = {
-      "User-Agent": "FredyBot/1.0",
-      "Accept": "application/vnd.github+json",
-    };
-    if (this.deps.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
-    }
-
-    try {
-      const res = await fetch(`https://api.github.com/repos/${repoName}`, { headers });
-      if (!res.ok) return null;
-      const repo = await res.json() as GHRepoInfo;
-
-      if (repo.stargazers_count === undefined || repo.stargazers_count < 500) {
-        return null; // Reject: not enough stars
-      }
-      if (repo.archived) {
-        return null; // Reject: archived repo
-      }
-
-      let score = 70;
-      if (repo.stargazers_count >= 5000) score = 95;
-      else if (repo.stargazers_count >= 2000) score = 88;
-      else if (repo.stargazers_count >= 1000) score = 82;
-      else score = 75;
-
-      return {
-        item: { ...item, metadata: { ...item.metadata, stars: repo.stargazers_count, forks: repo.forks_count } },
-        score,
-        reason: `stars=${repo.stargazers_count}`,
-        boost: repo.stargazers_count >= 5000,
-      };
-    } catch {
-      return null;
-    }
   }
 
   async health(): Promise<PluginStatus> {
@@ -442,12 +344,8 @@ export class GitHubEventsPlugin implements Plugin {
       lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null,
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,
-      itemsAccepted: 0,
-      itemsRejected: 0,
-      averageLatencyMs: null,
-      consecutiveEmptyFetches: 0,
-      currentBackoffMultiplier: 1,
-      lastRefreshAt: null,
+      itemsAccepted: 0, itemsRejected: 0, averageLatencyMs: null,
+      consecutiveEmptyFetches: 0, currentBackoffMultiplier: 1, lastRefreshAt: null,
     };
   }
 }
