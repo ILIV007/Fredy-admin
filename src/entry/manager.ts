@@ -1994,6 +1994,7 @@ async function loadSettings(){
   const d=await api("config");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.settings||{};
+  const previewMode=s.telegram?.linkPreviewMode??"smart";
   c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🔧 Runtime Settings</h3><p style="color:var(--text2);margin-bottom:12px">Edit and save — changes apply immediately without redeployment.</p>'+
   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
   '<div><label style="color:var(--text2);font-size:12px">Language</label><select id="set-lang" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"><option value="auto" '+(s.language?.default==="auto"?"selected":"")+'>Auto</option><option value="fa" '+(s.language?.default==="fa"?"selected":"")+'>Persian</option><option value="en" '+(s.language?.default==="en"?"selected":"")+'>English</option></select></div>'+
@@ -2002,6 +2003,7 @@ async function loadSettings(){
   '<div><label style="color:var(--text2);font-size:12px">Refresh Interval (minutes)</label><input type="number" id="set-refresh" value="'+(s.scheduler?.refreshIntervalMinutes??120)+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
   '<div><label style="color:var(--text2);font-size:12px">Quiet Hours Start</label><input type="text" id="set-qh-start" value="'+(s.scheduler?.quietHours?.start??"00:00")+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
   '<div><label style="color:var(--text2);font-size:12px">Quiet Hours End</label><input type="text" id="set-qh-end" value="'+(s.scheduler?.quietHours?.end??"07:30")+'" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"></div>'+
+  '<div><label style="color:var(--text2);font-size:12px">🔗 Link Preview Mode</label><select id="set-preview" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px"><option value="smart" '+(previewMode==="smart"?"selected":"")+'>Smart (Recommended)</option><option value="disabled" '+(previewMode==="disabled"?"selected":"")+'>Disabled</option><option value="always" '+(previewMode==="always"?"selected":"")+'>Always Enabled</option></select></div>'+
   '</div>'+
   '<button class="btn" style="margin-top:12px" onclick="saveSettings()">💾 Save Settings</button></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">Full Config (read-only)</h3>'+preWithCopy("full-cfg",JSON.stringify(s,null,2))+'</div>';
@@ -2013,10 +2015,12 @@ async function saveSettings(){
   const refresh=parseInt(document.getElementById("set-refresh").value)||120;
   const qhStart=document.getElementById("set-qh-start").value;
   const qhEnd=document.getElementById("set-qh-end").value;
+  const preview=document.getElementById("set-preview")?document.getElementById("set-preview").value:"smart";
   const d=await api("settings","POST",{
     language:{_version:1,default:lang,supported:["en","fa"],autoDetect:true},
     ai:{qualityThreshold:qt},
-    scheduler:{minGapMinutes:gap,refreshIntervalMinutes:refresh,quietHours:{start:qhStart,end:qhEnd}}
+    scheduler:{minGapMinutes:gap,refreshIntervalMinutes:refresh,quietHours:{start:qhStart,end:qhEnd}},
+    telegram:{linkPreviewMode:preview}
   });
   toast(d.ok?"✅ Settings saved":"❌ "+(d.error||"Failed"));
 }

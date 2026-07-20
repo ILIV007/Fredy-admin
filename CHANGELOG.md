@@ -2,6 +2,44 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.8.1] — 2026-07-20 — Link Preview in Bot Settings + Manager Dashboard
+
+### 🆕 Settings Integration
+
+- **Telegram Bot Settings Screen** — Added "Link Preview" row with 3-choice
+  buttons (disabled/smart/always). Tappable to cycle through modes.
+  Callback: `set:telegram:linkPreviewMode:<value>`
+
+- **Manager Dashboard Settings Page** — Added "🔗 Link Preview Mode" dropdown
+  (Smart/Disabled/Always Enabled). Saved via the existing settings POST endpoint.
+
+### 📝 About "Only Image" in Preview
+
+Telegram Bot API's `link_preview_options` supports `is_disabled` and
+`show_above_text` but does NOT support suppressing the description text.
+When preview is enabled, Telegram shows: image + title + description (from
+OpenGraph metadata). This is a Telegram limitation, not a Fredy bug.
+The `show_above_text: true` option puts the preview above the post text,
+which is the cleanest layout available.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.8.0 → 11.8.1 |
+| `package.json` | version 11.8.1 |
+| `src/core/constants.ts` | APP_VERSION = "11.8.1" |
+| `src/admin/screens/settings.ts` | Added Link Preview mode display + choice buttons + callback handler |
+| `src/entry/manager.ts` | Added Link Preview dropdown to Settings page + save logic |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.8.1
+
+---
+
 ## [11.8.0] — 2026-07-20 — Smart Telegram Link Preview System
 
 ### 🆕 New Feature: Smart Link Preview

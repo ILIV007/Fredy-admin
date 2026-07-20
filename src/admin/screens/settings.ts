@@ -14,6 +14,7 @@ export const settingsScreen: Screen = {
 
   async text(ctx) {
     const s = ctx.settings;
+    const previewMode = s.telegram?.linkPreviewMode ?? "smart";
     return [
       header("Settings", "⚙️"),
       "",
@@ -28,6 +29,9 @@ export const settingsScreen: Screen = {
       kv("Random offset", `${s.content.randomOffsetMinutes} min`),
       kv("Burst posting", statusBadge(s.content.burstPosting)),
       kv("Duplicate prevention", statusBadge(s.content.duplicatePrevention)),
+      "",
+      header("Telegram", "📤"),
+      kv("Link Preview", previewMode),
       "",
       header("Language", "🌐"),
       kv("Default", s.language.default),
@@ -45,6 +49,7 @@ export const settingsScreen: Screen = {
   },
 
   keyboard(s: FredySettings): InlineKeyboard {
+    const previewMode = s.telegram?.linkPreviewMode ?? "smart";
     return buildKeyboardWithBack([
       [toggleButton("Bot", s.general.botEnabled, "set:general:botEnabled:toggle")],
       [toggleButton("Maintenance", s.general.maintenanceMode, "set:general:maintenance:toggle")],
@@ -53,6 +58,8 @@ export const settingsScreen: Screen = {
       stepperRow("Quality", s.quality.minScore, "set:quality:minScore:dec", "set:quality:minScore:inc", ""),
       [toggleButton("Burst", s.content.burstPosting, "set:content:burst:toggle")],
       [toggleButton("Dedup", s.content.duplicatePrevention, "set:content:dedup:toggle")],
+      // v11.8.1: Link Preview Mode
+      choiceRow("Link Preview", ["disabled", "smart", "always"] as const, previewMode, (v) => `set:telegram:linkPreviewMode:${v}`),
     ]);
   },
 
@@ -91,6 +98,11 @@ export const settingsScreen: Screen = {
         const current = ctx.settings.quality.minScore;
         const next = action === "inc" ? Math.min(100, current + 5) : Math.max(0, current - 5);
         patch = { quality: { ...ctx.settings.quality, minScore: next } };
+      }
+    } else if (scope === "telegram") {
+      // v11.8.1: Link Preview Mode
+      if (field === "linkPreviewMode" && (action === "disabled" || action === "smart" || action === "always")) {
+        patch = { telegram: { ...ctx.settings.telegram, linkPreviewMode: action } };
       }
     }
 
