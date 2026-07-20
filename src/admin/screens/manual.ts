@@ -127,17 +127,28 @@ export const manualScreen: Screen = {
           if (pubResult.ok) {
             // v9.3.1: Record in dedup store ONLY after successful publish.
             await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
-            // Send the EXACT same formatted post to admin PM as what went to channel.
+            // v11.7.0: Send admin PM with same image as channel post.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
+              let adminCoverUrl: string | null = null;
               if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-                await ctx.container.tg.sendPhoto(ctx.adminId, finalPost.media.url, finalPost.caption, {
-                  parse_mode: "HTML",
-                }).catch(() => {});
+                adminCoverUrl = finalPost.media.url;
+              } else if (result.content.sourceUrl) {
+                try {
+                  const { ImageResolver } = await import("../../services/image-resolver");
+                  const resolver = new ImageResolver({ kv: ctx.container.kv, logger: ctx.container.logger });
+                  const resolved = await resolver.resolve({
+                    id: result.content.id, source: result.content.pluginId,
+                    category: result.content.category, title: result.content.headline ?? "",
+                    body: "", url: result.content.sourceUrl, fetchedAt: Date.now(),
+                  });
+                  if (resolved) adminCoverUrl = resolved.url;
+                } catch { /* non-fatal */ }
+              }
+              if (adminCoverUrl) {
+                await ctx.container.tg.sendPhoto(ctx.adminId, adminCoverUrl, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
               } else {
-                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
-                  parse_mode: "HTML",
-                }).catch(() => {});
+                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [
@@ -254,17 +265,28 @@ export const manualScreen: Screen = {
           if (pubResult.ok) {
             // v9.3.1: Record in dedup store ONLY after successful publish.
             await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
-            // Send the EXACT same formatted post to admin PM as what went to channel.
+            // v11.7.0: Send admin PM with same image as channel post.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
+              let adminCoverUrl: string | null = null;
               if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-                await ctx.container.tg.sendPhoto(ctx.adminId, finalPost.media.url, finalPost.caption, {
-                  parse_mode: "HTML",
-                }).catch(() => {});
+                adminCoverUrl = finalPost.media.url;
+              } else if (result.content.sourceUrl) {
+                try {
+                  const { ImageResolver } = await import("../../services/image-resolver");
+                  const resolver = new ImageResolver({ kv: ctx.container.kv, logger: ctx.container.logger });
+                  const resolved = await resolver.resolve({
+                    id: result.content.id, source: result.content.pluginId,
+                    category: result.content.category, title: result.content.headline ?? "",
+                    body: "", url: result.content.sourceUrl, fetchedAt: Date.now(),
+                  });
+                  if (resolved) adminCoverUrl = resolved.url;
+                } catch { /* non-fatal */ }
+              }
+              if (adminCoverUrl) {
+                await ctx.container.tg.sendPhoto(ctx.adminId, adminCoverUrl, finalPost.caption, { parse_mode: "HTML" }).catch(() => {});
               } else {
-                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, {
-                  parse_mode: "HTML",
-                }).catch(() => {});
+                await ctx.container.tg.sendMessage(ctx.adminId, finalPost.fullText, { parse_mode: "HTML" }).catch(() => {});
               }
             } catch { /* if transform fails, skip PM */ }
             await ctx.container.tg.sendMessage(ctx.adminId, [

@@ -2,6 +2,80 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.7.0] — 2026-07-20 — Unified Image Pipeline + No Fallback Logos + Manager Syntax Fix
+
+### 🔴 Critical Fixes
+
+- **FIX: Manager page SyntaxError** — `onmouseover`/`onmouseout` inline handlers
+  had quote escaping issues causing `Unexpected string` error. Replaced with
+  CSS `:hover` class (`.post-card:hover`).
+
+- **FIX: Image Pipeline completely redesigned** — New `ImageResolver` service
+  (`src/services/image-resolver.ts`) provides unified image resolution:
+  1. Provider-supplied image (imageUrl/media)
+  2. Reddit preview.images from metadata
+  3. GitHub social preview (opengraph.githubassets.com)
+  4. Dev.to API cover_image
+  5. OpenGraph image (og:image meta tag)
+  6. Twitter Card image (twitter:image meta tag)
+  7. og:image:secure_url
+
+  **NO fallback logos** — if no real image is found, post is published as
+  text-only. A low-quality placeholder is worse than no image.
+
+- **FIX: Admin PM without images** — Admin PM now uses the same ImageResolver
+  as the channel publisher. Both channel post and admin PM get the same image.
+
+- **FIX: Fallback logos removed** — All Clearbit logo fallbacks removed from
+  `resolveSourceCoverImage()`. Only real article images are used.
+
+### New Architecture
+
+```
+SourceItem (from provider)
+    ↓
+ImageResolver.resolve(item)
+    ↓
+  1. item.imageUrl / item.media
+  2. Reddit preview.images
+  3. GitHub social preview
+  4. Dev.to API cover_image
+  5. og:image (fetch page HTML, 8s timeout)
+  6. twitter:image
+  ↓
+ResolvedImage { url, source }
+    ↓
+FinalPublisher.publishToTelegram()
+    ↓
+sendPhoto(coverUrl) OR sendMessage(text-only)
+```
+
+### Image Cache
+
+Resolved images cached in KV at `fredy:image:<hash>` with 1h TTL.
+Avoids repeated page fetches for the same URL.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.6.3 → 11.7.0 |
+| `package.json` | version 11.7.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.7.0" |
+| **`src/services/image-resolver.ts`** | **NEW** — Unified image resolution service |
+| `src/services/final-publisher.ts` | Uses ImageResolver, removed fallback logos |
+| `src/container.ts` | Wires ImageResolver to FinalPublisher |
+| `src/admin/screens/manual.ts` | Admin PM uses ImageResolver for same image |
+| `src/entry/manager.ts` | Fixed SyntaxError (CSS hover instead of inline JS) |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.7.0
+
+---
+
 ## [11.6.3] — 2026-07-20 — Provider Logos for ALL + Post to Channel Redesign + maxTokens Migration
 
 ### 🔴 Fixes

@@ -1391,6 +1391,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:6px;
 .skeleton{background:var(--surface2);border-radius:6px;animation:pulse 1.5s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .progress{background:var(--surface2);border-radius:6px;height:8px;overflow:hidden}.progress-bar{background:var(--accent);height:100%;transition:width .3s}
 .test-result{padding:8px 12px;border-radius:6px;margin:4px 0;display:flex;align-items:center;gap:8px;font-size:13px}.test-pass{background:rgba(34,197,94,.1)}.test-fail{background:rgba(239,68,68,.1)}
+.post-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s}.post-card:hover{border-color:var(--accent)}
 @media(max-width:768px){:root{--sidebar-w:200px}.sidebar{transform:translateX(calc(-1*var(--sidebar-w)))}.sidebar.open{transform:translateX(0)}.main{margin-left:0}}
 </style></head><body>
 <div class="sidebar" id="sidebar"><div class="sidebar-header"><span style="font-size:20px">🤖</span><h1>Fredy</h1></div><div class="sidebar-nav" id="nav"></div></div>
@@ -1477,14 +1478,14 @@ async function loadPost(){
 
   function pluginCard(p){
     const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":"var(--text2)";
-    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:all .2s" onclick="postToChannel('+ "'" +p.id+ "'" +')" onmouseover="this.style.borderColor=\''+tierColor+'\'" onmouseout="this.style.borderColor=\'var(--border)\'">'+
+    return '<div class="post-card" data-tier-color="'+tierColor+'" onclick="postToChannel('+ "'" +p.id+ "'" +')">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
         '<span style="font-weight:600;font-size:13px">'+p.name+'</span>'+
         '<span class="badge" style="background:'+tierColor+'20;color:'+tierColor+';font-size:9px">'+p.tier+'</span>'+
       '</div>'+
       '<div style="font-size:11px;color:var(--text2);display:flex;gap:8px">'+
-        '<span>📂 Cat '+p.category+'</span>'+
-        (p.lastItemCount!==null&&p.lastItemCount!==undefined?'<span>📦 '+p.lastItemCount+' items</span>':'')+
+        '<span>Cat '+p.category+'</span>'+
+        (p.lastItemCount!==null&&p.lastItemCount!==undefined?'<span>'+p.lastItemCount+' items</span>':'')+
       '</div>'+
     '</div>';
   }

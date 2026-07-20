@@ -67,6 +67,7 @@ import { StrategyEngine } from "./services/strategy-engine";
 import { HookEngine } from "./services/hook-engine";
 import { UXLayer } from "./services/ux-layer";
 import { FinalPublisher } from "./services/final-publisher";
+import { ImageResolver } from "./services/image-resolver";
 
 // Bundled default soul
 const BUNDLED_SOUL = `
@@ -296,6 +297,8 @@ export function buildContainer(env: Env): Container {
     hookEngine,
     sourceFormatter,
   });
+  // v11.7.0: Unified Image Resolver
+  const imageResolver = new ImageResolver({ kv, logger });
   const finalPublisher = new FinalPublisher({
     tg,
     uxLayer,
@@ -304,6 +307,7 @@ export function buildContainer(env: Env): Container {
     history,
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
+    imageResolver,
   });
   const scheduler = new SchedulerService({
     logger,

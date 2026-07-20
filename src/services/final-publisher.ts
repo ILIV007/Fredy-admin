@@ -37,6 +37,8 @@ export interface FinalPublisherDeps {
   readonly history: HistoryService;
   readonly logger: Logger;
   readonly settings: () => Promise<FredySettings>;
+  /** v11.7.0: Unified image resolver */
+  readonly imageResolver?: import("./image-resolver").ImageResolver;
 }
 
 /** Max retries (0 = no retries, just 1 attempt). */
@@ -191,7 +193,8 @@ export class FinalPublisher {
     };
   }
 
-  /** Publish a FinalPost to Telegram (text or photo). */
+  /** Publish a FinalPost to Telegram (text or photo).
+   *  v11.7.0: Uses unified ImageResolver — no fallback logos. */
   private async publishToTelegram(
     post: FinalPost,
   ): Promise<{ messageId: number; chatId: string }> {
@@ -203,25 +206,51 @@ export class FinalPublisher {
     const cleanText = this.stripBareUrls(post.fullText);
     const cleanCaption = this.stripBareUrls(post.caption || "");
 
-    // Minimal debug log.
-
-    // ── Cover image resolution ──────────────────────────────
-    // Priority: explicit post.media → source URL OG image → none.
-    // The source-image fallback is the new feature: when a post has no
-    // media of its own but the source URL exposes an OpenGraph image
-    // (or is itself an image URL), Telegram displays it above the text
-    // post as a cover photo.
+    // ── v11.7.0: Unified Image Resolution ──────────────────
+    // Priority: post.media → ImageResolver (og:image, twitter:image, etc.)
+    // NO fallback logos — if no real image, send text-only.
     let coverUrl: string | null = null;
+
+    // 1. Check if post already has media from the pipeline.
     if (post.media && post.media.type === "image" && post.media.url) {
       coverUrl = post.media.url;
-    } else if (post.sourceUrl) {
+    }
+
+    // 2. Use ImageResolver if available and no media yet.
+    if (!coverUrl && this.deps.imageResolver && post.sourceUrl) {
+      try {
+        // Reconstruct a minimal SourceItem for the resolver.
+        const fakeItem = {
+          id: "",
+          source: "",
+          category: "A" as const,
+          title: "",
+          body: "",
+          url: post.sourceUrl,
+          fetchedAt: Date.now(),
+        };
+        const resolved = await this.deps.imageResolver.resolve(fakeItem);
+        if (resolved) {
+          coverUrl = resolved.url;
+          this.deps.logger.info("pipeline.start", {
+            stage: "image_publish",
+            imageSource: resolved.source,
+            imageUrl: resolved.url,
+            message: "Image resolved for publishing",
+          });
+        }
+      } catch { /* non-fatal — text-only is acceptable */ }
+    }
+
+    // 3. Old fallback resolver (for backward compat if ImageResolver not wired).
+    if (!coverUrl && !this.deps.imageResolver && post.sourceUrl) {
       coverUrl = await this.resolveSourceCoverImage(post.sourceUrl);
     }
 
+    // Validate image format.
     if (coverUrl) {
       const normalized = coverUrl.toLowerCase().split("?")[0] ?? "";
       if (normalized.match(/\.(ico|gif|svg|bmp|tiff|html?|php)$/)) {
-        // Bad image format — send as text-only instead.
         coverUrl = null;
       }
     }
@@ -243,18 +272,16 @@ export class FinalPublisher {
           messageId: result.result.message_id,
           chatId: String(result.result.chat?.id ?? channel),
         };
-      } catch (err) {
-        // sendPhoto failed — log and fall through to text-only.
-        // Common causes: image too large, URL 404, server-side content
-        // type mismatch. The post still goes out as text so it's not lost.
+      } catch {
+        // sendPhoto failed — fall through to text-only.
+        this.deps.logger.warn("telegram.error", {
+          error: "sendPhoto failed, falling back to text-only",
+          imageUrl: coverUrl,
+        });
       }
     }
 
     // ── Text-only post ──────────────────────────────────────
-    // NOTE: Do NOT send disable_web_page_preview — it causes Telegram to
-    // validate @username mentions in the text as web pages, returning
-    // "wrong type of the web page content". Since we've stripped ALL URLs
-    // from the text, there's nothing to preview anyway.
     const result = await this.deps.tg.sendMessage(channel, cleanText, {
       parse_mode: parseMode,
     });
@@ -270,23 +297,9 @@ export class FinalPublisher {
   }
 
   /**
-   * Resolve a cover image for a source URL when the post has no media of
-   * its own.
-   *
-   * v11.4.0: Added more fallback paths to increase image coverage:
-   *   1. Source URL is an image → use directly
-   *   2. Known image CDN hosts → use directly
-   *   3. GitHub repo → opengraph.githubassets.com social preview
-   *   4. Dev.to article → dev.to API cover_image
-   *   5. Hacker News → item URL has no image, skip
-   *   6. HTML page → fetch og:image (8s timeout)
-   *   7. Favicon-based fallback for known domains (blog.cloudflare.com, etc.)
-   *
-   * Returns null if no usable image is found.
-   *
-   * v11.6.1: Added fallback logos for known providers whose sites block
-   * Cloudflare Workers (openai.com returns 403, etc.). When og:image fetch
-   * fails, use a provider-specific logo from a CDN that doesn't block CF.
+   * v11.7.0: Legacy image resolver — kept as backward-compat fallback.
+   * The new ImageResolver service is preferred. This method NO LONGER
+   * returns fallback logos — if no real image is found, returns null.
    */
   private async resolveSourceCoverImage(sourceUrl: string): Promise<string | null> {
     try {
@@ -297,19 +310,8 @@ export class FinalPublisher {
       if (lower.match(/\.(jpg|jpeg|png|webp)$/)) {
         return sourceUrl;
       }
-      // Known image CDNs without extensions.
-      const imageCdnHosts = [
-        "opengraph.githubassets.com",
-        "upload.wikimedia.org",
-        "images.unsplash.com",
-        "cdn.jsdelivr.net",
-        "camo.githubusercontent.com",
-      ];
-      if (imageCdnHosts.some((h) => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`))) {
-        return sourceUrl;
-      }
 
-      // Case 3: GitHub repo → social preview.
+      // Case 2: GitHub repo → social preview.
       const ghMatch = parsed.hostname === "github.com"
         ? /github\.com\/([^/]+)\/([^/]+)/i.exec(sourceUrl)
         : null;
@@ -318,7 +320,7 @@ export class FinalPublisher {
         return `https://opengraph.githubassets.com/1/${owner}/${repo}`;
       }
 
-      // v11.4.0: Case 4: Dev.to article → use cover_image from API.
+      // Case 3: Dev.to article → use cover_image from API.
       if (parsed.hostname === "dev.to") {
         const articleMatch = /dev\.to\/([^/]+)\/([^/?#]+)/i.exec(sourceUrl);
         if (articleMatch) {
@@ -334,39 +336,17 @@ export class FinalPublisher {
         }
       }
 
-      // v11.6.1: Case 5: Known provider logos (for sites that block CF Workers).
-      // v11.6.3: Expanded to cover ALL providers. Clearbit logos work from CF Workers.
-      const providerLogos: Record<string, string> = {
-        "openai.com": "https://logo.clearbit.com/openai.com",
-        "blog.cloudflare.com": "https://logo.clearbit.com/cloudflare.com",
-        "huggingface.co": "https://logo.clearbit.com/huggingface.co",
-        "news.ycombinator.com": "https://logo.clearbit.com/ycombinator.com",
-        "stackoverflow.com": "https://logo.clearbit.com/stackoverflow.com",
-        "stackexchange.com": "https://logo.clearbit.com/stackexchange.com",
-        "www.producthunt.com": "https://logo.clearbit.com/producthunt.com",
-        "producthunt.com": "https://logo.clearbit.com/producthunt.com",
-        "www.reddit.com": "https://logo.clearbit.com/reddit.com",
-        "reddit.com": "https://logo.clearbit.com/reddit.com",
-        "old.reddit.com": "https://logo.clearbit.com/reddit.com",
-        "dev.to": "https://logo.clearbit.com/dev.to",
-        "xkcd.com": "https://logo.clearbit.com/xkcd.com",
-        "apod.nasa.gov": "https://logo.clearbit.com/nasa.gov",
-        "en.wikipedia.org": "https://logo.clearbit.com/wikipedia.org",
-        "upload.wikimedia.org": "https://logo.clearbit.com/wikipedia.org",
-      };
-      for (const [domain, logo] of Object.entries(providerLogos)) {
-        if (parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)) {
-          return logo;
-        }
-      }
+      // v11.7.0: NO FALLBACK LOGOS — removed providerLogos.
+      // If og:image can't be fetched, return null (text-only post).
+      // A low-quality placeholder is worse than no image.
 
-      // Case 6: HTML page → fetch og:image.
+      // Case 4: HTML page → fetch og:image.
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8_000);
       try {
         const response = await fetch(sourceUrl, {
           signal: controller.signal,
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0; +https://github.com/ilivir3/fredy)" },
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
         });
         clearTimeout(timeout);
         if (!response.ok) return null;
@@ -375,17 +355,8 @@ export class FinalPublisher {
           ?? /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html)
           ?? /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i.exec(html);
         if (!ogMatch?.[1]) return null;
-        // Resolve relative URLs against the page URL.
         const absolute = new URL(ogMatch[1], sourceUrl).href;
-        const absLower = absolute.toLowerCase().split("?")[0] ?? "";
-        if (absLower.match(/\.(jpg|jpeg|png|webp)$/)) return absolute;
-        // Accept known image CDNs even without extension.
-        if (imageCdnHosts.some((h) => absolute.includes(h))) return absolute;
-        // v11.4.0: Accept any og:image URL that looks like an image CDN.
-        if (/\/images?\//i.test(absolute) || /\/uploads?\//i.test(absolute) || /\/media\//i.test(absolute)) {
-          return absolute;
-        }
-        return null;
+        return absolute;
       } catch { /* non-fatal */
         clearTimeout(timeout);
         return null;
