@@ -44,6 +44,83 @@ export interface FinalPublisherDeps {
 /** Max retries (0 = no retries, just 1 attempt). */
 const MAX_RETRIES = 1;
 
+/**
+ * v11.8.0: Providers known to expose high-quality OpenGraph previews.
+ * When ImageResolver fails and the provider is in this list, Telegram's
+ * link preview is enabled (show_above_text) so the article's OG image
+ * appears above the text — better than a text-only post.
+ *
+ * Providers NOT in this list (NASA, XKCD, Dev.to, GitHub Trending, etc.)
+ * already provide good images via ImageResolver, so link preview is not needed.
+ */
+const GOOD_PREVIEW_PROVIDERS = new Set([
+  "github", "github-releases", "github-security",
+  "openai-news", "cloudflare-blog", "huggingface-blog",
+  "producthunt", "hackernews-algolia",
+  "reddit-v2",
+]);
+
+/**
+ * v11.8.0: Resolve Telegram link preview options based on publish context.
+ *
+ * Logic:
+ * - If sending a photo → preview always disabled (image is the preview).
+ * - If mode is "disabled" → always disabled.
+ * - If mode is "always" → enabled, show above text.
+ * - If mode is "smart":
+ *   - If provider is in GOOD_PREVIEW_PROVIDERS → enabled, show above text.
+ *   - Otherwise → disabled.
+ */
+function resolvePreviewOptions(
+  mode: string,
+  hasImage: boolean,
+  pluginId: string,
+): { linkPreviewOptions: Record<string, unknown>; reason: string } {
+  // If we have an image, always disable preview (image IS the preview).
+  if (hasImage) {
+    return {
+      linkPreviewOptions: { is_disabled: true },
+      reason: "Image resolved — preview disabled (sendPhoto)",
+    };
+  }
+
+  // Mode: disabled
+  if (mode === "disabled") {
+    return {
+      linkPreviewOptions: { is_disabled: true },
+      reason: "Preview mode: disabled",
+    };
+  }
+
+  // Mode: always
+  if (mode === "always") {
+    return {
+      linkPreviewOptions: { is_disabled: false, show_above_text: true },
+      reason: "Preview mode: always — show above text",
+    };
+  }
+
+  // Mode: smart (default)
+  if (mode === "smart") {
+    if (GOOD_PREVIEW_PROVIDERS.has(pluginId)) {
+      return {
+        linkPreviewOptions: { is_disabled: false, show_above_text: true },
+        reason: `Smart mode — ${pluginId} has good OpenGraph — preview enabled above text`,
+      };
+    }
+    return {
+      linkPreviewOptions: { is_disabled: true },
+      reason: `Smart mode — ${pluginId} has poor previews — preview disabled`,
+    };
+  }
+
+  // Fallback: disabled
+  return {
+    linkPreviewOptions: { is_disabled: true },
+    reason: "Unknown mode — preview disabled",
+  };
+}
+
 export class FinalPublisher {
   /** Debug info from last publish attempt (for error reporting). */
   public _lastPublishDebug: Record<string, unknown> | null = null;
@@ -281,9 +358,24 @@ export class FinalPublisher {
       }
     }
 
-    // ── Text-only post ──────────────────────────────────────
+    // ── v11.8.0: Smart Link Preview ─────────────────────────
+    // Resolve preview options based on mode, image status, and provider.
+    const previewMode = settings?.telegram?.linkPreviewMode ?? "smart";
+    const previewOpts = resolvePreviewOptions(previewMode, false, post.internalMetadata?.pluginId ?? "");
+
+    this.deps.logger.info("pipeline.start", {
+      stage: "link_preview",
+      mode: previewMode,
+      pluginId: post.internalMetadata?.pluginId ?? "",
+      previewDisabled: previewOpts.linkPreviewOptions["is_disabled"],
+      showAboveText: previewOpts.linkPreviewOptions["show_above_text"] ?? false,
+      reason: previewOpts.reason,
+    });
+
+    // ── Text-only post (with smart preview) ─────────────────
     const result = await this.deps.tg.sendMessage(channel, cleanText, {
       parse_mode: parseMode,
+      link_preview_options: previewOpts.linkPreviewOptions,
     });
 
     if (!result.ok || !result.result) {

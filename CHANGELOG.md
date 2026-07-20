@@ -2,6 +2,65 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.8.0] — 2026-07-20 — Smart Telegram Link Preview System
+
+### 🆕 New Feature: Smart Link Preview
+
+Three preview modes for text-only posts (when no image is resolved):
+
+1. **Disabled** — Always disable Telegram previews. Clean text-only posts.
+2. **Smart (DEFAULT)** — If ImageResolver found an image → sendPhoto (no preview
+   needed). If no image and provider has good OpenGraph → enable preview above
+   text. If no image and provider has poor previews → disable.
+3. **Always Enabled** — Always enable preview, show above text.
+
+### Implementation
+
+- **`linkPreviewMode`** added to `telegram` config section (default: "smart")
+- Migration auto-adds the field to existing KV-stored config
+- `resolvePreviewOptions()` helper function in `final-publisher.ts`
+- `link_preview_options` passed to Telegram `sendMessage` API
+- `GOOD_PREVIEW_PROVIDERS` set: github, github-releases, github-security,
+  openai-news, cloudflare-blog, huggingface-blog, producthunt, hackernews-algolia,
+  reddit-v2
+
+### Preview Decision Logic
+
+```
+IF sendPhoto (image resolved)
+  → preview disabled (image IS the preview)
+
+IF mode == "disabled"
+  → preview disabled
+
+IF mode == "always"
+  → preview enabled, show above text
+
+IF mode == "smart"
+  IF provider in GOOD_PREVIEW_PROVIDERS
+    → preview enabled, show above text
+  ELSE
+    → preview disabled
+```
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.7.1 → 11.8.0 |
+| `package.json` | version 11.8.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.8.0" |
+| `src/core/config/sections/telegram.ts` | Added linkPreviewMode field + migration |
+| `src/services/final-publisher.ts` | resolvePreviewOptions() helper + smart preview in publishToTelegram |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.8.0
+
+---
+
 ## [11.7.1] — 2026-07-20 — Post to Channel Fix + Disabled Provider Selection Fix + Image Optimization
 
 ### 🔴 Critical Fixes
