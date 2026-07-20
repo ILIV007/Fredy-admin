@@ -21,4 +21,7 @@ export const openaiNewsManifest: PluginManifest = {
   homepage: "https://openai.com/news",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "✨",
+  displaySource: "OpenAI",
+  extractRepoFromUrl: false,
 };

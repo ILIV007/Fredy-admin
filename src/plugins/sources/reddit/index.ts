@@ -160,6 +160,8 @@ export class RedditPlugin implements Plugin {
         subreddit: post.subreddit ?? post.permalink?.split("/")[2],
         flair: post.link_flair_text,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

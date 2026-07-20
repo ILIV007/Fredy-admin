@@ -19,4 +19,7 @@ export const xkcdManifest: PluginManifest = {
   homepage: "https://xkcd.com",
   supportsMarkdown: false,
   supportsLanguage: ["en"],
+  displayIcon: "🎨",
+  displaySource: "XKCD",
+  extractRepoFromUrl: false,
 };

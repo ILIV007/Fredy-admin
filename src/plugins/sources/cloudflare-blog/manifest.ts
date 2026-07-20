@@ -22,4 +22,7 @@ export const cloudflareBlogManifest: PluginManifest = {
   homepage: "https://blog.cloudflare.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "☁️",
+  displaySource: "Cloudflare Blog",
+  extractRepoFromUrl: false,
 };

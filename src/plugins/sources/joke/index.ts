@@ -121,6 +121,8 @@ export class JokePlugin implements Plugin {
         type: joke.type,
         id: joke.id,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

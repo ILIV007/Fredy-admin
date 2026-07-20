@@ -19,4 +19,7 @@ export const githubTrendingManifest: PluginManifest = {
   homepage: "https://github.com/trending",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🐙",
+  displaySource: null,
+  extractRepoFromUrl: true,
 };

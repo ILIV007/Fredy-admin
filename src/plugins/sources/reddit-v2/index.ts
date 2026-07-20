@@ -177,7 +177,9 @@ export class RedditV2Plugin implements Plugin {
             subreddit: sub,
             source: "rss",
           },
-          fetchedAt: Date.now(),
+                displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
+      fetchedAt: Date.now(),
         });
       }
     }

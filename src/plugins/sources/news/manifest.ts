@@ -21,4 +21,7 @@ export const newsManifest: PluginManifest = {
   homepage: "https://newsapi.org",
   supportsMarkdown: false,
   supportsLanguage: ["en"],
+  displayIcon: "📰",
+  displaySource: "Source",
+  extractRepoFromUrl: false,
 };

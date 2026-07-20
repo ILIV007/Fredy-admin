@@ -125,6 +125,8 @@ export class GitHubTrendingPlugin implements Plugin {
         topics: repo.topics,
         owner: repo.owner?.login,
       },
+            displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: this.extractGithubRepo(raw),
       fetchedAt: Date.now(),
     };
   }

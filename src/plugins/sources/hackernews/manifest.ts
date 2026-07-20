@@ -19,4 +19,7 @@ export const hackernewsManifest: PluginManifest = {
   homepage: "https://news.ycombinator.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "📰",
+  displaySource: "Hacker News",
+  extractRepoFromUrl: false,
 };

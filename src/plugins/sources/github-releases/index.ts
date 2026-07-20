@@ -156,6 +156,8 @@ export class GitHubReleasesPlugin implements Plugin {
         author: release.author?.login,
         prerelease: release.prerelease,
       },
+            displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: this.extractGithubRepo(raw),
       fetchedAt: Date.now(),
     };
   }

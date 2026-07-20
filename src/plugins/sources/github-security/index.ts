@@ -124,6 +124,8 @@ export class GitHubSecurityPlugin implements Plugin {
         severity: advisory.severity,
         cvss: advisory.cvss?.score ?? 0,
       },
+            displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: this.extractGithubRepo(raw),
       fetchedAt: Date.now(),
     };
   }

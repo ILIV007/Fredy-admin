@@ -77,6 +77,28 @@ export interface PluginManifest {
 
   /** Languages this provider supports (e.g., ["en"] for English-only sources). */
   readonly supportsLanguage?: readonly string[];
+
+  // ─── v11.6.0: Provider Display Metadata ───
+  // These fields control how the provider appears in the post footer.
+  // The formatter NEVER guesses — it renders exactly what the provider supplies.
+  // If both are empty, the footer falls back to "🌌 Source".
+
+  /** Icon emoji for the footer (e.g., "☁️", "🤗", "✨", "🐙"). */
+  readonly displayIcon?: string;
+
+  /**
+   * Display label for the footer (e.g., "Cloudflare Blog", "Hugging Face").
+   * For GitHub providers, set to null — the formatter extracts "owner/repo" from the URL.
+   * If empty/null and not a GitHub URL, falls back to "Source".
+   */
+  readonly displaySource?: string | null;
+
+  /**
+   * Whether this provider's displaySource should be extracted from the URL
+   * (GitHub repos: "owner/repo"). When true, the normalize() method extracts
+   * the repo name from the source URL.
+   */
+  readonly extractRepoFromUrl?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────

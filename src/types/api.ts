@@ -42,6 +42,16 @@ export interface SourceItem {
 
   /** When the item was fetched. */
   readonly fetchedAt: number;
+
+  // ─── v11.6.0: Provider Display Metadata ───
+  // Populated by the provider's normalize() method from the manifest.
+  // Carried through the pipeline to the formatter.
+
+  /** Icon emoji for the footer (e.g., "☁️", "🐙"). */
+  readonly displayIcon?: string;
+
+  /** Display label (e.g., "Cloudflare Blog", "microsoft/vscode", or "Source" as fallback). */
+  readonly displaySource?: string;
 }
 
 /** Media attached to a source item. */

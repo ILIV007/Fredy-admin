@@ -84,7 +84,9 @@ export class HuggingFaceBlogPlugin implements Plugin {
           url: link,
           language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
-          fetchedAt: Date.now(),
+                displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
+      fetchedAt: Date.now(),
         });
       }
     }

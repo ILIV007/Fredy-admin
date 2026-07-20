@@ -41,21 +41,26 @@ export class UXLayerImpl implements UXLayer {
     // Apply Persian half-space fixing if language is fa.
     const fixedBody = content.language === "fa" ? fixPersianHalfSpaces(body) : body;
 
-    // 3. Source line with random emoji.
-    const { emoji } = await this.deps.sourceFormatter.buildFooter();
+    // v11.6.0: Source line uses provider display metadata from ReadyContent.
+    // No hardcoded logic — the provider decides how it appears.
+    const displayIcon = content.displayIcon ?? content.sourceEmoji ?? "🌌";
+    const displaySource = content.displaySource ?? "Source";
+    const sourceLine = `${displayIcon} ${displaySource}`;
 
     // 4. Assemble the full text.
-    const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_TEXT_LIMIT);
+    const fullText = this.assembleFullText(hook, fixedBody, content.sourceUrl, displayIcon, displaySource, TELEGRAM_TEXT_LIMIT);
 
     // 5. Caption for image posts (shorter).
-    const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, emoji, TELEGRAM_CAPTION_LIMIT);
+    const caption = this.assembleCaption(hook, fixedBody, content.sourceUrl, displayIcon, displaySource, TELEGRAM_CAPTION_LIMIT);
 
     return {
       hook,
       body,
       takeaway: "",
-      sourceLine: `${emoji} Source`,
-      sourceEmoji: emoji,
+      sourceLine,
+      sourceEmoji: displayIcon,
+      displayIcon,
+      displaySource,
       sourceUrl: content.sourceUrl,
       media: content.media,
       fullText,
@@ -78,39 +83,41 @@ export class UXLayerImpl implements UXLayer {
 
   /** Assemble the full post text.
    *  v8.0.0: Pre-truncates the body to fit within maxLen — try full first,
-   *  only truncate if the assembled text exceeds the limit. */
+   *  only truncate if the assembled text exceeds the limit.
+   *  v11.6.0: Uses displaySource for the footer label. */
   private assembleFullText(
     hook: string,
     body: string,
     sourceUrl: string,
     emoji: string,
+    displaySource: string,
     maxLen: number,
   ): string {
     // First, try the full body — most posts fit within the Telegram limit.
-    const fullAttempt = this.buildFullTextParts(hook, body, sourceUrl, emoji);
+    const fullAttempt = this.buildFullTextParts(hook, body, sourceUrl, emoji, displaySource);
     if (fullAttempt.length <= maxLen) {
       return fullAttempt;
     }
 
     // Need to truncate the body. Reserve space for hook + footer + overhead.
-    const footer = this.buildFooter(sourceUrl, emoji);
+    const footer = this.buildFooter(sourceUrl, emoji, displaySource);
     const hookBlock = this.buildHookBlock(hook, body);
     const overhead = hookBlock.length + footer.length + 4; // newlines + safety margin
     const bodyBudget = Math.max(200, maxLen - overhead);
 
     const truncatedBody = this.summarizeText(body, bodyBudget);
-    return this.buildFullTextParts(hook, truncatedBody, sourceUrl, emoji);
+    return this.buildFullTextParts(hook, truncatedBody, sourceUrl, emoji, displaySource);
   }
 
   /** Build the full text parts (helper used by assembleFullText). */
-  private buildFullTextParts(hook: string, body: string, sourceUrl: string, emoji: string): string {
+  private buildFullTextParts(hook: string, body: string, sourceUrl: string, emoji: string, displaySource: string): string {
     const parts: string[] = [];
     if (hook && body && !body.startsWith(hook)) {
       parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
     parts.push(this.formatBody(body));
-    parts.push(...this.buildFooterParts(sourceUrl, emoji));
+    parts.push(...this.buildFooterParts(sourceUrl, emoji, displaySource));
     return parts.join("\n");
   }
 
@@ -123,16 +130,18 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Build the footer string. */
-  private buildFooter(sourceUrl: string, emoji: string): string {
-    return this.buildFooterParts(sourceUrl, emoji).join("\n");
+  private buildFooter(sourceUrl: string, emoji: string, displaySource: string): string {
+    return this.buildFooterParts(sourceUrl, emoji, displaySource).join("\n");
   }
 
-  /** Build the footer parts array. */
-  private buildFooterParts(sourceUrl: string, emoji: string): string[] {
+  /** Build the footer parts array.
+   *  v11.6.0: Uses displaySource instead of hardcoded "Source". */
+  private buildFooterParts(sourceUrl: string, emoji: string, displaySource: string): string[] {
     const parts: string[] = [];
+    const label = `${emoji} ${escapeHtml(displaySource)}`;
     if (sourceUrl && this.isLinkableUrl(sourceUrl)) {
       parts.push("");
-      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${emoji} Source</a></blockquote>`);
+      parts.push(`<blockquote><a href="${escapeHtml(sourceUrl)}">${label}</a></blockquote>`);
     }
     parts.push("");
     parts.push(`<blockquote>🌀 &#64;ILIVIR3</blockquote>`);
@@ -245,39 +254,42 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Assemble a shorter caption for image posts.
-   *  v8.0.0: Pre-truncates the body to fit within maxLen. */
+   *  v8.0.0: Pre-truncates the body to fit within maxLen.
+   *  v11.6.0: Uses displaySource for the footer label. */
   private assembleCaption(
     hook: string,
     body: string,
     sourceUrl: string,
     emoji: string,
+    displaySource: string,
     maxLen: number,
   ): string {
     // First, try the full body — most captions fit within the limit.
-    const fullAttempt = this.buildCaptionParts(hook, body, sourceUrl, emoji);
+    const fullAttempt = this.buildCaptionParts(hook, body, sourceUrl, emoji, displaySource);
     if (fullAttempt.length <= maxLen) {
       return fullAttempt;
     }
 
     // Need to truncate the body. Reserve space for hook + footer + overhead.
-    const footer = this.buildFooter(sourceUrl, emoji);
+    const footer = this.buildFooter(sourceUrl, emoji, displaySource);
     const hookBlock = this.buildHookBlock(hook, body);
     const overhead = hookBlock.length + footer.length + 4;
     const bodyBudget = Math.max(150, maxLen - overhead);
 
     const truncatedBody = this.summarizeText(body, bodyBudget);
-    return this.buildCaptionParts(hook, truncatedBody, sourceUrl, emoji);
+    return this.buildCaptionParts(hook, truncatedBody, sourceUrl, emoji, displaySource);
   }
 
-  /** Build caption parts (helper). */
-  private buildCaptionParts(hook: string, body: string, sourceUrl: string, emoji: string): string {
+  /** Build caption parts (helper).
+   *  v11.6.0: Uses displaySource for the footer label. */
+  private buildCaptionParts(hook: string, body: string, sourceUrl: string, emoji: string, displaySource: string): string {
     const parts: string[] = [];
     if (hook && body && !body.startsWith(hook)) {
       parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
     parts.push(this.formatBody(body));
-    parts.push(...this.buildFooterParts(sourceUrl, emoji));
+    parts.push(...this.buildFooterParts(sourceUrl, emoji, displaySource));
     return parts.join("\n");
   }
 

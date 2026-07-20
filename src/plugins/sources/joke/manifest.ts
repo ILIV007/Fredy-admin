@@ -21,4 +21,7 @@ export const jokeManifest: PluginManifest = {
   homepage: "https://v2.jokeapi.dev",
   supportsMarkdown: false,
   supportsLanguage: ["en"],
+  displayIcon: "😂",
+  displaySource: "JokeAPI",
+  extractRepoFromUrl: false,
 };

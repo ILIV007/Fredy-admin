@@ -84,8 +84,18 @@ export class StackExchangePlugin implements Plugin {
       return cached;
     }
 
-    // v11.3.0: Try multiple tag sets if the first returns empty.
-    // Previously picked ONE random tag and gave up if it returned nothing.
+    // v11.5.0: Try API first, then RSS fallback.
+    // StackExchange API throttles Cloudflare Workers IPs (400 throttle error).
+    // RSS feeds are not throttled.
+    const apiItems = await this.fetchAPI();
+    if (apiItems.length > 0) return apiItems;
+
+    // v11.5.0: RSS fallback — StackExchange has RSS feeds per tag.
+    return this.fetchRSS();
+  }
+
+  /** v11.5.0: API fetch with multiple tag retry. */
+  private async fetchAPI(): Promise<readonly SourceItem[]> {
     const shuffledTags = [...TAG_SETS].sort(() => Math.random() - 0.5);
     let items: readonly SourceItem[] = [];
 
@@ -188,12 +198,106 @@ export class StackExchangePlugin implements Plugin {
         isAnswered: q.is_answered,
         author: q.owner?.display_name,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }
 
   validate(item: SourceItem): boolean {
-    return !!item.title && !!item.url && item.url.includes("stackoverflow.com");
+    return !!item.title && !!item.url && (item.url.includes("stackoverflow.com") || item.url.includes("stackexchange.com"));
+  }
+
+  /**
+   * v11.5.0: RSS fallback when API is throttled.
+   * StackExchange has RSS feeds: https://stackoverflow.com/feeds/tag/{tag}
+   */
+  private async fetchRSS(): Promise<readonly SourceItem[]> {
+    const tags = TAG_SETS[Math.floor(Math.random() * TAG_SETS.length)] ?? ["javascript"];
+    const tag = tags[0] ?? "javascript";
+    const RSS_URL = `https://stackoverflow.com/feeds/tag/${encodeURIComponent(tag)}`;
+
+    try {
+      const res = await fetch(RSS_URL, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; FredyBot/1.0)" },
+      });
+
+      if (!res.ok) {
+        this.deps.logger.warn("source.fetch_error", { plugin: "stackexchange", source: "rss", status: res.status, tag });
+        return [];
+      }
+
+      const xml = await res.text();
+      const items = this.parseRSS(xml, tag);
+
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+      }
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "stackexchange", source: "rss", tag, returned: items.length,
+      });
+      return items;
+    } catch (error) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "stackexchange", source: "rss", tag,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** v11.5.0: Parse StackExchange Atom RSS feed. */
+  private parseRSS(xml: string, tag: string): readonly SourceItem[] {
+    const items: SourceItem[] = [];
+    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = entryRegex.exec(xml)) !== null && items.length < 10) {
+      const block = match[1] ?? "";
+      const title = this.extractTag(block, "title");
+      const link = this.extractAtomLink(block);
+      const summary = this.stripHtml(this.extractTag(block, "summary"));
+      const published = this.extractTag(block, "published");
+      const id = this.extractTag(block, "id");
+
+      if (title && link) {
+        items.push({
+          id: `so-${id || title.slice(0, 30)}`,
+          source: this.metadata.id,
+          category: this.metadata.category,
+          title,
+          body: summary.slice(0, 500) || title,
+          url: link,
+          language: "en",
+          publishedAt: published ? Date.parse(published) || undefined : undefined,
+          metadata: {
+            tags: [tag],
+            score: 0,
+            source: "rss",
+          },
+          fetchedAt: Date.now(),
+        });
+      }
+    }
+    return items;
+  }
+
+  private extractTag(xml: string, tag: string): string {
+    const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+    const match = regex.exec(xml);
+    return (match?.[1] ?? "").trim();
+  }
+
+  private extractAtomLink(xml: string): string {
+    const match = /<link[^>]*href="([^"]+)"[^>]*rel="alternate"/i.exec(xml)
+      ?? /<link[^>]*rel="alternate"[^>]*href="([^"]+)"/i.exec(xml)
+      ?? /<link[^>]*href="([^"]+)"/i.exec(xml);
+    return match?.[1] ?? "";
+  }
+
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]+>/g, "").replace(/&[^;]+;/g, " ").trim();
   }
 
   async health(): Promise<PluginStatus> {

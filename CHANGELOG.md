@@ -2,6 +2,187 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.6.0] — 2026-07-20 — Global Provider Footer Refactor
+
+### 🏗️ Architecture: Unified Provider Display System
+
+Complete refactor of the provider footer system. Previously, the formatter
+hardcoded "🌌 Source" for all providers, with a v11.5.0 patch that detected
+GitHub URLs. Now **every provider supplies its own display metadata** through
+`displayIcon` and `displaySource` fields — the formatter NEVER guesses.
+
+### Provider Footer Examples
+
+| Provider | Footer (before) | Footer (after) |
+|----------|-----------------|----------------|
+| GitHub Trending | 🌌 Source | 🐙 microsoft/vscode |
+| GitHub Releases | 🌌 Source | 🐙 openai/openai-python |
+| GitHub Events | 🌌 Source | 🐙 cloudflare/workers-sdk |
+| GitHub Security | 🌌 Source | 🐙 iliv007/fredy-admin |
+| Dev.to | 🌌 Source | 💚 Dev.to |
+| Hacker News | 🌌 Source | 📰 Hacker News |
+| NASA APOD | 🌌 Source | 🌌 NASA APOD |
+| Stack Exchange | 🌌 Source | 🧠 Stack Overflow |
+| Cloudflare Blog | 🌌 Source | ☁️ Cloudflare Blog |
+| Hugging Face | 🌌 Source | 🤗 Hugging Face |
+| Product Hunt | 🌌 Source | 🚀 Product Hunt |
+| XKCD | 🌌 Source | 🎨 XKCD |
+| OpenAI News | 🌌 Source | ✨ OpenAI |
+| Reddit | 🌌 Source | 👾 Reddit |
+| **Future providers** | 🌌 Source | **Whatever the provider specifies** |
+
+### Architecture Changes
+
+**New fields in PluginManifest:**
+- `displayIcon` — emoji for the footer (e.g., "☁️", "🐙")
+- `displaySource` — label text (e.g., "Cloudflare Blog", null for GitHub repo extraction)
+- `extractRepoFromUrl` — whether to extract "owner/repo" from the source URL
+
+**New fields in SourceItem, ContentItem, StandardPost, ReadyContent, FinalPost:**
+- `displayIcon` — carried through the entire pipeline
+- `displaySource` — carried through the entire pipeline
+
+**Data flow:**
+```
+Provider normalize() → SourceItem.displayIcon/displaySource
+    ↓
+ContentNormalizer → StandardPost.displayIcon/displaySource
+    ↓
+ContentManager → ContentItem.displayIcon/displaySource
+    ↓
+ContentFormatter.buildReadyContent() → ReadyContent.displayIcon/displaySource
+    ↓
+UXLayer.transform() → FinalPost.displayIcon/displaySource
+    ↓
+buildFooterParts() renders: "{displayIcon} {displaySource}" in blockquote
+```
+
+**Zero duplicated formatting logic** — one shared footer renderer in `ux-layer.ts`.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.5.0 → 11.6.0 |
+| `package.json` | version 11.6.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.6.0" |
+| `src/types/plugin.ts` | Added displayIcon, displaySource, extractRepoFromUrl to PluginManifest |
+| `src/types/api.ts` | Added displayIcon, displaySource to SourceItem |
+| `src/types/content.ts` | Added displayIcon, displaySource to ContentItem, ReadyContent, StandardPost, FinalPost |
+| `src/core/providers.config.ts` | Added display fields to ProviderConfigEntry interface |
+| **All 20 provider manifests** | Added displayIcon + displaySource + extractRepoFromUrl |
+| **All 20 provider normalize() methods** | Populate displayIcon/displaySource from manifest |
+| **5 GitHub providers** | Added extractGithubRepo() helper for owner/repo extraction |
+| `src/services/content-normalizer.ts` | Carries display fields from SourceItem to StandardPost |
+| `src/services/content-manager.ts` | Carries display fields from StandardPost to ContentItem |
+| `src/services/content-formatter.ts` | Uses display metadata (removed hardcoded GitHub detection) |
+| `src/services/ux-layer.ts` | buildFooterParts uses displayIcon + displaySource (no hardcoded "Source") |
+
+### Future-Proofing
+
+Adding a new provider now requires editing ONLY:
+1. The provider's `manifest.ts` — set `displayIcon` and `displaySource`
+2. The provider's `index.ts` normalize() — populate fields from manifest
+
+No formatter changes. No publisher changes. No UX layer changes. The provider
+decides how it appears — the formatter just renders it.
+
+### Backward Compatibility
+
+- Existing published posts are unaffected (they're already on Telegram)
+- The channel footer `🌀 @ILIVIR3` remains unchanged
+- The quote layout (blockquote) remains unchanged
+- Manual publishing, automatic publishing, history, queue, preview — all compatible
+
+### Verification
+
+- TypeScript: 0 errors
+- All 20 providers have display metadata
+- GitHub providers extract owner/repo from URL
+- Non-GitHub providers use their configured display label
+- Unknown/future providers default to "🌌 Source"
+
+---
+
+## [11.5.0] — 2026-07-20 — CRITICAL: Tick Pipeline Reorder + RSS Fallbacks + GitHub Source Formatting
+
+### 🔴 CRITICAL FIX: Automatic Publishing Now Works!
+
+- **ROOT CAUSE FOUND AND FIXED**: In v11.1.0, `providerEngine.refreshDueProviders(3)`
+  was added as the FIRST step in the tick pipeline. This could take 15-45 seconds
+  (API calls to GitHub, HN, Dev.to, etc.). Cloudflare Workers Free Plan has a
+  30-second wall time limit for `ctx.waitUntil()`. The Worker would be killed
+  BEFORE `scheduler.tick()` ever ran — so scheduled posts were NEVER published
+  automatically. Only manual publishing worked (because it bypasses the scheduler).
+
+  **Fix**: Reordered the tick pipeline:
+  1. `scheduler.tick()` — fire due slots (CRITICAL, runs first)
+  2. `maintainQueue()` — refill if below minimum
+  3. `providerEngine.refreshDueProviders(2)` — refresh for NEXT tick (safely skipped if out of time)
+
+  This ensures the most critical operation (publishing scheduled posts) runs first.
+  Provider refresh is the least time-sensitive and can be safely skipped if the
+  Worker runs out of time.
+
+### Plugin Fixes
+
+- **FIX: stackexchange returns 0 items** — Added RSS fallback. StackExchange API
+  throttles Cloudflare Workers IPs (400 throttle error). Now tries API first (3
+  tag sets), then falls back to RSS feed (`stackoverflow.com/feeds/tag/{tag}`).
+
+- **FIX: github-events returns 0 items** — Added search API fallback. When the
+  events API returns nothing (orgs with no recent events), now searches for
+  popular repos pushed in the last 24h (`stars:>100+pushed:>{yesterday}`).
+
+### New Features
+
+- **GitHub Source Formatting** — GitHub-based posts now show "🐙 owner/repo"
+  instead of "🌌 Source" in the footer. Examples:
+  - `🐙 microsoft/vscode`
+  - `🐙 openai/openai-python`
+  - `🐙 cloudflare/workers-sdk`
+  
+  Applies to: github, github-releases, github-trending, github-events, github-security.
+  Other providers keep the normal "🌌 Source" format.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.4.0 → 11.5.0 |
+| `package.json` | version 11.5.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.5.0" |
+| `src/entry/tick.ts` | **CRITICAL**: Reordered pipeline — scheduler.tick() runs FIRST |
+| `src/plugins/sources/stackexchange/index.ts` | RSS fallback + parseRSS |
+| `src/plugins/sources/github-events/index.ts` | Search API fallback + normalizeSearchRepo |
+| `src/services/content-formatter.ts` | GitHub repo extraction + 🐔 owner/repo footer |
+
+### Root Cause Report
+
+**Problem**: Scheduled posts never published automatically. Only manual publishing worked.
+
+**Root Cause**: v11.1.0 added `providerEngine.refreshDueProviders(3)` as the FIRST
+step in `runTickWork()`. This operation fetches up to 3 providers (each with API
+calls + quality filters), taking 15-45 seconds. Cloudflare Workers Free Plan has
+a 30-second wall time limit for `ctx.waitUntil()`. The Worker would be killed
+before `scheduler.tick()` ever ran.
+
+**Evidence**:
+- User's logs showed "Last Tick: 58min ago" (ticks ARE happening)
+- User's logs showed "Due NOW: 5" (slots ARE due)
+- But "Completed: 0" (slots NEVER fired)
+- Manual publishing worked (bypasses scheduler entirely)
+
+**Fix**: Moved `scheduler.tick()` to be the FIRST operation in the tick pipeline.
+Provider engine refresh moved to LAST (it's for the NEXT tick, not the current one).
+Reduced max providers to refresh from 3 to 2 (less wall time).
+
+**Verification**: After this fix, `scheduler.tick()` runs within 1-2 seconds of
+tick start, well within the 30s limit. Provider refresh runs after, and if it
+runs out of time, it's safely skipped (cached content is still available).
+
+---
+
 ## [11.4.0] — 2026-07-20 — Double-Publish Fix + Image Resolution + JSON Repair + README
 
 ### 🔴 Critical Fixes

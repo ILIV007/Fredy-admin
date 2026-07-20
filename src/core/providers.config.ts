@@ -61,6 +61,16 @@ export interface ProviderConfigEntry {
   readonly canBreak: boolean;
   /** Homepage URL. */
   readonly homepage: string;
+
+  // ─── v11.6.0: Provider Display Metadata ───
+  /** Icon emoji for the footer (e.g., "☁️", "🐙"). */
+  readonly displayIcon: string;
+
+  /** Display label (e.g., "Cloudflare Blog", "microsoft/vscode"). Null = extract from URL. */
+  readonly displaySource: string | null;
+
+  /** Whether to extract owner/repo from URL (GitHub providers). */
+  readonly extractRepoFromUrl: boolean;
   /** API docs URL. */
   readonly docsUrl: string;
 }

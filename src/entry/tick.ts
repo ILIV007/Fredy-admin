@@ -198,18 +198,60 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
     log.push("config loaded");
 
-    // ── v11.1.0: Provider Engine — refresh due providers FIRST ────
-    // This replaces the old flat "refresh all sources" approach with
-    // tier-based staggered refresh. Only providers whose refresh interval
-    // has expired are fetched, minimizing API calls and KV writes.
-    // Runs BEFORE maintainQueue so fresh content is available.
+    // ════════════════════════════════════════════════════════════
+    // v11.5.0: CRITICAL FIX — Scheduler.tick() runs FIRST!
+    //
+    // Previously (v11.1.0–v11.4.0), providerEngine.refreshDueProviders(3)
+    // ran FIRST and could take 15-45 seconds. Cloudflare Workers Free Plan
+    // has a 30s wall time limit for ctx.waitUntil(). The Worker would be
+    // killed BEFORE scheduler.tick() ever ran, so scheduled posts were
+    // NEVER published automatically.
+    //
+    // Now the order is:
+    //   1. Scheduler tick (fire due slots) — CRITICAL, must run first
+    //   2. Process scheduled queue (silent scheduling fallback)
+    //   3. Maintain queue (refill if below minimum)
+    //   4. Provider engine refresh (staggered, for NEXT tick)
+    // ════════════════════════════════════════════════════════════
+
+    // ── 1. SCHEDULER TICK — fire due slots (CRITICAL) ────
     try {
-      const refreshResult = await container.providerEngine.refreshDueProviders(3);
+      // Process silent scheduling queue first (Telegram schedule_date fallback).
+      await processScheduledQueue(env, container);
+      log.push("scheduled queue processed");
+
+      // Scheduler tick — fires ALL due slots from the daily plan.
+      const scheduler = new SchedulerOrchestrator(container);
+      const tickResult = await scheduler.tick();
+      if (tickResult.fired) {
+        log.push(`✅ slot fired: category=${tickResult.slot?.category ?? "?"}`);
+      } else if (tickResult.skipped) {
+        log.push(`⚠️ slot skipped: ${tickResult.skipReason ?? "unknown"}`);
+      } else {
+        log.push("no due slots");
+      }
+    } catch (error) {
+      log.push(`❌ publish error: ${errMsg(error)}`);
+    }
+
+    // ── 2. MAINTAIN QUEUE (refill if below minimum) ────
+    try {
+      await maintainQueue(container, settings, log);
+    } catch (error) {
+      log.push(`queue maintenance error: ${errMsg(error)}`);
+    }
+
+    // ── 3. PROVIDER ENGINE REFRESH (for NEXT tick) ────
+    // v11.5.0: Moved to LAST — this is the least time-sensitive operation.
+    // It refreshes provider caches for the NEXT tick, not the current one.
+    // If the Worker runs out of time, this is safely skipped.
+    try {
+      const refreshResult = await container.providerEngine.refreshDueProviders(2);
       if (refreshResult.refreshed.length > 0) {
         log.push(`providers refreshed: ${refreshResult.refreshed.join(", ")}`);
       }
       if (refreshResult.skipped.length > 0) {
-        log.push(`providers skipped (no content): ${refreshResult.skipped.join(", ")}`);
+        log.push(`providers skipped: ${refreshResult.skipped.join(", ")}`);
       }
       if (refreshResult.failed.length > 0) {
         log.push(`providers failed: ${refreshResult.failed.join(", ")}`);
@@ -219,33 +261,6 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
       }
     } catch (error) {
       log.push(`provider engine error: ${errMsg(error)}`);
-    }
-
-    // ── Publish due posts (from queue only) ────────────
-    try {
-      // Process silent scheduling queue.
-      await processScheduledQueue(env, container);
-      log.push("scheduled queue processed");
-
-      // Scheduler tick — fires due slots from queue.
-      const scheduler = new SchedulerOrchestrator(container);
-      const tickResult = await scheduler.tick();
-      if (tickResult.fired) {
-        log.push(`slot fired: category=${tickResult.slot?.category ?? "?"}`);
-      } else if (tickResult.skipped) {
-        log.push(`slot skipped: ${tickResult.skipReason ?? "unknown"}`);
-      } else {
-        log.push("no due slots");
-      }
-    } catch (error) {
-      log.push(`publish error: ${errMsg(error)}`);
-    }
-
-    // ── Maintain queue (refill if below minimum) ──────
-    try {
-      await maintainQueue(container, settings, log);
-    } catch (error) {
-      log.push(`queue maintenance error: ${errMsg(error)}`);
     }
 
     // ── Cleanup ────────────────────────────────────────

@@ -21,4 +21,7 @@ export const producthuntManifest: PluginManifest = {
   homepage: "https://www.producthunt.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🚀",
+  displaySource: "Product Hunt",
+  extractRepoFromUrl: false,
 };

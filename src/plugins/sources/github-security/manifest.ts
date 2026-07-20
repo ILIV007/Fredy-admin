@@ -21,4 +21,7 @@ export const githubSecurityManifest: PluginManifest = {
   homepage: "https://github.com/advisories",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🐙",
+  displaySource: null,
+  extractRepoFromUrl: true,
 };

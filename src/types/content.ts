@@ -55,6 +55,10 @@ export interface ContentItem {
 
   /** Original source item (for reference). */
   readonly raw: SourceItem;
+
+  // ─── v11.6.0: Provider Display Metadata (carried from SourceItem) ───
+  readonly displayIcon?: string;
+  readonly displaySource?: string;
 }
 
 /** Media attached to a content item. */
@@ -91,11 +95,15 @@ export interface ReadyContent {
   /** The source URL (for the footer link). */
   readonly sourceUrl: string;
 
-  /** The source footer line: "[emoji]Source". */
+  /** The source footer line: "[emoji] label" (e.g., "☁️ Cloudflare Blog" or "🐙 microsoft/vscode"). */
   readonly sourceFooter: string;
 
   /** The emoji used in the source footer. */
   readonly sourceEmoji: string;
+
+  // ─── v11.6.0: Provider Display Metadata (carried from ContentItem) ───
+  readonly displayIcon?: string;
+  readonly displaySource?: string;
 
   /** Media (image) if applicable (e.g., NASA). */
   readonly media: ContentMedia | null;
@@ -273,11 +281,11 @@ export interface StandardPost {
 
   /** Original source item (for reference). */
   readonly raw: SourceItem;
-}
 
-// ────────────────────────────────────────────────────────────
-// Provider Enrichment (provider-specific metadata)
-// ────────────────────────────────────────────────────────────
+  // ─── v11.6.0: Provider Display Metadata (carried from SourceItem) ───
+  readonly displayIcon?: string;
+  readonly displaySource?: string;
+}
 
 /**
  * Enrichment data attached to a StandardPost.
@@ -351,11 +359,17 @@ export interface FinalPost {
   /** The key insight or takeaway line. */
   readonly takeaway: string;
 
-  /** The source line: "[emoji]Source". */
+  /** The source line: "[emoji] label" (e.g., "☁️ Cloudflare Blog" or "🐙 microsoft/vscode"). */
   readonly sourceLine: string;
 
   /** The source emoji. */
   readonly sourceEmoji: string;
+
+  /** v11.6.0: Display icon from provider metadata. */
+  readonly displayIcon?: string;
+
+  /** v11.6.0: Display source from provider metadata. */
+  readonly displaySource?: string;
 
   /** The source URL (for the blockquote link). */
   readonly sourceUrl: string;

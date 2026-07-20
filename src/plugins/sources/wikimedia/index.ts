@@ -189,6 +189,8 @@ export class WikimediaPlugin implements Plugin {
       publishedAt: undefined, // historical event
       imageUrl: firstPage?.thumbnail?.source ? String(firstPage.thumbnail.source) : undefined,
       metadata: { year: event.year, pages: pages.length },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

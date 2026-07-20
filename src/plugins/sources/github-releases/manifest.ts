@@ -19,4 +19,7 @@ export const githubReleasesManifest: PluginManifest = {
   homepage: "https://github.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🐙",
+  displaySource: null,
+  extractRepoFromUrl: true,
 };

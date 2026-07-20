@@ -109,7 +109,9 @@ export class CloudflareBlogPlugin implements Plugin {
             categories,
             pubDate,
           },
-          fetchedAt: Date.now(),
+                displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
+      fetchedAt: Date.now(),
         });
       }
     }

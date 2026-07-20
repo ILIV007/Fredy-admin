@@ -71,6 +71,9 @@ export class ContentNormalizer {
       createdAt: Date.now(),
       publishedAt: sourceItem.publishedAt ?? null,
       raw: sourceItem,
+      // v11.6.0: Carry provider display metadata through the pipeline.
+      displayIcon: sourceItem.displayIcon,
+      displaySource: sourceItem.displaySource,
     };
 
     return post;

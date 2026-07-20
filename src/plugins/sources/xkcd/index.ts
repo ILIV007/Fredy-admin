@@ -96,6 +96,8 @@ export class XkcdPlugin implements Plugin {
         source: "provider",
       } : undefined,
       metadata: { num: comic.num, alt: comic.alt },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

@@ -19,4 +19,7 @@ export const redditManifest: PluginManifest = {
   homepage: "https://www.reddit.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "👾",
+  displaySource: "Reddit",
+  extractRepoFromUrl: false,
 };

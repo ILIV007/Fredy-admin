@@ -55,6 +55,9 @@ export class ContentFormatter {
       media,
       fetchedAt: sourceItem.fetchedAt,
       raw: sourceItem,
+      // v11.6.0: Carry provider display metadata.
+      displayIcon: sourceItem.displayIcon,
+      displaySource: sourceItem.displaySource,
     };
   }
 
@@ -68,7 +71,13 @@ export class ContentFormatter {
     tokensUsed: number,
     estimatedCost: number,
   ): Promise<ReadyContent> {
-    const { emoji, footer } = await this.deps.sourceFormatter.buildFooter();
+    // v11.6.0: Unified provider footer — uses display metadata from the provider.
+    // No hardcoded logic. The provider decides how it appears.
+    // Fallback: "🌌 Source" if no display metadata is set.
+    const finalIcon = item.displayIcon ?? "🌌";
+    const finalSource = item.displaySource ?? "Source";
+    const finalEmoji = finalIcon;
+    const finalFooter = `${finalIcon} ${finalSource}`;
 
     return {
       id: item.id,
@@ -77,8 +86,10 @@ export class ContentFormatter {
       text: aiContent.text,
       headline: aiContent.headline ?? null,
       sourceUrl: item.url,
-      sourceFooter: footer,
-      sourceEmoji: emoji,
+      sourceFooter: finalFooter,
+      sourceEmoji: finalEmoji,
+      displayIcon: finalIcon,
+      displaySource: finalSource,
       media: item.media,
       language: aiContent.generatedLanguage,
       quality,
@@ -90,6 +101,9 @@ export class ContentFormatter {
       fetchedAt: item.fetchedAt,
     };
   }
+
+  // v11.6.0: extractGitHubRepo removed — providers now handle repo extraction
+  // in their normalize() method via displaySource. No hardcoded provider lists.
 
   /** Convert a SourceMedia to a ContentMedia. */
   private toContentMedia(source: SourceMedia): ContentMedia {

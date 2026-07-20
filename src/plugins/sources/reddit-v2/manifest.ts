@@ -21,4 +21,7 @@ export const redditV2Manifest: PluginManifest = {
   homepage: "https://www.reddit.com/r/programming",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "👾",
+  displaySource: "Reddit",
+  extractRepoFromUrl: false,
 };

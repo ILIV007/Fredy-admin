@@ -117,6 +117,9 @@ export class ContentManager {
       media: post.media,
       fetchedAt: sourceItem.fetchedAt,
       raw: sourceItem,
+      // v11.6.0: Carry provider display metadata from StandardPost.
+      displayIcon: post.displayIcon,
+      displaySource: post.displaySource,
     };
 
     // ── Stage 4: Local Validation ─────────────────────────

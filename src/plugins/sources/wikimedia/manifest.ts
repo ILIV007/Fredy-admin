@@ -19,4 +19,7 @@ export const wikimediaManifest: PluginManifest = {
   homepage: "https://www.wikipedia.org",
   supportsMarkdown: false,
   supportsLanguage: ["en"],
+  displayIcon: "📚",
+  displaySource: "Wikimedia",
+  extractRepoFromUrl: false,
 };

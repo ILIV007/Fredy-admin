@@ -73,6 +73,18 @@ interface GHRepoInfo {
   description?: string | null;
 }
 
+/** v11.5.0: GitHub search API repo shape. */
+interface GHSearchRepo {
+  id?: number;
+  full_name?: string;
+  html_url?: string;
+  description?: string | null;
+  stargazers_count?: number;
+  forks_count?: number;
+  language?: string | null;
+  pushed_at?: string;
+}
+
 export class GitHubEventsPlugin implements Plugin {
   readonly metadata = githubEventsManifest;
 
@@ -91,6 +103,18 @@ export class GitHubEventsPlugin implements Plugin {
       this.deps.logger.info("source.fetch_cache_hit", { plugin: "github-events", count: cached.length });
       return cached;
     }
+
+    // v11.5.0: Try events API first, then fallback to GitHub search API
+    // (which is more reliable and returns repos with recent activity).
+    const eventsItems = await this.fetchEvents();
+    if (eventsItems.length > 0) return eventsItems;
+
+    // v11.5.0: Fallback — search for recently pushed repos.
+    return this.fetchRecentlyPushed();
+  }
+
+  /** v11.5.0: Original events API fetch. */
+  private async fetchEvents(): Promise<readonly SourceItem[]> {
 
     const headers: Record<string, string> = {
       "User-Agent": "FredyBot/1.0",
@@ -155,6 +179,79 @@ export class GitHubEventsPlugin implements Plugin {
     });
 
     return items;
+  }
+
+  /**
+   * v11.5.0: Fallback — search for recently pushed repos.
+   * When the events API returns nothing (orgs with no recent events),
+   * this searches for popular repos pushed in the last 24h.
+   */
+  private async fetchRecentlyPushed(): Promise<readonly SourceItem[]> {
+    const headers: Record<string, string> = {
+      "User-Agent": "FredyBot/1.0",
+      "Accept": "application/vnd.github+json",
+    };
+    if (this.deps.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `Bearer ${this.deps.env.GITHUB_TOKEN}`;
+    }
+
+    try {
+      // Search for repos pushed in the last 24h with 100+ stars.
+      const yesterday = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const url = `${GH_API}/search/repositories?q=stars:>100+pushed:>${yesterday}&sort=updated&per_page=10`;
+
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        this.deps.logger.warn("source.fetch_error", { plugin: "github-events", fallback: "search", status: res.status });
+        return [];
+      }
+
+      const data = await res.json() as { items?: readonly GHSearchRepo[] };
+      const repos = data.items ?? [];
+
+      const items = repos.slice(0, 10).map((repo) => this.normalizeSearchRepo(repo));
+
+      if (items.length > 0) {
+        await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+      }
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "github-events", fallback: "search", returned: items.length,
+      });
+
+      return items;
+    } catch (error) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "github-events", fallback: "search",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** v11.5.0: Normalize a search API repo into a SourceItem. */
+  private normalizeSearchRepo(repo: GHSearchRepo): SourceItem {
+    const repoName = repo.full_name ?? "unknown";
+    return {
+      id: `evt-search-${repo.id ?? repoName}`,
+      source: this.metadata.id,
+      category: this.metadata.category,
+      title: `${repoName} — recent activity`,
+      body: String(repo.description ?? "").slice(0, 500),
+      url: repo.html_url ?? `https://github.com/${repoName}`,
+      language: "en",
+      publishedAt: repo.pushed_at ? Date.parse(repo.pushed_at) || undefined : undefined,
+      metadata: {
+        eventType: "SearchResult",
+        repo: repoName,
+        stars: repo.stargazers_count,
+        forks: repo.forks_count,
+        language: repo.language,
+      },
+            displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: this.extractGithubRepo(raw),
+      fetchedAt: Date.now(),
+    };
   }
 
   normalize(raw: unknown): SourceItem {

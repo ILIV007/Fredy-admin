@@ -19,4 +19,7 @@ export const devtoManifest: PluginManifest = {
   homepage: "https://dev.to",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "💚",
+  displaySource: "Dev.to",
+  extractRepoFromUrl: false,
 };

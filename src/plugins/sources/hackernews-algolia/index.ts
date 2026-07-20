@@ -100,6 +100,8 @@ export class HackerNewsAlgoliaPlugin implements Plugin {
         points: hit.points ?? 0,
         comments: hit.num_comments ?? 0,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

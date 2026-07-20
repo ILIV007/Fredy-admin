@@ -22,4 +22,7 @@ export const huggingfaceBlogManifest: PluginManifest = {
   homepage: "https://huggingface.co/blog",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🤗",
+  displaySource: "Hugging Face",
+  extractRepoFromUrl: false,
 };

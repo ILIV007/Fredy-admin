@@ -128,6 +128,8 @@ export class DevToPlugin implements Plugin {
         reactions: article.public_reactions_count ?? article.positive_reactions_count ?? 0,
         comments: article.comments_count ?? 0,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

@@ -146,6 +146,8 @@ export class GitHubPlugin implements Plugin {
         topics: repo.topics,
         owner: ownerLogin,
       },
+            displayIcon: this.metadata.displayIcon ?? "🐙",
+      displaySource: this.extractGithubRepo(raw),
       fetchedAt: Date.now(),
     };
   }

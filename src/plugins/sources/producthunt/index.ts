@@ -198,7 +198,9 @@ export class ProductHuntPlugin implements Plugin {
           language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
           metadata: { source: "rss" },
-          fetchedAt: Date.now(),
+                displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
+      fetchedAt: Date.now(),
         });
       }
     }

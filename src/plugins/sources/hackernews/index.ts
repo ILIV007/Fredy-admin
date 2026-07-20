@@ -123,6 +123,8 @@ export class HackerNewsPlugin implements Plugin {
         author: item.by,
         comments: item.descendants,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

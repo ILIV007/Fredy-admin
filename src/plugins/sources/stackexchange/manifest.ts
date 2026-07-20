@@ -19,4 +19,7 @@ export const stackexchangeManifest: PluginManifest = {
   homepage: "https://stackoverflow.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],
+  displayIcon: "🧠",
+  displaySource: "Stack Overflow",
+  extractRepoFromUrl: false,
 };

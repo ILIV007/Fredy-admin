@@ -154,6 +154,8 @@ export class NewsPlugin implements Plugin {
         source: article.source?.name,
         author: article.author,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }

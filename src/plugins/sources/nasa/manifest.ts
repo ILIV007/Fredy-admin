@@ -21,4 +21,7 @@ export const nasaManifest: PluginManifest = {
   homepage: "https://apod.nasa.gov",
   supportsMarkdown: false,
   supportsLanguage: ["en"],
+  displayIcon: "🌌",
+  displaySource: "NASA APOD",
+  extractRepoFromUrl: false,
 };

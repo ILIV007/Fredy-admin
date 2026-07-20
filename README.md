@@ -1,9 +1,9 @@
-# Fredy v11.4.0
+# Fredy v11.6.0
 
 > **Autonomous AI-powered content publishing platform for Telegram channels.**
 > Built on Cloudflare Workers. Tier-based provider architecture. Free-tier optimized.
 
-[![Version](https://img.shields.io/badge/version-11.4.0-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-11.6.0-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org)
@@ -455,7 +455,20 @@ bun run test:registry       # 65 plugin registry tests (v11.1.0)
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full history.
 
-### v11.4.0 (Current)
+### v11.6.0 (Current)
+- Global Provider Footer Refactor: every provider supplies its own displayIcon + displaySource
+- GitHub posts show "🐙 owner/repo" (e.g., "🐙 microsoft/vscode")
+- Non-GitHub posts show provider-specific label (e.g., "☁️ Cloudflare Blog", "🤗 Hugging Face")
+- Future-proof: adding providers requires NO formatter changes
+- Unified data flow: manifest → SourceItem → StandardPost → ContentItem → ReadyContent → FinalPost
+
+### v11.5.0
+- CRITICAL: Tick pipeline reordered — scheduler.tick() runs FIRST (was being killed by 30s timeout)
+- RSS fallback for stackexchange (API throttles CF Workers)
+- Search API fallback for github-events
+- GitHub source formatting (later superseded by v11.6.0 unified system)
+
+### v11.4.0
 - FIX: Double-publish bug (manual force no longer calls scheduler.tick)
 - FIX: Missing images (better og:image resolution, Dev.to API, browser UA)
 - FIX: AI JSON parse errors (automatic JSON repair)

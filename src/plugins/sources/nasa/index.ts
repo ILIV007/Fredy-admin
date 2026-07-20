@@ -141,6 +141,8 @@ export class NasaPlugin implements Plugin {
         serviceVersion: apod.service_version,
         mediaType,
       },
+            displayIcon: this.metadata.displayIcon ?? "🌌",
+      displaySource: this.metadata.displaySource ?? "Source",
       fetchedAt: Date.now(),
     };
   }
