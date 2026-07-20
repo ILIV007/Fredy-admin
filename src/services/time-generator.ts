@@ -109,15 +109,24 @@ export class TimeGenerator {
     generatedTimes.sort((a, b) => a.minutes - b.minutes);
 
     // Build SlotTime objects.
+    // v11.15.0: Window-based — each slot represents a posting WINDOW, not an exact time.
+    // The slot.time is the window START, windowEnd is the window END.
+    // The scheduler fires when the cron tick falls within [start, end].
     const slots: SlotTime[] = generatedTimes.map((entry, index) => {
-      const hh = Math.floor(entry.minutes / 60).toString().padStart(2, "0");
-      const mm = (entry.minutes % 60).toString().padStart(2, "0");
-      const time = `${hh}:${mm}`;
-      const epochMs = this.minutesToEpochMs(date, entry.minutes, config.timezone);
+      const range = minuteRanges[entry.windowIndex]!;
+      const startHh = Math.floor(range.start / 60).toString().padStart(2, "0");
+      const startMm = (range.start % 60).toString().padStart(2, "0");
+      const endHh = Math.floor(range.end / 60).toString().padStart(2, "0");
+      const endMm = (range.end % 60).toString().padStart(2, "0");
+      const time = `${startHh}:${startMm}`;
+      const windowEnd = `${endHh}:${endMm}`;
+      // epochMs is the window START — used for ordering, NOT exact firing.
+      const epochMs = this.minutesToEpochMs(date, range.start, config.timezone);
       return {
         index,
         date,
         time,
+        windowEnd,
         epochMs,
         category: entry.category,
         jitterMinutes: config.jitterMinutes,

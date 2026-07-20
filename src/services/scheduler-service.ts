@@ -192,18 +192,17 @@ export class SchedulerService {
     //    Only fire ONE slot per tick to prevent burst publishing.
     //    If a slot was missed (cron gap), it fires on the next tick.
     //    Random slot times are preserved — the scheduler adapts to them.
+    // v11.15.0: Log window-based information for debugging.
     this.deps.logger.info("scheduler.tick", {
       now: new Date(now).toISOString(),
       nowEpoch: now,
       timezone: settings.scheduler.timezone,
-      slots: plan.slots.map((s) => ({
+      windows: plan.slots.map((s) => ({
         index: s.index,
-        time: s.time,
-        epochMs: s.epochMs,
-        isDue: s.epochMs <= now,
-        overdueMin: s.epochMs <= now ? Math.round((now - s.epochMs) / 60000) : 0,
+        window: `${s.time}-${s.windowEnd ?? "?"}`,
+        category: s.category,
       })),
-      message: "Scheduler tick — checking slots",
+      message: "Scheduler tick — checking windows",
     });
 
     const dueSlot = await this.findDueSlot(plan, now);
@@ -237,23 +236,32 @@ export class SchedulerService {
   }
 
   /**
-   * v11.11.0: Find the OLDEST pending due slot within the grace period.
+   * v11.15.0: WINDOW-BASED scheduling — the core architectural change.
    *
-   * Architecture change:
-   * - v11.2.0 fired ALL due slots (could cause burst publishing)
-   * - v11.11.0 fires ONE slot per tick (oldest first)
+   * Instead of comparing `now >= slot.epochMs` (which requires exact timestamps),
+   * the scheduler now checks if the current time falls WITHIN a posting window.
    *
-   * This ensures:
-   * - Random slot times are preserved (no bias needed)
-   * - One post per cron tick (no burst)
-   * - Missed slots fire on next tick (grace period)
-   * - No duplicate publishing
+   * Logic:
+   * 1. Convert current time to minutes-since-midnight in the configured timezone.
+   * 2. For each window (slot), check if current minutes is within [start, end].
+   * 3. If yes AND the window is pending → fire it.
+   * 4. Also check PAST windows that are still pending (missed ticks).
+   * 5. One post per tick (oldest pending window first).
    *
-   * The scheduler adapts to the random slot times, NOT the other way around.
+   * This eliminates:
+   * - Grace period failures (windows don't "expire" — they stay pending)
+   * - Exact timestamp comparison (no epochMs dependency)
+   * - "Slot missed" errors (any tick within or after the window fires it)
+   *
+   * A window is "due" if:
+   * - current time >= window start
+   * - AND window is still pending (not published/failed/publishing)
+   *
+   * A window is "expired" if:
+   * - current time > window end + 6 hours (generous buffer for cron gaps)
+   * - AND still pending → mark as failed + notify admin
    */
   private async findDueSlot(plan: DailyPlan, now: number): Promise<SlotTime | null> {
-    const GRACE_PERIOD_MS = 240 * 60 * 1000; // 4 hours
-
     let stratPlan: import("../types/strategy").DailyPublishPlan | null = null;
     if (this.deps.strategyEngine) {
       try {
@@ -261,13 +269,27 @@ export class SchedulerService {
       } catch { /* non-fatal */ }
     }
 
-    // Iterate slots in chronological order (oldest first).
-    // Return the FIRST pending due slot — one per tick.
+    // Get current time in the configured timezone as minutes-since-midnight.
+    const settings = await this.deps.settings();
+    const tz = settings.scheduler.timezone || "UTC";
+    const nowInTz = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date(now));
+    const [nowH, nowM] = nowInTz.split(":").map(Number);
+    const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+    // v11.15.0: Window expiration — 6 hours after window end.
+    // This is very generous: with a 2-hour cron, a window at 08:00-10:00
+    // would expire at 16:00 (6h after end). That's 3 missed cron ticks.
+    const WINDOW_EXPIRY_HOURS = 6;
+
     for (const slot of plan.slots) {
-      // Skip slots not yet due.
-      if (slot.epochMs > now) {
-        continue;
-      }
+      // Parse window start/end as minutes-since-midnight.
+      const [startH, startM] = slot.time.split(":").map(Number);
+      const [endH, endM] = (slot.windowEnd ?? "23:59").split(":").map(Number);
+      const startMin = (startH ?? 0) * 60 + (startM ?? 0);
+      const endMin = (endH ?? 23) * 60 + (endM ?? 59);
 
       // Check if already fired.
       let alreadyFired = false;
@@ -281,36 +303,48 @@ export class SchedulerService {
       }
       if (alreadyFired) continue;
 
-      // Grace period — if slot is too far overdue, mark as failed.
-      if (now - slot.epochMs > GRACE_PERIOD_MS) {
+      // v11.15.0: Window is "due" if current time >= window start.
+      // This means ANY tick after the window starts will fire it.
+      if (nowMinutes < startMin) {
+        // Window hasn't started yet — skip.
+        continue;
+      }
+
+      // v11.15.0: Check if window is expired (too far past end).
+      const expiryMin = endMin + WINDOW_EXPIRY_HOURS * 60;
+      const isExpired = nowMinutes > expiryMin;
+
+      if (isExpired) {
+        // Window is expired — mark as failed.
         if (this.deps.strategyEngine) {
           await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
-            error: `Slot >4h overdue — grace period exceeded. Now=${new Date(now).toISOString()}, scheduled=${new Date(slot.epochMs).toISOString()}`,
-            stage: "grace",
+            error: `Window ${slot.time}-${slot.windowEnd} expired (>${WINDOW_EXPIRY_HOURS}h past end). Now=${nowInTz}`,
+            stage: "window_expired",
             plugin: null,
           }).catch(() => {});
         } else {
-          await this.deps.dailyPlanner.markSlotFired(slot, "passed-grace").catch(() => {});
+          await this.deps.dailyPlanner.markSlotFired(slot, "window-expired").catch(() => {});
         }
         this.deps.logger.warn("scheduler.skip", {
           slotIndex: slot.index,
           date: slot.date,
-          time: slot.time,
-          reason: "slot_overdue_grace",
-          overdueHours: Math.round((now - slot.epochMs) / (60 * 60 * 1000) * 10) / 10,
-          message: "Slot >4h overdue — marking as passed",
+          window: `${slot.time}-${slot.windowEnd}`,
+          reason: "window_expired",
+          nowTime: nowInTz,
+          message: `Window ${slot.time}-${slot.windowEnd} expired — marking as failed`,
         });
         await this.notifyAdminOfGraceFailure(slot, now).catch(() => {});
         continue;
       }
 
-      // Found the oldest pending due slot — return it.
+      // Window is due (current time >= start) and not expired — fire it!
       this.deps.logger.info("scheduler.slot_fired", {
         slotIndex: slot.index,
-        time: slot.time,
+        window: `${slot.time}-${slot.windowEnd}`,
         category: slot.category,
-        overdue: Math.round((now - slot.epochMs) / 60000) + "min",
-        message: `Firing slot ${slot.index} (${slot.time}, ${Math.round((now - slot.epochMs) / 60000)}min overdue)`,
+        nowTime: nowInTz,
+        inWindow: nowMinutes >= startMin && nowMinutes <= endMin,
+        message: `Firing window ${slot.time}-${slot.windowEnd} (now: ${nowInTz})`,
       });
       return slot;
     }
@@ -327,15 +361,13 @@ export class SchedulerService {
       const adminId = Number(settings.telegram.adminId || 0);
       if (adminId <= 0) return;
 
-      const overdueHours = Math.round((now - slot.epochMs) / (60 * 60 * 1000) * 10) / 10;
       const msg = [
         ``,
-        `<b>━━━ ⚠️ SLOT MISSED (Grace Expired) ━━━</b>`,
+        `<b>━━━ ⚠️ WINDOW EXPIRED ━━━</b>`,
         ``,
-        `<blockquote>📅 <b>Slot:</b> #${slot.index} at ${slot.time}</blockquote>`,
+        `<blockquote>📅 <b>Window:</b> #${slot.index} ${slot.time}-${slot.windowEnd}</blockquote>`,
         `<blockquote>📂 <b>Category:</b> ${slot.category}</blockquote>`,
-        `<blockquote>⏰ <b>Overdue:</b> ${overdueHours}h</blockquote>`,
-        `<blockquote>💡 <b>Cause:</b> External cron gap exceeded 4h grace period</blockquote>`,
+        `<blockquote>💡 <b>Cause:</b> Window expired (6h+ past end, cron may have missed multiple ticks)</blockquote>`,
       ].join("\n");
 
       await this.deps.tg?.sendMessage(adminId, msg, { parse_mode: "HTML" }).catch(() => {});

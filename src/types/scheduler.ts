@@ -19,17 +19,23 @@ export interface PostingWindow {
   readonly end: string; // "HH:MM"
 }
 
-/** A generated slot time for a day. */
+/** A generated slot time for a day.
+ *  v11.15.0: Window-based — no exact epochMs. The scheduler fires when
+ *  the cron tick falls within the window's time range. */
 export interface SlotTime {
   readonly index: number;
   readonly date: string; // YYYY-MM-DD
-  readonly time: string; // HH:MM
+  /** Window start time "HH:MM" */
+  readonly time: string;
+  /** Window end time "HH:MM" (v11.15.0) */
+  readonly windowEnd: string;
+  /** Epoch ms for window START (for ordering, not exact firing) */
   readonly epochMs: number;
   readonly category: Category;
   readonly jitterMinutes: number;
   /** v8.0.0: True if the slot has been fired (set by status()). */
   readonly fired?: boolean;
-  /** v8.7.0: Real 3-state status from strategy plan — "published" | "failed" | "pending". */
+  /** v8.7.0: Real 3-state status from strategy plan — "published" | "failed" | "pending" | "publishing". */
   readonly status?: string;
 }
 

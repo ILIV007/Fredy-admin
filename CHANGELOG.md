@@ -2,6 +2,93 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.15.0] — 2026-07-20 — CRITICAL: Window-Based Scheduler (Remove Exact Timestamps)
+
+### 🏗️ Architecture: Time-Based → Window-Based Scheduler
+
+**Root Cause:** The scheduler was designed like a 1-minute cron system but runs
+on a 2-hour cron. It generated exact timestamps (08:06, 12:47, 17:27) and
+compared `now >= slot.epochMs`. With a 2-hour cron, a slot at 17:27 would only
+fire at the 18:00 tick (33min "delay") — or if that tick was missed, at 20:00
+(2h33m "delay"). If the delay exceeded the grace period (4h), the slot was
+marked "failed" and permanently lost.
+
+**Fix:** Complete refactor to **window-based scheduling**:
+
+```
+BEFORE (v11.11.0 — Time-Based):
+  Generate exact slot: 17:27
+  Tick at 18:00: 17:27 ≤ 18:00 → fire (33min delay)
+  Tick at 20:00: 17:27 ≤ 20:00 → fire (2h33m delay)
+  Tick at 22:00: 17:27 ≤ 22:00 → but 4h33m > grace → FAILED
+
+AFTER (v11.15.0 — Window-Based):
+  Generate window: 16:00-18:00
+  Tick at 16:00: current 16:00 ≥ window start 16:00 → fire (0 delay!)
+  Tick at 18:00: current 18:00 ≥ window start 16:00 → fire (if still pending)
+  Window expires at 18:00 + 6h = 24:00 (midnight) — very generous
+```
+
+### Key Changes
+
+1. **TimeGenerator**: Slots now represent **windows**, not exact times.
+   - `slot.time` = window START (e.g., "16:00")
+   - `slot.windowEnd` = window END (e.g., "18:00")
+   - `slot.epochMs` = window start epoch (for ordering only, not firing)
+   - Random times within windows are **eliminated** — the window IS the slot
+
+2. **findDueSlot()**: Completely rewritten:
+   - Converts current time to minutes-since-midnight in timezone
+   - Checks if `nowMinutes >= windowStart` (not exact epochMs comparison)
+   - Window expires 6 hours after end (not 4h grace from random time)
+   - No more "slot >4h overdue" errors
+
+3. **StrategyEngine**: Stores `windowEnd` in plan posts
+
+4. **Types**: `SlotTime` has `windowEnd` field, `PlannedPost` has `windowEnd`
+
+5. **Admin PM**: "WINDOW EXPIRED" instead of "SLOT MISSED (Grace Expired)"
+
+### What This Eliminates
+
+- ❌ "Slot >4h overdue — grace period exceeded" errors
+- ❌ Exact timestamp comparison (`now >= slot.epochMs`)
+- ❌ Random slot times that don't align with cron ticks
+- ❌ Grace period failures from cron gaps
+- ❌ "Slot missed" at the exact scheduled time
+
+### What This Preserves
+
+- ✅ Posting windows (08-10, 12-14, 16-18, 18-20, 20-22)
+- ✅ One post per tick (oldest pending window first)
+- ✅ Quiet hours
+- ✅ All strategies (balanced, active, minimal, etc.)
+- ✅ Weekly themes
+- ✅ Provider selection
+- ✅ Dedup system
+- ✅ Image resolver
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.14.0 → 11.15.0 |
+| `package.json` | version 11.15.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.15.0" |
+| `src/types/scheduler.ts` | Added `windowEnd` to SlotTime |
+| `src/types/strategy.ts` | Added `windowEnd` to PlannedPost |
+| `src/services/time-generator.ts` | Generate windows, not random exact times |
+| `src/services/strategy-engine.ts` | Store windowEnd in plan posts |
+| `src/services/scheduler-service.ts` | Window-based findDueSlot, no grace period |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.15.0
+
+---
+
 ## [11.14.0] — 2026-07-20 — GitHub Events → Discovery Provider Refactor
 
 ### 🏗️ Architecture: GitHub Events converted to Discovery Provider

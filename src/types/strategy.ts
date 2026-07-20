@@ -77,9 +77,11 @@ export interface PlannedPost {
   readonly index: number;
   /** Date in YYYY-MM-DD format. */
   readonly date: string;
-  /** Time in HH:MM format (random within posting window). */
+  /** Time in HH:MM format — window START (v11.15.0). */
   readonly time: string;
-  /** Epoch milliseconds for the publish time. */
+  /** v11.15.0: Window end time "HH:MM". */
+  readonly windowEnd?: string;
+  /** Epoch milliseconds for the window start (used for ordering, not exact firing). */
   readonly epochMs: number;
   /** Category for this post. */
   readonly category: Category;
