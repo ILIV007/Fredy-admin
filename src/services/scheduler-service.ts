@@ -291,6 +291,23 @@ export class SchedulerService {
       const startMin = (startH ?? 0) * 60 + (startM ?? 0);
       const endMin = (endH ?? 23) * 60 + (endM ?? 59);
 
+      // v11.18.0: Parse scheduledTime (random within window) as minutes-since-midnight.
+      // This is the REAL publish trigger — not windowStart.
+      // If scheduledTime is missing (old plan), fall back to windowStart.
+      let scheduledMin = startMin;
+      if (slot.scheduledTime) {
+        const [sH, sM] = slot.scheduledTime.split(":").map(Number);
+        scheduledMin = (sH ?? 0) * 60 + (sM ?? 0);
+      }
+      // Also check strategy plan for scheduledTime (more reliable).
+      if (stratPlan) {
+        const post = stratPlan.posts.find(p => p.index === slot.index);
+        if (post?.scheduledTime) {
+          const [psH, psM] = post.scheduledTime.split(":").map(Number);
+          scheduledMin = (psH ?? 0) * 60 + (psM ?? 0);
+        }
+      }
+
       // Check if already fired.
       let alreadyFired = false;
       if (stratPlan) {
@@ -303,17 +320,16 @@ export class SchedulerService {
       }
       if (alreadyFired) continue;
 
-      // v11.16.0: Window is "due" with CRON TOLERANCE.
-      // Allow firing up to 10 minutes BEFORE window start (cron can be early).
+      // v11.18.0: RANDOM JITTER — the scheduler fires when now >= scheduledTime
+      // (not windowStart). This restores human-like random posting.
+      // Cron tolerance: allow firing up to 10 minutes BEFORE scheduledTime.
       const CRON_TOLERANCE_MINUTES = 10;
-      if (nowMinutes < startMin - CRON_TOLERANCE_MINUTES) {
-        // Window hasn't started yet (with tolerance) — skip.
+      if (nowMinutes < scheduledMin - CRON_TOLERANCE_MINUTES) {
+        // scheduledTime hasn't been reached yet — skip.
         continue;
       }
 
-      // v11.16.0: Window expiry — 6 hours after window END (exclusive).
-      // Windows use exclusive end: [start, end) so 18:00-20:00 means
-      // 18:00 <= now < 20:00. At exactly 20:00, the next window takes over.
+      // v11.18.0: Window expiry — 6 hours after window END (exclusive).
       const expiryMin = endMin + WINDOW_EXPIRY_HOURS * 60;
       const isExpired = nowMinutes >= expiryMin;
 
@@ -340,14 +356,14 @@ export class SchedulerService {
         continue;
       }
 
-      // Window is due (current time >= start) and not expired — fire it!
+      // v11.18.0: scheduledTime reached — fire it!
       this.deps.logger.info("scheduler.slot_fired", {
         slotIndex: slot.index,
         window: `${slot.time}-${slot.windowEnd}`,
-        category: slot.category,
+        scheduledTime: slot.scheduledTime ?? slot.time,
         nowTime: nowInTz,
-        inWindow: nowMinutes >= startMin && nowMinutes <= endMin,
-        message: `Firing window ${slot.time}-${slot.windowEnd} (now: ${nowInTz})`,
+        category: slot.category,
+        message: `Firing scheduledTime ${slot.scheduledTime ?? slot.time} in window ${slot.time}-${slot.windowEnd} (now: ${nowInTz})`,
       });
       return slot;
     }
@@ -1232,12 +1248,13 @@ export class SchedulerService {
           const [nowH, nowM] = nowInTz.split(":").map(Number);
           const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
 
-          // Find the first pending window whose start is still in the future.
+          // v11.18.0: Find next pending post whose scheduledTime is in the future.
           const nextPost = stratPlan.posts.find((p) => {
             if (p.status !== "pending") return false;
-            const [sH, sM] = p.time.split(":").map(Number);
-            const startMin = (sH ?? 0) * 60 + (sM ?? 0);
-            return nowMinutes < startMin;
+            const schedTime = p.scheduledTime ?? p.time;
+            const [sH, sM] = schedTime.split(":").map(Number);
+            const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+            return nowMinutes < schedMin;
           });
           if (nextPost) {
             nextSlot = {

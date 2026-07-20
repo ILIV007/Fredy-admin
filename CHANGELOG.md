@@ -2,6 +2,82 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.18.0] — 2026-07-20 — Random Jitter Scheduler (scheduledTime = REAL Trigger)
+
+### 🎲 Random Jitter: scheduledTime is now the REAL publish trigger
+
+**Before (v11.17.0):** Scheduler fired when `nowMinutes >= windowStart`.
+Every post published at the exact window start (08:00, 12:00, 16:00...).
+Randomness was lost — all posts were at predictable times.
+
+**After (v11.18.0):** Scheduler fires when `nowMinutes >= scheduledTime`.
+Each window gets a random `scheduledTime` (e.g., 08:47, 13:22, 17:14...)
+generated once during daily plan creation and persisted in KV.
+
+### How It Works
+
+```
+Daily Plan Generation (once per day):
+  Window 08:00-10:00 → scheduledTime = 09:17 🎲
+  Window 12:00-14:00 → scheduledTime = 13:02 🎲
+  Window 16:00-18:00 → scheduledTime = 17:26 🎲
+
+Scheduler Tick (every 2h):
+  now = 16:00 → scheduledTime 17:26 not reached → skip
+  now = 18:00 → scheduledTime 17:26 reached → FIRE!
+```
+
+### Cloudflare Free Plan Note
+
+The external cron fires every 2 hours. This means the actual publish time
+is the first cron tick AT OR AFTER the scheduledTime. Example:
+
+```
+scheduledTime = 17:26
+Cron ticks: 16:00, 18:00
+→ 16:00: 17:26 not reached → skip
+→ 18:00: 17:26 reached → fire (actual publish: 18:00)
+```
+
+The **displayed** scheduledTime (17:26) is the INTENDED time.
+The **actual** publish time (18:00) is when the cron tick fires.
+Both are stored: `scheduledTime` (intended) and `publishedAt` (actual).
+
+This is inherent to the 2-hour cron architecture and cannot be improved
+without increasing cron frequency (which would exceed Cloudflare Free limits).
+
+### Changes
+
+1. **findDueSlot()**: Now compares `nowMinutes >= scheduledMin` (not `startMin`).
+   Falls back to `windowStart` if `scheduledTime` is missing (backward compat).
+
+2. **status()**: Pending/dueNow calculation uses `scheduledTime`.
+
+3. **manager.ts**: Scheduler debug API uses `scheduledTime` for pending/dueNow.
+
+4. **scheduledTime is generated ONCE** by TimeGenerator during daily plan
+   creation and stored in KV. Never regenerated during ticks.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.17.0 → 11.18.0 |
+| `package.json` | version 11.18.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.18.0" |
+| `src/services/scheduler-service.ts` | findDueSlot uses scheduledTime, status() uses scheduledTime |
+| `src/entry/manager.ts` | Scheduler debug uses scheduledTime for pending/dueNow |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.18.0
+- **scheduledTime is the REAL scheduler trigger** ✓
+- **No old epoch-based scheduling logic remains** ✓
+
+---
+
 ## [11.17.0] — 2026-07-20 — Scheduler Domain Separation (Window vs Display-Only)
 
 ### 🏗️ Architecture: Domain Model Separation

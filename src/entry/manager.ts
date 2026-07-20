@@ -659,19 +659,21 @@ export async function managerHandler(
 
       const slots = plan?.posts ?? [];
       const completed = slots.filter((s) => s.status === "published" || s.status === "backup");
-      // v11.16.0: Pending = window start is still in the future (with 10min tolerance)
+      // v11.18.0: Pending = scheduledTime is still in the future (with 10min tolerance)
       const pending = slots.filter((s) => {
         if (s.status !== "pending") return false;
-        const [sH, sM] = s.time.split(":").map(Number);
-        const startMin = (sH ?? 0) * 60 + (sM ?? 0);
-        return nowMinutes < startMin - 10; // 10min cron tolerance
+        const schedTime = s.scheduledTime ?? s.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes < schedMin - 10;
       });
-      // v11.16.0: Due NOW = window has started but not yet published
+      // v11.18.0: Due NOW = scheduledTime has been reached but not yet published
       const dueNow = slots.filter((s) => {
         if (s.status !== "pending") return false;
-        const [sH, sM] = s.time.split(":").map(Number);
-        const startMin = (sH ?? 0) * 60 + (sM ?? 0);
-        return nowMinutes >= startMin - 10;
+        const schedTime = s.scheduledTime ?? s.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        return nowMinutes >= schedMin - 10;
       });
       const failed = slots.filter((s) => s.status === "failed");
       const publishing = slots.filter((s) => s.status === "publishing");
