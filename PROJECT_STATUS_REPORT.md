@@ -1,10 +1,10 @@
 # Fredy — Project Status Report
 
 > **Document type:** Living status document (updated per release)
-> **Current version:** Fredy v11.1.0
+> **Current version:** Fredy v11.11.1
 > **Source baseline:** Fredy-admin v9.3.2 (uploaded 2026-07-19)
-> **Last updated:** 2026-07-20 (v11.1.0 refactor)
-> **Status:** v11.1.0 complete. ProviderEngine wired, central config, rotation, breaking content.
+> **Last updated:** 2026-07-20 (v11.11.1)
+> **Status:** Production-ready. Scheduler redesigned, dedup unified, image pipeline rebuilt, 20 providers with tier system, smart link preview, Telegram bot fully refactored.
 > **Author:** Z.ai Code (continuation agent)
 
 ---

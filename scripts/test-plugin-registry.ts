@@ -2,6 +2,8 @@
  * scripts/test-plugin-registry.ts
  * v11.1.0: Structural test — asserts every plugin registered in PluginManager
  * has an entry in providers.config.ts.
+ * v11.12.0: Derives plugin IDs from providers.config.ts (single source of truth)
+ * instead of maintaining a hardcoded parallel list.
  *
  * This test prevents the recurring bug where new plugins are added but their
  * IDs are missing from CREDIBILITY_SCORES / PLUGIN_MIN_STARS / etc.
@@ -10,21 +12,11 @@
  * Run: npx tsx scripts/test-plugin-registry.ts
  */
 
-import { PROVIDERS_CONFIG, findMissingProviders, getProviderWeight, getCredibilityScore, getReputationScore } from "../src/core/providers.config";
+import { PROVIDERS_CONFIG, findMissingProviders, getProviderWeight, getCredibilityScore, getReputationScore, getAllProviderIds } from "../src/core/providers.config";
 
-// Since we can't easily instantiate PluginManager without a full env,
-// we test against the static list of plugin IDs that the PluginLoader registers.
-// This list MUST match src/services/plugin-loader.ts loadSources().
-const REGISTERED_PLUGIN_IDS: readonly string[] = [
-  // Legacy
-  "news", "joke", "wikimedia", "hackernews", "reddit",
-  // Tier S
-  "github", "github-releases", "github-trending", "github-events", "devto", "hackernews-algolia", "nasa",
-  // Tier A
-  "stackexchange", "cloudflare-blog", "huggingface-blog", "producthunt",
-  // Tier B
-  "xkcd", "reddit-v2", "github-security", "openai-news",
-];
+// v11.12.0: Derive plugin IDs from the central config (single source of truth).
+// No more hardcoded parallel list that could drift.
+const REGISTERED_PLUGIN_IDS: readonly string[] = getAllProviderIds();
 
 let passed = 0;
 let failed = 0;

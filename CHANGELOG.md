@@ -2,6 +2,45 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.12.0] — 2026-07-20 — Optimization: KV Writes Reduced + Test Strengthened + Status Report
+
+### 📊 Optimizations
+
+- **KV write reduction in tick pipeline** — Combined `LAST_TICK_KEY` and
+  `LAST_LOG_KEY` writes into a single KV write. The tick timestamp is now
+  embedded in the lastLog object. Saves 1 KV write per tick (~12 writes/day).
+
+- **Eliminated duplicate getSettings call** — `runTickWork()` previously called
+  `getSettings()` a second time (cache hit but still overhead). Now receives
+  the already-loaded settings from the lock acquisition step.
+
+- **Test strengthened** — `test-plugin-registry.ts` now derives plugin IDs
+  from `getAllProviderIds()` in `providers.config.ts` (single source of truth)
+  instead of maintaining a hardcoded parallel list that could drift when new
+  plugins are added.
+
+- **PROJECT_STATUS_REPORT.md updated** — Status line now reflects v11.11.1
+  (was stale at v11.1.0).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.11.1 → 11.12.0 |
+| `package.json` | version 11.12.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.12.0" |
+| `src/entry/tick.ts` | Combined KV writes, pass cached settings |
+| `scripts/test-plugin-registry.ts` | Derive IDs from getAllProviderIds() |
+| `PROJECT_STATUS_REPORT.md` | Updated status to v11.11.1 |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.12.0
+
+---
+
 ## [11.11.1] — 2026-07-20 — Bot Settings Fix + Admin PM Preview + Daily Plan UI
 
 ### 🔴 Critical Fixes

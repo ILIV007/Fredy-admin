@@ -116,12 +116,14 @@ export async function tickHandler(
       }
     }
   }
-  // Now safe to overwrite with the current tick timestamp.
+  // v11.12.0: lastTick is now embedded in LAST_LOG_KEY (saved at end of tick).
+  // This removes one KV write per tick.
+  // Still read the old LAST_TICK_KEY for backward compat with stale-tick detection.
   await container.kv.set(LAST_TICK_KEY, String(now)).catch(() => {});
 
   // If ctx is available, run in background. Otherwise run synchronously (legacy mode).
   if (ctx) {
-    ctx.waitUntil(runTickWork(container, env, tickLock));
+    ctx.waitUntil(runTickWork(container, env, tickLock, settings));
     return json({
       ok: true,
       time: startedAt,
@@ -131,7 +133,7 @@ export async function tickHandler(
   }
 
   // Fallback: synchronous execution (older Cloudflare environments without ctx)
-  const log = await runTickWork(container, env, tickLock);
+  const log = await runTickWork(container, env, tickLock, settings);
   return json({
     ok: true,
     time: new Date().toISOString(),
@@ -189,13 +191,12 @@ async function notifyStaleTick(
 // Background work
 // ────────────────────────────────────────────────────────────
 
-async function runTickWork(container: Container, env: Env, tickLock: { release: () => Promise<void> }): Promise<string[]> {
+async function runTickWork(container: Container, env: Env, tickLock: { release: () => Promise<void> }, cachedSettings: FredySettings | null): Promise<string[]> {
   const log: string[] = [];
 
   try {
-    // v8.1.1: Settings are already cached by ConfigCache (module-level singleton),
-    // so this is an in-memory hit, not a KV read.
-    const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+    // v11.12.0: Reuse settings from lock acquisition (already cached in memory).
+    const settings = cachedSettings ?? await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
     log.push("config loaded");
 
     // ════════════════════════════════════════════════════════════
@@ -270,8 +271,9 @@ async function runTickWork(container: Container, env: Env, tickLock: { release: 
   } finally {
     // ── Release lock ───────────────────────────────────
     await tickLock.release();
-    // Persist log for debugging
-    await container.kv.setJson(LAST_LOG_KEY, { time: Date.now(), log }, 3600).catch(() => {});
+    // v11.12.0: Combine lastTick + lastLog into ONE KV write (was 2 separate writes).
+    // lastTick timestamp is now embedded in the lastLog object.
+    await container.kv.setJson(LAST_LOG_KEY, { time: Date.now(), tickTime: now, log }, 3600).catch(() => {});
   }
 
   return log;
