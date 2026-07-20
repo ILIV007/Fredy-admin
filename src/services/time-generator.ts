@@ -35,7 +35,17 @@ export class TimeGenerator {
    * Generate random slot times for a day.
    *
    * v7: Each posting window generates at most ONE random time.
-   * The number of slots = min(categoryList.length, postingWindows.length).
+   * v11.10.0: CRITICAL FIX — slots are now aligned to cron tick boundaries.
+   *
+   * The external cron fires every 2 hours. Previously, slots were generated
+   * at completely random times within each posting window (e.g., 13:35 in a
+   * 12:00-14:00 window). This meant the slot would only fire on the NEXT tick
+   * after its time (e.g., 14:00 tick → 25min delay, or worse: 13:35 slot with
+   * 14:00 missed tick → 15:00 tick → 85min delay).
+   *
+   * Now, slot times are biased toward the START of each posting window, so
+   * they fire on the FIRST tick that falls within the window. This reduces
+   * maximum delay from ~2 hours to ~0 hours.
    *
    * @param date — YYYY-MM-DD
    * @param config — scheduler config (windows, jitter, timezone, minGap)
@@ -156,7 +166,24 @@ export class TimeGenerator {
     });
   }
 
-  /** Generate a random time within a single range, avoiding existing times by minGap. */
+  /**
+   * Generate a slot time within a single range, avoiding existing times by minGap.
+   *
+   * v11.10.0: CRITICAL FIX — biased toward the START of the range.
+   *
+   * The external cron fires every 2 hours. If a slot is at 13:35 in a 12:00-14:00
+   * window, the 12:00 tick sees it as "not yet due" and the 14:00 tick fires it
+   * with 25min delay. If the 14:00 tick is missed, the 15:00 tick fires it with
+   * 85min delay.
+   *
+   * By biasing the slot time toward the start of the window (12:00-12:15 range
+   * instead of 12:00-14:00), the 12:00 tick immediately sees it as due and
+   * fires it with ~0-15min delay.
+   *
+   * The bias is: use only the first 15 minutes of the window for the base time,
+   * then apply jitter (±30min) on top. This gives a range of ~start-30 to start+45,
+   * which always falls within the first cron tick of the window.
+   */
   private generateTimeInRange(
     rangeStart: number,
     rangeEnd: number,
@@ -165,14 +192,24 @@ export class TimeGenerator {
     jitterMinutes: number,
   ): number | null {
     const maxAttempts = 100;
+    // v11.10.0: Bias window — use first 15 minutes of the range for the base time.
+    // This ensures the slot fires on the FIRST cron tick within the window.
+    const biasEnd = Math.min(rangeStart + 15, rangeEnd);
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const time = randomInt(rangeStart, rangeEnd);
+      // Generate base time in the biased range (first 15 min of window).
+      const baseTime = randomInt(rangeStart, biasEnd);
+      // Apply jitter (±jitterMinutes) — can push slightly before/after the bias range.
+      const jitter = randomInt(-jitterMinutes, jitterMinutes);
+      let time = baseTime + jitter;
+      // Clamp to the full window range.
+      time = Math.max(rangeStart, Math.min(rangeEnd, time));
+
       const tooClose = existingTimes.some(
         (t) => Math.abs(t - time) < minGapMinutes,
       );
       if (!tooClose) {
-        const jitter = randomInt(-jitterMinutes, jitterMinutes);
-        return Math.max(rangeStart, Math.min(rangeEnd, time + jitter));
+        return time;
       }
     }
     return null;

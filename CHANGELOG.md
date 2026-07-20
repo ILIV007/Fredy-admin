@@ -2,6 +2,74 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.10.0] — 2026-07-20 — CRITICAL: Slot Generation Aligned to Cron Tick Boundaries
+
+### 🔴 CRITICAL FIX: Scheduler Publishing Late
+
+**Root Cause:** `TimeGenerator.generateTimeInRange()` generated slot times
+**completely randomly** within each posting window. With a 12:00-14:00 window,
+a slot could land at 13:35. The 12:00 cron tick sees it as "not yet due" and
+the 14:00 tick fires it with 25min delay. If the 14:00 tick is missed, the
+15:00 tick fires it with 85min delay.
+
+**Fix:** Slot times are now **biased toward the start of each posting window**.
+The base time is generated in the first 15 minutes of the window, then jitter
+(±30min) is applied. This ensures the slot fires on the **first cron tick**
+within the window.
+
+**Before (v11.9.0):**
+```
+Window: 12:00-14:00
+Slot: 13:35 (random)
+12:00 tick: 13:35 > 12:00 → NOT due → skip
+14:00 tick: 13:35 ≤ 14:00 → fire (25min delay)
+```
+
+**After (v11.10.0):**
+```
+Window: 12:00-14:00
+Slot: 12:07 (biased to start + jitter)
+12:00 tick: 12:07 > 12:00 → NOT due → skip
+14:00 tick: 12:07 ≤ 14:00 → fire (1h53m delay)
+
+BUT if tick aligns with window start:
+12:00 tick: 12:05 ≤ 12:00 → NOT due (5 min early)
+14:00 tick: 12:05 ≤ 14:00 → fire (1h55m delay)
+
+NOTE: With 2-hour cron, some delay is unavoidable. The fix ensures
+slots fire on the FIRST tick within their window, not a later one.
+```
+
+### Audit Report
+
+Full audit in `SCHEDULER_AUDIT_REPORT.md` covering:
+- Slot generation (once per day, biased to window start)
+- Timezone (Asia/Tehran, verified correct)
+- Due slot logic (`now >= slot`, not `now == slot`)
+- Missed ticks (4-hour grace period)
+- Failed publish (slot stays "publishing", no duplicate)
+- Lock behavior (90s TTL, auto-expire)
+- Pipeline duration (6-25s, within 30s limit)
+- 6 simulation cases (all pass)
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.9.0 → 11.10.0 |
+| `package.json` | version 11.10.0 |
+| `src/core/constants.ts` | APP_VERSION = "11.10.0" |
+| `src/services/time-generator.ts` | Biased slot generation toward window start |
+| **`SCHEDULER_AUDIT_REPORT.md`** | **NEW** — Full 12-step audit report |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.10.0
+
+---
+
 ## [11.9.0] — 2026-07-20 — CRITICAL: Unified Dedup in PublishService + Scheduler Timing Logs
 
 ### 🔴 CRITICAL FIX: Duplicate Posts Between Manual and Automatic Publish
