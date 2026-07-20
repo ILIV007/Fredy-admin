@@ -2,6 +2,52 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [11.6.1] — 2026-07-20 — Bug Fixes: extractGithubRepo + Random Emoji + Provider Logos
+
+### 🔴 Critical Fixes
+
+- **FIX: `extractGithubRepo is not a function`** — The v11.6.0 refactor added
+  calls to `this.extractGithubRepo(raw)` in all 5 GitHub providers' normalize()
+  methods, but the actual method definition was missing from 4 of them (only
+  github-trending had it via the initial script, but even that was a false
+  positive). Now all 5 GitHub providers (github, github-releases, github-trending,
+  github-events, github-security) have the method properly defined.
+
+- **FIX: Random emoji for generic "Source" footer** — When a provider's
+  `displaySource` is "Source" (the generic fallback), the emoji was fixed
+  (always 🌌). Now it uses a random emoji from the pool (classic Fredy behavior).
+  Providers with custom labels (e.g., "Cloudflare Blog") still use their fixed icon.
+
+- **FIX: Missing images for OpenAI News (and similar providers)** — Sites like
+  openai.com, blog.cloudflare.com, and huggingface.co return 403 to Cloudflare
+  Workers IPs, so og:image fetch fails. Added provider logo fallbacks using
+  Clearbit logo API (logo.clearbit.com/domain) for known providers. When og:image
+  fetch fails, the provider's logo is used as the cover image instead.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `VERSION` | 11.6.0 → 11.6.1 |
+| `package.json` | version 11.6.1 |
+| `src/core/constants.ts` | APP_VERSION = "11.6.1" |
+| `src/plugins/sources/github/index.ts` | Added extractGithubRepo method |
+| `src/plugins/sources/github-releases/index.ts` | Added extractGithubRepo method |
+| `src/plugins/sources/github-trending/index.ts` | Added extractGithubRepo method |
+| `src/plugins/sources/github-events/index.ts` | Added extractGithubRepo method |
+| `src/plugins/sources/github-security/index.ts` | Added extractGithubRepo method |
+| `src/services/content-formatter.ts` | Random emoji when displaySource="Source" |
+| `src/services/ux-layer.ts` | Random emoji when displaySource="Source" |
+| `src/services/final-publisher.ts` | Provider logo fallbacks (Clearbit) |
+
+### Verification
+
+- TypeScript: 0 errors
+- Plugin registry test: 65/65 passing
+- Version: 11.6.1
+
+---
+
 ## [11.6.0] — 2026-07-20 — Global Provider Footer Refactor
 
 ### 🏗️ Architecture: Unified Provider Display System

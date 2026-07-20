@@ -43,8 +43,19 @@ export class UXLayerImpl implements UXLayer {
 
     // v11.6.0: Source line uses provider display metadata from ReadyContent.
     // No hardcoded logic — the provider decides how it appears.
-    const displayIcon = content.displayIcon ?? content.sourceEmoji ?? "🌌";
+    // v11.6.1: When displaySource is "Source" (generic fallback), use a random
+    // emoji from the pool instead of the provider's fixed icon. This keeps the
+    // classic Fredy behavior for providers that don't have a custom label.
+    let displayIcon: string;
     const displaySource = content.displaySource ?? "Source";
+    if (displaySource === "Source") {
+      // Generic "Source" label — use random emoji from pool (classic behavior).
+      const { emoji: randomEmoji } = await this.deps.sourceFormatter.buildFooter();
+      displayIcon = randomEmoji;
+    } else {
+      // Provider has a custom label — use its icon.
+      displayIcon = content.displayIcon ?? content.sourceEmoji ?? "🌌";
+    }
     const sourceLine = `${displayIcon} ${displaySource}`;
 
     // 4. Assemble the full text.

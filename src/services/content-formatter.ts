@@ -72,12 +72,20 @@ export class ContentFormatter {
     estimatedCost: number,
   ): Promise<ReadyContent> {
     // v11.6.0: Unified provider footer — uses display metadata from the provider.
-    // No hardcoded logic. The provider decides how it appears.
-    // Fallback: "🌌 Source" if no display metadata is set.
-    const finalIcon = item.displayIcon ?? "🌌";
-    const finalSource = item.displaySource ?? "Source";
+    // v11.6.1: When displaySource is "Source" (generic), use a random emoji
+    // from the pool. When provider has a custom label, use its fixed icon.
+    const displaySource = item.displaySource ?? "Source";
+    let finalIcon: string;
+    if (displaySource === "Source") {
+      // Generic "Source" — use random emoji from pool (classic behavior).
+      const { emoji } = await this.deps.sourceFormatter.buildFooter();
+      finalIcon = emoji;
+    } else {
+      // Provider has a custom label — use its icon.
+      finalIcon = item.displayIcon ?? "🌌";
+    }
     const finalEmoji = finalIcon;
-    const finalFooter = `${finalIcon} ${finalSource}`;
+    const finalFooter = `${finalIcon} ${displaySource}`;
 
     return {
       id: item.id,
@@ -89,7 +97,7 @@ export class ContentFormatter {
       sourceFooter: finalFooter,
       sourceEmoji: finalEmoji,
       displayIcon: finalIcon,
-      displaySource: finalSource,
+      displaySource: displaySource,
       media: item.media,
       language: aiContent.generatedLanguage,
       quality,

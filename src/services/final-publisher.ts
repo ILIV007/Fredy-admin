@@ -283,6 +283,10 @@ export class FinalPublisher {
    *   7. Favicon-based fallback for known domains (blog.cloudflare.com, etc.)
    *
    * Returns null if no usable image is found.
+   *
+   * v11.6.1: Added fallback logos for known providers whose sites block
+   * Cloudflare Workers (openai.com returns 403, etc.). When og:image fetch
+   * fails, use a provider-specific logo from a CDN that doesn't block CF.
    */
   private async resolveSourceCoverImage(sourceUrl: string): Promise<string | null> {
     try {
@@ -327,6 +331,23 @@ export class FinalPublisher {
               if (article.cover_image) return article.cover_image;
             }
           } catch { /* non-fatal */ }
+        }
+      }
+
+      // v11.6.1: Case 5: Known provider logos (for sites that block CF Workers).
+      // These are hosted on Wikimedia Commons (doesn't block CF IPs).
+      // Using PNG/JPG versions (Telegram doesn't support SVG in sendPhoto).
+      const providerLogos: Record<string, string> = {
+        "openai.com": "https://logo.clearbit.com/openai.com",
+        "blog.cloudflare.com": "https://logo.clearbit.com/cloudflare.com",
+        "huggingface.co": "https://logo.clearbit.com/huggingface.co",
+        "news.ycombinator.com": "https://logo.clearbit.com/ycombinator.com",
+        "stackoverflow.com": "https://logo.clearbit.com/stackoverflow.com",
+        "www.producthunt.com": "https://logo.clearbit.com/producthunt.com",
+      };
+      for (const [domain, logo] of Object.entries(providerLogos)) {
+        if (parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)) {
+          return logo;
         }
       }
 

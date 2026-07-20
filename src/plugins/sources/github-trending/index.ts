@@ -50,6 +50,20 @@ export class GitHubTrendingPlugin implements Plugin {
   getTier(): Tier { return this.metadata.tier; }
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
+  /** v11.6.0: Extract "owner/repo" from a GitHub URL for display. */
+  private extractGithubRepo(raw: unknown): string {
+    try {
+      const url = (raw as { url?: string; html_url?: string })?.url ?? (raw as { html_url?: string })?.html_url ?? "";
+      const match = /github\.com\/([^/]+)\/([^/]+)/i.exec(url);
+      if (match && match[1] && match[2]) {
+        const repo = match[2].split(/[?#]/)[0] ?? "";
+        return `${match[1]}/${repo}`;
+      }
+    } catch { /* non-fatal */ }
+    return "GitHub";
+  }
+
+
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "github-trending" });
 
