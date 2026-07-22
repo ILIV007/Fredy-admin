@@ -59,7 +59,6 @@ export const manualScreen: Screen = {
         navButton("🛠️ Dev.to", "action:manual:source:devto"),
         navButton("🔥 HN Algolia", "action:manual:source:hackernews-algolia"),
       ],
-      [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
       [labelButton("─── Tier A (Important) ───")],
       [
         navButton("📚 StackExchange", "action:manual:source:stackexchange"),
@@ -78,6 +77,8 @@ export const manualScreen: Screen = {
         navButton("🤖 OpenAI News", "action:manual:source:openai-news"),
         navButton("👾 Reddit", "action:manual:source:reddit-v2"),
       ],
+      [labelButton("─── Tier V (Scheduled) ───")],
+      [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
       [labelButton("─── Legacy ───")],
       [
         navButton("📰 News", "action:manual:source:news"),

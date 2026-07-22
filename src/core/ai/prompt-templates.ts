@@ -178,22 +178,13 @@ export function buildSystemPrompt(
 }
 
 /** The user prompt — contains the raw source item to process.
- *  v12.1.3: Added provider-specific context tags (e.g., "Discovery of the Day" for github-events).
- *  v12.1.4: Removed tags for trending/releases/security — only github-events gets context.
+ *  v12.1.5: Removed ALL context tags (user doesn't want them).
  *  v12.1.4: Added RTL/Persian language rules to prevent English-first sentences. */
 export function buildUserPrompt(
   sourceItem: { readonly title: string; readonly body: string; readonly url: string; readonly source: string },
   language: string,
 ): string {
-  // v12.1.4: Context tag ONLY for github-events.
-  let contextTag = "";
-  const source = sourceItem.source;
-  if (source === "github-events") {
-    const tags = ["Discovery of the Day", "Repo Spotlight", "Hidden Gem", "Trending Discovery", "Project of the Day"];
-    contextTag = `\nContext: This is a "${tags[Math.floor(Math.random() * tags.length)]}" — a repository discovered from recent GitHub activity. In the headline or first paragraph, briefly mention WHY this repo is interesting (e.g., growing rapidly, new release, innovative approach). The context tag itself should appear at the START of the headline in a natural way, like: "🔍 کشف روز: ..." or "⭐ پروژه منتخب: ..."\n`;
-  }
-
-  // v12.1.4: RTL / Persian language rules.
+  // v12.1.5: RTL / Persian language rules.
   let rtlRules = "";
   if (language === "fa") {
     rtlRules = `\nRTL / PERSIAN RULES (CRITICAL):
@@ -212,7 +203,6 @@ export function buildUserPrompt(
     ``,
     `Requested language: ${language}`,
     `Source: ${sourceItem.source}`,
-    contextTag,
     rtlRules,
     `=== SOURCE ITEM ===`,
     `Title: ${sourceItem.title}`,

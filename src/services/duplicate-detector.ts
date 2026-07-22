@@ -216,13 +216,20 @@ export class DuplicateDetector {
     const metadata = ((raw as SourceItem).metadata ?? {}) as Record<string, unknown>;
 
     // GitHub repos — extract owner/repo from URL.
-    if (source === "github" || source === "github-trending") {
+    // v12.1.5: CRITICAL FIX — use "github-repo:owner/repo" for ALL GitHub repo
+    // providers (github, github-trending, github-events). This prevents the same
+    // repo from being published twice when discovered by different providers.
+    if (source === "github" || source === "github-trending" || source === "github-events") {
+      // Try metadata first (github-events sets repo in metadata).
+      const repo = metadata["repo"] as string | undefined;
+      if (repo && repo.includes("/")) return `github-repo:${repo}`;
+      // Fallback: extract from URL.
       const match = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(url);
-      if (match) return `${source}:${match[1]}/${match[2]}`;
+      if (match) return `github-repo:${match[1]}/${match[2]}`;
       return null;
     }
 
-    // GitHub Releases — owner/repo + tag.
+    // GitHub Releases — owner/repo + tag (different from repo — a release is a specific version).
     if (source === "github-releases") {
       const match = /github\.com\/([^/]+)\/([^/]+)\/releases\/tag\/([^/?#]+)/i.exec(url);
       if (match) return `github-releases:${match[1]}/${match[2]}:${match[3]}`;
@@ -230,15 +237,6 @@ export class DuplicateDetector {
       const repo = metadata["repo"] as string | undefined;
       const tag = metadata["tag"] as string | undefined;
       if (repo && tag) return `github-releases:${repo}:${tag}`;
-      return null;
-    }
-
-    // GitHub Events — owner/repo + eventType + eventId.
-    if (source === "github-events") {
-      const repo = metadata["repo"] as string | undefined;
-      const eventType = metadata["eventType"] as string | undefined;
-      const itemId = (raw as SourceItem).id;
-      if (repo && eventType && itemId) return `github-events:${repo}:${eventType}:${itemId}`;
       return null;
     }
 
