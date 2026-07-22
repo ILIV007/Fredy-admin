@@ -20,13 +20,13 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 // src/core/config/sections/providers.ts.
 const GEMINI_MODELS = [
   // ── 3.x stable (ranked per AI Studio 2026 free-tier guide) ──
-  "gemini-3.5-flash",                // #1 best overall — frontier + 1M ctx
-  "gemini-3.1-flash-lite",           // #2 fastest stable 3.x lite
-  "gemini-3-flash",                  // #2 alt — stable 3.x flash
+  "gemini-3.6-flash",                // #1 newest free-tier Flash
+  "gemini-3.5-flash",                // #2 best overall — frontier + 1M ctx
+  "gemini-3.1-flash-lite",           // #3 fastest stable 3.x lite
+  "gemini-3-flash",                  // #3 alt — stable 3.x flash
   // ── 2.5 legacy (placed AFTER all 3.x, per user request) ──
   "gemini-2.5-flash",                // legacy reliable
   "gemini-2.5-flash-lite",           // legacy lite
-  "gemini-2.0-flash",                // last resort
 ] as const;
 
 export class GeminiProvider implements AIProvider {

@@ -55,6 +55,13 @@ const PLAN_KEY = (date: string) => `fredy:strategy:plan:${date}`;
 const PLAN_TTL_SECONDS = 48 * 3600; // 48 hours
 
 export class StrategyEngine {
+  /** v12.0.9: In-memory plan cache to fix the "plan refresh" bug.
+   *  Cloudflare KV is eventually consistent — after generatePlan() writes
+   *  a new plan, getOrGeneratePlan() might still read the OLD plan from
+   *  the KV edge cache for up to 60 seconds. This in-memory cache ensures
+   *  the freshly-generated plan is returned immediately. */
+  private cachedPlan: DailyPublishPlan | null = null;
+
   constructor(private readonly deps: StrategyEngineDeps) {}
 
   // ────────────────────────────────────────────────────────
@@ -176,6 +183,10 @@ export class StrategyEngine {
     // 8. Save to KV.
     await this.deps.kv.setJson(PLAN_KEY(targetDate), plan, PLAN_TTL_SECONDS).catch(() => {});
 
+    // v12.0.9: Cache in memory so getOrGeneratePlan() returns the FRESH plan
+    // immediately (bypasses KV eventual consistency).
+    this.cachedPlan = plan;
+
     const durationMs = Date.now() - startTime;
     this.deps.logger.info("pipeline.start", {
       step: "strategy.generatePlan",
@@ -193,15 +204,25 @@ export class StrategyEngine {
   }
 
   /** Load today's plan from KV (or generate if missing).
-   *  v11.2.0: Added defensive date check — if the loaded plan's date doesn't
-   *  match the target date (clock skew, KV corruption), regenerate. */
+   *  v12.0.9: Check in-memory cache FIRST (bypasses KV eventual consistency
+   *  after a regenerate). Falls back to KV, then generates if missing.
+   *  v11.2.0: Added defensive date check. */
   async getOrGeneratePlan(date?: string): Promise<DailyPublishPlan> {
     const schedulerConfig = await this.deps.schedulerConfig();
     const targetDate = date ?? formatDateInZone(Date.now(), schedulerConfig.timezone);
 
+    // v12.0.9: Check in-memory cache first — avoids stale KV reads after regenerate.
+    if (this.cachedPlan && this.cachedPlan.date === targetDate) {
+      return this.cachedPlan;
+    }
+
     const existing = await this.deps.kv.getJson<DailyPublishPlan>(PLAN_KEY(targetDate));
     // v11.2.0: Defensive date check — protects against clock skew / KV corruption.
-    if (existing && existing.date === targetDate) return existing;
+    if (existing && existing.date === targetDate) {
+      // v12.0.9: Cache the KV-loaded plan in memory for subsequent calls.
+      this.cachedPlan = existing;
+      return existing;
+    }
 
     return this.generatePlan(targetDate);
   }
@@ -224,9 +245,16 @@ export class StrategyEngine {
         : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
-      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostPublishing setJson failed" });
+    await this.savePlan(date, updatedPlan);
+  }
+
+  /** v12.0.9: Save plan to KV + update in-memory cache (fixes stale-read bug). */
+  private async savePlan(date: string, plan: DailyPublishPlan): Promise<void> {
+    await this.deps.kv.setJson(PLAN_KEY(date), plan, PLAN_TTL_SECONDS).catch((e) => {
+      this.deps.logger.warn("pipeline.error", { error: String(e), message: "savePlan setJson failed" });
     });
+    // Update in-memory cache so subsequent getOrGeneratePlan() calls see the update.
+    this.cachedPlan = plan;
   }
 
   /** Mark a planned post as published.
@@ -238,9 +266,7 @@ export class StrategyEngine {
       p.index === postIndex ? { ...p, status: "published" as PlannedPostStatus } : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
-      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostPublished setJson failed" });
-    });
+    await this.savePlan(date, updatedPlan);
   }
 
   /** Mark a planned post as failed.
@@ -268,9 +294,7 @@ export class StrategyEngine {
         : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
-      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostFailed setJson failed" });
-    });
+    await this.savePlan(date, updatedPlan);
   }
 
   /** v8.8.0: Mark a planned post as backup (original failed, backup succeeded).
@@ -295,9 +319,7 @@ export class StrategyEngine {
         : p,
     );
     const updatedPlan = { ...plan, posts: updatedPosts };
-    await this.deps.kv.setJson(PLAN_KEY(date), updatedPlan, PLAN_TTL_SECONDS).catch((e) => {
-      this.deps.logger.warn("pipeline.error", { error: String(e), message: "markPostBackup setJson failed" });
-    });
+    await this.savePlan(date, updatedPlan);
   }
 
   // ────────────────────────────────────────────────────────

@@ -145,21 +145,32 @@ export class TimeGenerator {
     return slots;
   }
 
-  /** Build the category list from distribution (e.g., {A:2, B:1, C:1} → [A, A, B, C]). */
+  /** Build the category list from distribution.
+   *  v12.0.9: Category C (NASA, XKCD) is placed at the END so it gets the
+   *  LAST posting window (20:00-22:00 = night). Previously C was round-robin
+   *  interleaved, landing it in afternoon windows.
+   *
+   *  Example: {A:2, B:1, C:1} -> [A, B, A, C] (C is last = night window)
+   *  Before:  {A:2, B:1, C:1} -> [A, B, C, A] (C was 3rd = afternoon) */
   private buildCategoryList(distribution: Readonly<Record<Category, number>>): Category[] {
     const list: Category[] = [];
-    const categories: Category[] = ["A", "B", "C"];
+    // v12.0.9: A and B first (round-robin), C last (night window).
+    const dayCategories: Category[] = ["A", "B"];
     let dist = { ...distribution };
     let remaining = true;
     while (remaining) {
       remaining = false;
-      for (const cat of categories) {
+      for (const cat of dayCategories) {
         if (dist[cat] > 0) {
           list.push(cat);
           dist = { ...dist, [cat]: dist[cat] - 1 };
           remaining = true;
         }
       }
+    }
+    // Append all C slots at the end (night windows).
+    for (let i = 0; i < distribution.C; i++) {
+      list.push("C");
     }
     return list;
   }
