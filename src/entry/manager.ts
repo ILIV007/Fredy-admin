@@ -6,6 +6,7 @@
 
 import type { Env, Container } from "../types/env";
 import { APP_VERSION, APP_BUILD_DATE } from "../core/constants";
+import { DEFAULT_WEEKLY_THEMES as DEFAULT_WEEKLY_THEMES_EXPORT } from "../core/config/sections/strategy";
 import { escapeHtml } from "../primitives/strings";
 import { reportBanner, reportRow, qualityRow } from "../primitives/report";
 
@@ -771,7 +772,12 @@ export async function managerHandler(
     const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0")).catch(() => null);
     const strategy = settings?.strategy;
     const plan = await container.strategyEngine.getOrGeneratePlan().catch(() => null);
-    return json({ ok: true, strategy, plan });
+    // v12.0.12: Add weekly themes + Tier V entries for the redesigned Strategy page.
+    const weeklyThemes = strategy?.weeklyThemesEnabled
+      ? DEFAULT_WEEKLY_THEMES_EXPORT
+      : null;
+    const tierVEntries = settings?.tierV?.entries ?? [];
+    return json({ ok: true, strategy, plan, weeklyThemes, tierVEntries });
   }
   if (apiPath === "strategy" && request.method === "POST") {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -2680,13 +2686,97 @@ async function loadStrategy(){
   const d=await api("strategy");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.strategy||{};const plan=d.plan||{};
-  // v9.2.3: Cache the plan in window so showPostError() can read it.
   window._lastPlan=plan;
   const modes=[{id:"minimal",name:"Minimal",desc:"4 posts/day"},{id:"balanced",name:"Balanced",desc:"9 posts/day (default)"},{id:"active",name:"Active",desc:"13 posts/day"},{id:"ai_priority",name:"AI Priority",desc:"8 posts/day, threshold 80"},{id:"news_priority",name:"News Priority",desc:"10 posts/day, B-heavy"},{id:"custom",name:"Custom",desc:"Admin-defined"}];
-  c.innerHTML='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+card("Mode",s.mode??"balanced")+card("Language",s.language??"auto")+card("Weekly Themes",s.weeklyThemesEnabled?"✅":"❌")+card("Quality Threshold",s.qualityThreshold??"80")+'</div></div>'+
-  '<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>'+
-  (s.mode==="custom"?'<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>':'')+
-  '<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div></div>'+(plan.posts&&plan.posts.length>0?'<table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+plan.posts.map(p=>{const st=p.status||"pending";const badge=st==="published"?'<span class="badge badge-green">✅ Published</span>':st==="failed"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>':st==="backup"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Backup</span></a>':st==="publishing"?'<span class="badge badge-yellow">🔄 Publishing</span>':'<span class="badge badge-yellow">⏳ Pending</span>';const win=p.time+'-'+(p.windowEnd||p.time);const sched=p.scheduledTime||p.time;const schedStyle=st==='pending'?' style="color:var(--accent);font-weight:bold"':'';return '<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';}).join("")+'</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time.</div>':'<p>No plan generated yet.</p>')+(plan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+plan.theme.dayName+' — '+plan.theme.topics.join(", ")+'</p>':'')+(plan.validation?'<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>':'')+'</div>';
+
+  let html='<div class="fade-in">';
+
+  // ── ACTIVE STRATEGY ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">🎯 Active Strategy</h3><div class="card-grid">'+
+    '<div class="stat-pod"><span class="sp-icon">📊</span><div class="sp-label">Mode</div><div class="sp-val" style="font-size:16px">'+(s.mode??"balanced")+'</div><div class="sp-sub">'+(modes.find(m=>m.id===s.mode)?.desc||"")+'</div></div>'+
+    '<div class="stat-pod"><span class="sp-icon">🌐</span><div class="sp-label">Language</div><div class="sp-val" style="font-size:16px">'+(s.language??"auto")+'</div><div class="sp-sub">default</div></div>'+
+    '<div class="stat-pod"><span class="sp-icon">📅</span><div class="sp-label">Weekly Themes</div><div class="sp-val">'+(s.weeklyThemesEnabled?"✅ ON":"❌ OFF")+'</div><div class="sp-sub">day-based topics</div></div>'+
+    '<div class="stat-pod"><span class="sp-icon">⭐</span><div class="sp-label">Quality Threshold</div><div class="sp-val">'+(s.qualityThreshold??"80")+'</div><div class="sp-sub">min score</div></div>'+
+  '</div></div>';
+
+  // ── SWITCH STRATEGY ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>';
+
+  // ── CUSTOM DISTRIBUTION ──
+  if(s.mode==="custom"){
+    html+='<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>';
+  }
+
+  // ── v12.0.12: WEEKLY SCHEDULE OVERVIEW ──
+  if(d.weeklyThemes){
+    html+='<div class="card" style="border:1px solid var(--accent)"><h3 style="margin-bottom:8px">📅 Weekly Schedule — Themes & Topics</h3>';
+    html+='<p style="color:var(--text2);font-size:12px;margin-bottom:10px">Each day has a theme that influences provider selection. On themed days, providers matching the theme topics are prioritized.</p>';
+    const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dayEmojis=['☀️','📅','🔥','⭐','💡','🎉','🌙'];
+    const today=new Date().getDay();
+    for(const theme of d.weeklyThemes){
+      const isToday=theme.day===today;
+      const borderColor=isToday?'var(--accent)':'var(--border)';
+      const bg=isToday?'rgba(99,102,241,.08)':'var(--surface)';
+      html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid '+borderColor+';border-radius:8px;margin-bottom:6px;background:'+bg+'">'+
+        '<span style="font-size:20px">'+(dayEmojis[theme.day]||'📅')+'</span>'+
+        '<div style="flex:1">'+
+          '<div style="font-weight:600;font-size:14px">'+escapeHtml(theme.dayName)+(isToday?' <span class="badge badge-blue" style="margin-left:4px">TODAY</span>':'')+'</div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-top:2px">'+theme.topics.map(t=>'<span class="badge badge-gray" style="margin:1px">'+escapeHtml(t)+'</span>').join(' ')+'</div>'+
+        '</div>'+
+      '</div>';
+    }
+    html+='</div>';
+  }
+
+  // ── DAILY PLAN ──
+  html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div></div>';
+
+  if(plan.posts&&plan.posts.length>0){
+    html+='<table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
+    for(const p of plan.posts){
+      const st=p.status||"pending";
+      const badge=st==="published"?'<span class="badge badge-green">✅ Published</span>':st==="failed"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>':st==="backup"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Backup</span></a>':st==="publishing"?'<span class="badge badge-yellow">🔄 Publishing</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      const win=p.time+'-'+(p.windowEnd||p.time);
+      const sched=p.scheduledTime||p.time;
+      const schedStyle=st==='pending'?' style="color:var(--accent);font-weight:bold"':'';
+      html+='<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';
+    }
+    html+='</tbody></table>';
+    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time.</div>';
+  } else {
+    html+='<p>No plan generated yet.</p>';
+  }
+
+  if(plan.theme){
+    html+='<p style="margin-top:8px;color:var(--text2)">📅 Today Theme: <b>'+plan.theme.dayName+'</b> — '+plan.theme.topics.join(", ")+'</p>';
+  }
+  if(plan.validation){
+    html+='<p style="color:var(--text2);font-size:11px">Validation: '+(plan.validation.valid?"✅ Valid":"❌ Invalid")+' ('+plan.validation.warnings.length+' warnings)</p>';
+  }
+  html+='</div>';
+
+  // ── v12.0.12: TIER V SCHEDULED CONTENT ──
+  if(d.tierVEntries&&d.tierVEntries.length>0){
+    html+='<div class="card" style="border:1px solid #a855f7"><h3 style="margin-bottom:8px;color:#a855f7">🟣 Tier V — Scheduled Content (Fixed Schedule)</h3>';
+    html+='<p style="color:var(--text2);font-size:12px;margin-bottom:10px">Tier V posts have a FIXED schedule (no random jitter). They publish at the exact configured time every day.</p>';
+    html+='<table style="font-size:12px"><thead><tr><th>ID</th><th>⏰ Time</th><th>Provider</th><th>Status</th><th>Description</th></tr></thead><tbody>';
+    for(const entry of d.tierVEntries){
+      html+='<tr style="background:rgba(168,85,247,.05)">'+
+        '<td><code>'+escapeHtml(entry.id)+'</code></td>'+
+        '<td style="color:#a855f7;font-weight:bold">'+escapeHtml(entry.time)+'</td>'+
+        '<td>'+escapeHtml(entry.providerId)+'</td>'+
+        '<td>'+(entry.enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-red">Disabled</span>')+'</td>'+
+        '<td style="color:var(--text2);font-size:11px">'+escapeHtml(entry.description||"")+'</td>'+
+      '</tr>';
+    }
+    html+='</tbody></table>';
+    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🟣 Tier V posts appear in the Daily Plan table with a purple theme. They are checked by the 20-min watcher alongside normal window slots.</div>';
+    html+='</div>';
+  }
+
+  html+='</div>';
+  c.innerHTML=html;
 }
 function showPostError(idx){
   // Find the post by index in the most recently-loaded plan.
