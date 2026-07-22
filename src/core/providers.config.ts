@@ -211,10 +211,10 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
   {
     id: "nasa",
     name: "NASA APOD",
-    tier: "S",
-    category: "C",
+    tier: "V", // v12.0.9: moved from Tier S/Cat C to Tier V (scheduled content)
+    category: "C", // kept for backward compat — Tier V scheduling overrides
     weight: 65,
-    refreshIntervalHours: 6, // once daily is enough, but tier S for priority
+    refreshIntervalHours: 0, // Tier V: on-demand fetch, no refresh interval
     cacheTtlSeconds: 6 * 3600,
     credibility: 90,
     reputation: 80,

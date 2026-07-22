@@ -19,24 +19,29 @@
  * - A     : Important providers. Refreshed every 6 hours. Enabled by default.
  * - B     : Supporting providers. Refreshed every 12 hours. Enabled by default.
  * - Legacy: Old providers. Refreshed every 24 hours. Disabled by default.
+ * - V     : v12.0.9 Scheduled/manual content. Fixed schedule, no jitter, no
+ *           provider queue. Examples: NASA APOD (nightly 22:30), weekly reports.
+ *           Tier V providers are NOT refreshed by Layer 2 — they fetch on demand.
  */
-export type Tier = "S" | "A" | "B" | "legacy";
+export type Tier = "S" | "A" | "B" | "legacy" | "V";
 
 /** Ordered list of tiers (highest priority first). */
-export const TIER_ORDER: readonly Tier[] = ["S", "A", "B", "legacy"] as const;
+export const TIER_ORDER: readonly Tier[] = ["S", "A", "B", "legacy", "V"] as const;
 
 /** All valid tier values (for runtime validation). */
-export const TIER_VALUES = ["S", "A", "B", "legacy"] as const;
+export const TIER_VALUES = ["S", "A", "B", "legacy", "V"] as const;
 
 /**
  * Default refresh interval (in hours) for each tier.
  * Source of truth is src/core/constants.ts; this is a convenience mapping.
+ * v12.0.9: Tier V = 0 (fetch on demand, not on a refresh interval).
  */
 export const TIER_DEFAULT_REFRESH_HOURS: Readonly<Record<Tier, number>> = {
   S: 2,
   A: 6,
   B: 12,
   legacy: 24,
+  V: 0,
 } as const;
 
 /**
@@ -48,6 +53,7 @@ export const TIER_DEFAULT_ENABLED: Readonly<Record<Tier, boolean>> = {
   A: true,
   B: true,
   legacy: false,
+  V: true,
 } as const;
 
 /** Convert a tier to a numeric priority for sorting (lower = higher priority). */
@@ -57,6 +63,7 @@ export function tierPriority(tier: Tier): number {
     case "A": return 1;
     case "B": return 2;
     case "legacy": return 3;
+    case "V": return 4;
   }
 }
 

@@ -29,6 +29,7 @@ import type { NasaConfig } from "../core/config/sections/nasa";
 import type { PluginsConfig } from "../core/config/sections/plugins";
 import type { FutureConfig } from "../core/config/sections/future";
 import type { StrategyConfig } from "../core/config/sections/strategy";
+import type { TierVConfig } from "../core/config/sections/tier-v";
 
 /**
  * The complete Fredy settings blob.
@@ -54,6 +55,8 @@ export interface FredySettings {
   readonly plugins: PluginsConfig;
   readonly future: FutureConfig;
   readonly strategy: StrategyConfig;
+  /** v12.0.9: Tier V — fixed-schedule content (NASA APOD, weekly reports). */
+  readonly tierV: TierVConfig;
   /** Approve mode — when true, posts require manual approval before publishing. */
   readonly approveMode?: boolean;
 }

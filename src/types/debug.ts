@@ -50,7 +50,12 @@ export type DebugEventName =
   // v12.0.5: Replacement pipeline events
   | "pipeline.replacement"
   | "pipeline.replacement_success"
-  | "pipeline.replacement_exhausted";
+  | "pipeline.replacement_exhausted"
+  // v12.0.9: Tier V scheduled content events
+  | "tierV.publish_start"
+  | "tierV.publish_success"
+  | "tierV.publish_failed"
+  | "tierV.publish_error";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

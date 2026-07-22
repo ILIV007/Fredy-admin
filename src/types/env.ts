@@ -88,6 +88,8 @@ export interface Container {
   readonly hookEngine: import("../services/hook-engine").HookEngine;
   readonly uxLayer: import("../services/ux-layer").UXLayer;
   readonly finalPublisher: import("../services/final-publisher").FinalPublisher;
+  /** v12.0.9: Tier V scheduler — fixed-schedule content (NASA APOD, etc). */
+  readonly tierVScheduler: import("../services/tier-v-scheduler").TierVScheduler;
 }
 
 /** Execution context passed from the Worker `fetch`/`scheduled` handler. */

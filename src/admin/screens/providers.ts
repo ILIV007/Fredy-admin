@@ -48,13 +48,18 @@ export const providersScreen: Screen = {
     for (const provider of providers) {
       const configured = provider.configured ? "✅" : "❌";
       const enabled = provider.enabled ? "ON" : "OFF";
+      // v12.0.9: Show the actual model list (was only showing count).
+      const models = provider.models ?? [];
       lines.push(
         `<b>${provider.name}</b> (${provider.id}) ${configured}`,
         kv("Enabled", enabled),
         kv("Priority", provider.priority),
-        kv("Models", provider.modelCount),
-        "",
+        kv("Models", `${models.length} (priority order)`),
       );
+      for (let i = 0; i < models.length; i++) {
+        lines.push(`  ${i + 1}. <code>${models[i]}</code>`);
+      }
+      lines.push("");
     }
 
     lines.push(

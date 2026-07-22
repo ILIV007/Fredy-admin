@@ -127,13 +127,15 @@ export class ProviderEngine {
     return due;
   }
 
-  /** Get the base refresh interval (in hours) for a tier. */
+  /** Get the base refresh interval (in hours) for a tier.
+   *  v12.0.9: Tier V = 0 (on-demand fetch, not refreshed by Layer 2). */
   private getRefreshInterval(tier: Tier): number {
     switch (tier) {
       case "S": return TIER_S_REFRESH_HOURS;
       case "A": return TIER_A_REFRESH_HOURS;
       case "B": return TIER_B_REFRESH_HOURS;
       case "legacy": return TIER_LEGACY_REFRESH_HOURS;
+      case "V": return 0; // on-demand, not refreshed by provider engine
     }
   }
 
@@ -242,6 +244,7 @@ export class ProviderEngine {
       A: { total: 0, enabled: 0, due: 0 },
       B: { total: 0, enabled: 0, due: 0 },
       legacy: { total: 0, enabled: 0, due: 0 },
+      V: { total: 0, enabled: 0, due: 0 },
     };
 
     let topPerformer: { id: string; score: number } | null = null;
@@ -272,7 +275,7 @@ export class ProviderEngine {
 
     return {
       totalProviders: all.length,
-      enabledProviders: byTier.S.enabled + byTier.A.enabled + byTier.B.enabled + byTier.legacy.enabled,
+      enabledProviders: byTier.S.enabled + byTier.A.enabled + byTier.B.enabled + byTier.legacy.enabled + byTier.V.enabled,
       healthyProviders: all.filter((p) => this.deps.pluginManager.getStatus(p.metadata.id).healthy).length,
       dueForRefresh: due.length,
       topPerforming: topPerformer?.id ?? null,

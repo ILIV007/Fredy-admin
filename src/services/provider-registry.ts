@@ -107,6 +107,7 @@ export class ProviderRegistry {
     readonly priority: number;
     readonly configured: boolean;
     readonly modelCount: number;
+    readonly models: readonly string[];
   }> {
     return Array.from(this.entries.values()).map((e) => ({
       id: e.provider.id,
@@ -115,6 +116,7 @@ export class ProviderRegistry {
       priority: e.priority,
       configured: e.provider.isConfigured(this.deps.env),
       modelCount: e.provider.models.length,
+      models: e.provider.models,
     }));
   }
 

@@ -68,6 +68,7 @@ import { HookEngine } from "./services/hook-engine";
 import { UXLayer } from "./services/ux-layer";
 import { FinalPublisher } from "./services/final-publisher";
 import { ImageResolver } from "./services/image-resolver";
+import { TierVScheduler } from "./services/tier-v-scheduler";
 
 // Bundled default soul
 const BUNDLED_SOUL = `
@@ -331,7 +332,11 @@ export function buildContainer(env: Env): Container {
     kv,
   });
 
-  return {
+  // v12.0.9: Tier V scheduler — fixed-schedule content (NASA APOD, etc).
+  // Container is assigned after construction (circular dependency resolved via closure).
+  const tierVScheduler = new TierVScheduler({ container: null as unknown as Container });
+
+  const container: Container = {
     env,
     tg,
     kv,
@@ -381,5 +386,12 @@ export function buildContainer(env: Env): Container {
     hookEngine,
     uxLayer,
     finalPublisher,
+    // v12.0.9: Tier V scheduler
+    tierVScheduler,
   };
+
+  // v12.0.9: Inject the container into the TierVScheduler (circular dep resolved).
+  (tierVScheduler as unknown as { deps: { container: Container } }).deps.container = container;
+
+  return container;
 }

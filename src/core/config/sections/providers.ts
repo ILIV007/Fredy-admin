@@ -16,7 +16,7 @@ export const providerConfigSchema = z.object({
 });
 
 export const providersSchema = z.object({
-  _version: z.literal(1),
+  _version: z.literal(2),
   gemini: providerConfigSchema,
   openrouter: providerConfigSchema,
 });
@@ -25,7 +25,7 @@ export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 export type ProvidersConfig = z.infer<typeof providersSchema>;
 
 export const providersDefaults: ProvidersConfig = {
-  _version: 1,
+  _version: 2,
   gemini: {
     enabled: true,
     // Order = fallback priority (first = primary, last = last resort).
@@ -67,9 +67,27 @@ export const providersDefaults: ProvidersConfig = {
 
 export const providersSection = {
   key: "providers",
-  version: 1,
+  version: 2,
   schema: providersSchema,
   defaults: providersDefaults,
   description:
     "Per-provider enable, model list, timeout, retry, daily limit, and priority.",
+  /** v12.0.9: Migration from v1 → v2 — update AI model lists to the new
+   *  free-tier models (Gemini 3.6-flash, OpenRouter nemotron-3-ultra etc).
+   *  Preserves enabled/timeout/retry/limit/priority settings. */
+  migrate(fromVersion: number, input: unknown): unknown {
+    const cfg = input as Record<string, unknown>;
+    const providers = cfg as { gemini?: ProviderConfig; openrouter?: ProviderConfig };
+    // v1 → v2: force-update model lists to the new defaults.
+    if (fromVersion < 2) {
+      if (providers.gemini) {
+        providers.gemini.models = [...providersDefaults.gemini.models];
+      }
+      if (providers.openrouter) {
+        providers.openrouter.models = [...providersDefaults.openrouter.models];
+      }
+    }
+    (cfg as { _version: number })._version = 2;
+    return cfg;
+  },
 };

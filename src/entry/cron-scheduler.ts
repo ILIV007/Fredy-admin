@@ -180,6 +180,22 @@ async function runSchedulerWatch(container: Container, env: Env): Promise<void> 
     }
     // "No due slots" is the normal case — silent, no log entry, no KV write.
 
+    // ── 2b. v12.0.9: Check Tier V scheduled content (NASA APOD, etc) ────
+    //  Tier V uses fixed schedules (no jitter, no window). Checked after the
+    //  normal scheduler tick so both systems coexist.
+    try {
+      if (settings) {
+        const tierVResult = await container.tierVScheduler.checkAndPublish(settings, startTime);
+        if (tierVResult > 0) {
+          didWork = true;
+          log.push(`🟣 Tier V: published ${tierVResult} scheduled post(s)`);
+        }
+      }
+    } catch (error) {
+      log.push(`❌ Tier V error: ${error instanceof Error ? error.message : String(error)}`);
+      didWork = true;
+    }
+
     // ── 3. Flush batched stats if we published ────
     if (result.fired) {
       await container.kv.flushAllStats().catch(() => {});

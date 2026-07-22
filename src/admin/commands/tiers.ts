@@ -16,13 +16,14 @@ export const tiersCommand: Command = {
     const statuses = ctx.container.plugins.getAllStatuses();
     const statusMap = new Map(statuses.map((s) => [s.pluginId, s]));
 
-    const tiers: readonly Tier[] = ["S", "A", "B", "legacy"];
-    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦" };
+    const tiers: readonly Tier[] = ["S", "A", "B", "legacy", "V"];
+    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦", V: "🟣" };
     const tierNames: Record<Tier, string> = {
       S: "Tier S (Core · 2h)",
       A: "Tier A (Important · 6h)",
       B: "Tier B (Supporting · 12h)",
       legacy: "Legacy (Disabled · 24h)",
+      V: "Tier V (Scheduled · Fixed)",
     };
 
     let html = `<b>━━━ 📊 Provider Tiers ━━━</b>\n\n`;

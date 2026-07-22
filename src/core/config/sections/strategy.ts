@@ -146,10 +146,10 @@ export const CATEGORY_PROVIDERS: Readonly<Record<string, readonly string[]>> = {
     "hackernews",
   ],
   C: [
-    "nasa",
     "xkcd",
     // Legacy:
     "wikimedia",
     "joke",
+    // v12.0.9: NASA moved to Tier V (scheduled content) — no longer in Cat C rotation
   ],
 };

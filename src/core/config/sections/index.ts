@@ -26,6 +26,7 @@ import { nasaSection } from "./nasa";
 import { pluginsSection } from "./plugins";
 import { futureSection } from "./future";
 import { strategySection } from "./strategy";
+import { tierVSection } from "./tier-v";
 
 // Re-export all section types and schemas for consumers.
 export * from "./general";
@@ -42,6 +43,7 @@ export * from "./debug";
 export * from "./logging";
 export * from "./nasa";
 export * from "./plugins";
+export * from "./tier-v";
 export * from "./future";
 export * from "./strategy";
 
@@ -69,6 +71,7 @@ export function registerAllSections(registry: ConfigSectionRegistry): void {
   registry.register(pluginsSection);
   registry.register(futureSection);
   registry.register(strategySection);
+  registry.register(tierVSection);
 }
 
 /** List of all section keys in registration order. */
@@ -89,4 +92,5 @@ export const ALL_SECTION_KEYS = [
   "plugins",
   "future",
   "strategy",
+  "tierV",
 ] as const;

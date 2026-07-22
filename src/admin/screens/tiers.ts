@@ -30,9 +30,9 @@ export const tiersScreen: Screen = {
     const statuses = ctx.container.plugins.getAllStatuses();
     const statusMap = new Map(statuses.map((s) => [s.pluginId, s]));
 
-    const tiers: readonly Tier[] = ["S", "A", "B", "legacy"];
-    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦" };
-    const tierNames: Record<Tier, string> = { S: "Tier S (Core)", A: "Tier A (Important)", B: "Tier B (Supporting)", legacy: "Legacy (Disabled)" };
+    const tiers: readonly Tier[] = ["S", "A", "B", "legacy", "V"];
+    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦", V: "🟣" };
+    const tierNames: Record<Tier, string> = { S: "Tier S (Core)", A: "Tier A (Important)", B: "Tier B (Supporting)", legacy: "Legacy (Disabled)", V: "Tier V (Scheduled)" };
 
     let html = `<b>━━━ 📊 Provider Tiers ━━━</b>\n\n`;
 
@@ -200,5 +200,6 @@ function getTierRefreshHours(tier: Tier): number {
     case "A": return 6;
     case "B": return 12;
     case "legacy": return 24;
+    case "V": return 0; // on-demand fetch, no refresh interval
   }
 }
