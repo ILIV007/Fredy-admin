@@ -1,7 +1,7 @@
 {
   "name": "fredy-admin",
-  "version": "12.1.3",
-  "description": "Fredy v12.1.3 — Precision Scheduler + Zero-KV Quiet Hours + Provider Smart Sleep. Cloudflare Workers Free, serverless.",
+  "version": "12.1.4",
+  "description": "Fredy v12.1.4 — Precision Scheduler + Zero-KV Quiet Hours + Provider Smart Sleep. Cloudflare Workers Free, serverless.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

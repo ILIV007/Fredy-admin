@@ -2840,11 +2840,13 @@ async function loadStrategy(){
     html+='<p style="color:var(--text2);font-size:12px;margin-bottom:10px">Tier V posts have a FIXED schedule (no random jitter). They publish at the exact configured time every day.</p>';
     html+='<table style="font-size:12px"><thead><tr><th>ID</th><th>⏰ Time</th><th>Provider</th><th>Status</th><th>Description</th></tr></thead><tbody>';
     for(const entry of d.tierVEntries){
+      const st=d.tierVStatus?d.tierVStatus[entry.id]:null;
+      const pubBadge=st&&st.published?'<span class="badge badge-green">✅ Published</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
       html+='<tr style="background:rgba(168,85,247,.05)">'+
         '<td><code>'+escapeHtml(entry.id)+'</code></td>'+
         '<td style="color:#a855f7;font-weight:bold">'+escapeHtml(entry.time)+'</td>'+
         '<td>'+escapeHtml(entry.providerId)+'</td>'+
-        '<td>'+(entry.enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-red">Disabled</span>')+'</td>'+
+        '<td>'+(entry.enabled?pubBadge:'<span class="badge badge-red">Disabled</span>')+'</td>'+
         '<td style="color:var(--text2);font-size:11px">'+escapeHtml(entry.description||"")+'</td>'+
       '</tr>';
     }

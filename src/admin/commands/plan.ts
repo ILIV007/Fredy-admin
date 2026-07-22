@@ -70,6 +70,19 @@ export const planCommand: Command = {
         html += `\n<b>⚠️ ${dueNow} slot(s) due NOW — will fire on next tick.</b>`;
       }
 
+      // v12.1.4: Show Tier V scheduled content.
+      const tierVEntries = settings.tierV?.entries ?? [];
+      if (tierVEntries.length > 0) {
+        html += `\n<b>━━━ 🟣 Tier V — Scheduled ━━━</b>\n\n`;
+        for (const entry of tierVEntries) {
+          if (!entry.enabled) continue;
+          const sentKey = `fredy:tierV:sent:${today}:${entry.id}`;
+          const sent = await ctx.container.kv.get(sentKey).catch(() => null);
+          const pubEmoji = sent ? "✅" : "⏳";
+          html += `<blockquote>${pubEmoji} 🟣 ${entry.time} ${entry.providerId} — ${escapeHtml(entry.description || entry.id)}</blockquote>\n`;
+        }
+      }
+
       await ctx.reply(html);
     } catch (error) {
       await ctx.reply(`❌ Failed to load plan: ${escapeHtml(error instanceof Error ? error.message : String(error))}`);

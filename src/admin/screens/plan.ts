@@ -108,6 +108,20 @@ export const planScreen: Screen = {
         html += `\n<b>⚠️ ${dueNow} slot(s) due now — will fire on next tick.</b>`;
       }
 
+      // v12.1.4: Show Tier V scheduled content in bot plan screen.
+      const tierVEntries = settings.tierV?.entries ?? [];
+      if (tierVEntries.length > 0) {
+        html += `\n<b>━━━ 🟣 Tier V — Scheduled ━━━</b>\n\n`;
+        for (const entry of tierVEntries) {
+          if (!entry.enabled) continue;
+          // Check if published today.
+          const sentKey = `fredy:tierV:sent:${today}:${entry.id}`;
+          const sent = await ctx.container.kv.get(sentKey).catch(() => null);
+          const pubEmoji = sent ? "✅" : "⏳";
+          html += `<blockquote>${pubEmoji} 🟣 ${entry.time} ${entry.providerId} — ${escapeHtml(entry.description || entry.id)}</blockquote>\n`;
+        }
+      }
+
       return html;
     } catch (error) {
       return `<b>━━━ 📋 Daily Plan ━━━</b>\n\n❌ Failed to load plan: ${escapeHtml(error instanceof Error ? error.message : String(error))}`;

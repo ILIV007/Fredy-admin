@@ -178,31 +178,33 @@ export function buildSystemPrompt(
 }
 
 /** The user prompt — contains the raw source item to process.
- *  v12.1.3: Added provider-specific context tags (e.g., "Discovery of the Day" for github-events). */
+ *  v12.1.3: Added provider-specific context tags (e.g., "Discovery of the Day" for github-events).
+ *  v12.1.4: Removed tags for trending/releases/security — only github-events gets context.
+ *  v12.1.4: Added RTL/Persian language rules to prevent English-first sentences. */
 export function buildUserPrompt(
   sourceItem: { readonly title: string; readonly body: string; readonly url: string; readonly source: string },
   language: string,
 ): string {
-  // v12.1.3: Add context tag for specific providers.
+  // v12.1.4: Context tag ONLY for github-events.
   let contextTag = "";
   const source = sourceItem.source;
   if (source === "github-events") {
     const tags = ["Discovery of the Day", "Repo Spotlight", "Hidden Gem", "Trending Discovery", "Project of the Day"];
-    contextTag = `\nContext: This is a ${tags[Math.floor(Math.random() * tags.length)]} — a repository discovered from recent GitHub activity. In the headline or first paragraph, briefly mention WHY this repo is interesting (e.g., growing rapidly, new release, innovative approach).\n`;
-  } else if (source === "github-trending") {
-    contextTag = "\nContext: This is a trending GitHub repository — it's gaining stars rapidly right now.\n";
-  } else if (source === "github-releases") {
-    contextTag = "\nContext: This is a new release of a popular open-source project. Highlight what changed and why users should upgrade.\n";
-  } else if (source === "github-security") {
-    contextTag = "\nContext: This is a security advisory. Treat it seriously — mention affected versions and recommended actions.\n";
+    contextTag = `\nContext: This is a "${tags[Math.floor(Math.random() * tags.length)]}" — a repository discovered from recent GitHub activity. In the headline or first paragraph, briefly mention WHY this repo is interesting (e.g., growing rapidly, new release, innovative approach). The context tag itself should appear at the START of the headline in a natural way, like: "🔍 کشف روز: ..." or "⭐ پروژه منتخب: ..."\n`;
   }
 
-  // v12.1.3: Length guidance based on category interest.
-  let lengthGuidance = "";
-  if (source === "github-releases" || source === "github-security" || source === "hackernews-algolia") {
-    lengthGuidance = "\nLength: This is high-interest content — write 3-5 paragraphs with full technical detail. Don't be brief.\n";
-  } else if (source === "github-events" || source === "github-trending") {
-    lengthGuidance = "\nLength: Write 3-4 paragraphs explaining what the project does, why it's interesting, and how to get started.\n";
+  // v12.1.4: RTL / Persian language rules.
+  let rtlRules = "";
+  if (language === "fa") {
+    rtlRules = `\nRTL / PERSIAN RULES (CRITICAL):
+- NEVER start a Persian sentence with an English word. If a sentence starts with a tool name, version number, or English term, restructure the sentence to start with a Persian word.
+  BAD: "React 19 منتشر شد" → GOOD: "نسخه ۱۹ React منتشر شد"
+  BAD: "GitHub Trending نشان میده" → GOOD: "بخش ترند گیت‌هاب نشان میده"
+  BAD: "TypeScript 6.0 اضافه شده" → GOOD: "در TypeScript 6.0 اضافه شده"
+- English words (tool names, code, identifiers) should be wrapped in their natural form within Persian sentences — do NOT capitalize or emphasize them at the start of sentences.
+- Use Persian numerals (۱۲۳۴۵۶۷۸۹۰) for numbers in Persian text, EXCEPT in code blocks and version tags.
+- Ensure proper RTL flow: Persian text reads right-to-left. Mixed RTL/LTR content must flow naturally.
+- Use zero-width non-joiner (نیم‌فاصله) correctly in Persian compound words.\n`;
   }
 
   return [
@@ -211,7 +213,7 @@ export function buildUserPrompt(
     `Requested language: ${language}`,
     `Source: ${sourceItem.source}`,
     contextTag,
-    lengthGuidance,
+    rtlRules,
     `=== SOURCE ITEM ===`,
     `Title: ${sourceItem.title}`,
     `Body: ${sourceItem.body}`,
