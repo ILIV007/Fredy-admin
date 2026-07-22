@@ -331,10 +331,14 @@ export class StrategyEngine {
    * If the theme has topics that match a provider's keywords, that
    * provider is preferred. Otherwise, a random provider is selected.
    *
-   * v11.7.1: CRITICAL FIX — filters out DISABLED providers. Previously, the
-   * strategy engine could assign "news" (legacy, disabled) or "wikimedia"
-   * (legacy, disabled) to slots, causing the scheduler to fail when trying
-   * to fetch from a disabled provider.
+   * v11.7.1: CRITICAL FIX — filters out DISABLED providers.
+   * v12.0.11: CRITICAL FIX — theme matching was too loose. The old check
+   *   `topic.includes(providerLower)` caused "github security" to match
+   *   "github" (because "github security" contains "github"), selecting the
+   *   wrong provider. Now uses exact token matching: checks if the provider
+   *   ID contains the FULL topic as a substring (e.g., "github-security"
+   *   contains "security"), NOT the reverse. Also requires the topic to be
+   *   at least 4 chars to avoid false positives with short words like "AI".
    */
   private selectProvider(category: Category, theme: DailyTheme | null): string | null {
     const allProviders = CATEGORY_PROVIDERS[category];
@@ -349,12 +353,22 @@ export class StrategyEngine {
       return providers[randomInt(0, providers.length - 1)]!;
     }
 
-    // Check if any provider name matches a theme topic.
-    const themeTopicsLower = theme.topics.map((t) => t.toLowerCase());
-    for (const provider of providers) {
-      const providerLower = provider.toLowerCase();
-      if (themeTopicsLower.some((topic) => providerLower.includes(topic) || topic.includes(providerLower))) {
-        return provider;
+    // v12.0.11: Theme matching — provider ID must CONTAIN the topic keyword.
+    // Filter topics to meaningful ones (>= 4 chars) to avoid false positives.
+    const themeTopicsLower = theme.topics
+      .map((t) => t.toLowerCase())
+      .filter((t) => t.length >= 4);
+
+    if (themeTopicsLower.length > 0) {
+      // Find providers whose ID contains a theme topic keyword.
+      const matchedProviders = providers.filter((provider) => {
+        const providerLower = provider.toLowerCase();
+        return themeTopicsLower.some((topic) => providerLower.includes(topic));
+      });
+
+      if (matchedProviders.length > 0) {
+        // Pick a random matched provider (variety within the theme).
+        return matchedProviders[randomInt(0, matchedProviders.length - 1)]!;
       }
     }
 

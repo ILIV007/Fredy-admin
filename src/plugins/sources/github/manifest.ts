@@ -7,7 +7,7 @@ import type { PluginManifest } from "../../../types/plugin";
 
 export const githubManifest: PluginManifest = {
   id: "github",
-  name: "GitHub Trending",
+  name: "GitHub Topic Search",
   version: "1.1.0",
   enabled: true,
   category: "A",

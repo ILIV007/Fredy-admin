@@ -2010,16 +2010,18 @@ async function loadPost(){
   const d=await api("plugins");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error loading plugins</div>';return;}
   const enabledPlugins=d.plugins.filter(p=>p.enabled);
-  // v11.6.3: Group by tier
+  // v12.0.11: Group by tier — includes Tier V (scheduled content)
   const tierS=enabledPlugins.filter(p=>p.tier==="S");
   const tierA=enabledPlugins.filter(p=>p.tier==="A");
   const tierB=enabledPlugins.filter(p=>p.tier==="B");
+  const tierV=enabledPlugins.filter(p=>p.tier==="V");
 
   function pluginCard(p){
-    const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":"var(--text2)";
+    const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":p.tier==="V"?"#a855f7":"var(--text2)";
+    const tierEmoji=p.tier==="S"?"🥇":p.tier==="A"?"🥈":p.tier==="V"?"🟣":"🥉";
     return '<div class="post-card" data-tier-color="'+tierColor+'" onclick="postToChannel('+ "'" +p.id+ "'" +')">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
-        '<span style="font-weight:600;font-size:13px">'+p.name+'</span>'+
+        '<span style="font-weight:600;font-size:13px">'+tierEmoji+' '+p.name+'</span>'+
         '<span class="badge" style="background:'+tierColor+'20;color:'+tierColor+';font-size:9px">'+p.tier+'</span>'+
       '</div>'+
       '<div style="font-size:11px;color:var(--text2);display:flex;gap:8px">'+
@@ -2045,6 +2047,9 @@ async function loadPost(){
   }
   if(tierB.length>0){
     html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🥉</span><h4 style="margin:0;color:var(--text2)">Tier B — Supporting ('+tierB.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierB.map(pluginCard).join("")+'</div></div>';
+  }
+  if(tierV.length>0){
+    html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🟣</span><h4 style="margin:0;color:#a855f7">Tier V — Scheduled ('+tierV.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierV.map(pluginCard).join("")+'</div></div>';
   }
 
   html+='<div id="post-result"></div>';
