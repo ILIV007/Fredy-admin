@@ -1,403 +1,336 @@
-# Fredy v11.6.0
+# Fredy v12.1.0
 
 > **Autonomous AI-powered content publishing platform for Telegram channels.**
-> Built on Cloudflare Workers. Tier-based provider architecture. Free-tier optimized.
+> Built on Cloudflare Workers Free Tier. Three-Layer Cron + Random Jitter + Tier V Scheduled Content.
 
-[![Version](https://img.shields.io/badge/version-11.6.0-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-12.1.0-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-202%20passing-brightgreen)](./scripts)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org)
+[![Tests](https://img.shields.io/badge/tests-208%20passing-brightgreen)](./scripts)
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
-- [Provider Tier System](#provider-tier-system)
-- [Content Pipeline](#content-pipeline)
-- [Scheduler](#scheduler)
-- [Telegram Admin Bot](#telegram-admin-bot)
-- [Manager Dashboard](#manager-dashboard)
+- [Three-Layer Cron System](#three-layer-cron-system)
+- [Provider Tiers](#provider-tiers)
+- [AI Models](#ai-models)
+- [Getting Started](#getting-started)
 - [Configuration](#configuration)
-- [Deployment](#deployment)
-- [API Reference](#api-reference)
+- [Telegram Bot Commands](#telegram-bot-commands)
+- [Manager Dashboard](#manager-dashboard)
+- [API Endpoints](#api-endpoints)
 - [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Changelog](#changelog)
+- [Deployment](#deployment)
+- [Project Structure](#project-structure)
+- [License](#license)
 
 ---
 
 ## Overview
 
-Fredy is a serverless, AI-driven content publishing system for Telegram channels. It automatically fetches, curates, rewrites, and publishes developer-focused content to your Telegram channel — optimized for the Cloudflare Workers **Free Plan**.
+Fredy is a production-ready, serverless content automation platform that publishes high-quality, AI-curated developer content to Telegram channels. It runs entirely on Cloudflare Workers Free Tier with zero infrastructure cost.
 
-### What Fredy Does
+**What Fredy does:**
+- Fetches content from 20+ providers (GitHub, Dev.to, Hacker News, NASA, Reddit, etc.)
+- Filters by quality (popularity, freshness, stars, score)
+- Rewrites with AI (Gemini / OpenRouter) in Persian or English
+- Publishes to Telegram with images, smart link previews, and professional formatting
+- Detects duplicates using a 3-layer system (canonical ID + URL + content hash)
+- Schedules posts with human-like random jitter within configurable windows
 
-1. **Collects** content from 20+ providers (GitHub, Dev.to, Hacker News, NASA, Cloudflare Blog, etc.)
-2. **Filters** low-quality content using per-provider quality rules (stars, score, votes, age)
-3. **Enriches** content with metadata (GitHub stars, HN points, etc.)
-4. **Rewrites** content using AI (Gemini/OpenRouter) with your channel's personality (soul.md)
-5. **Schedules** posts at optimal times with jitter, quiet hours, and posting windows
-6. **Publishes** to Telegram with images, HTML formatting, and source links
-7. **Manages** everything from a web dashboard or Telegram bot
-
-### Design Principles
-
-- **Cloudflare Free Plan First** — every optimization respects free-tier limits (CPU, KV reads/writes, API calls)
-- **Plugin Architecture** — add/remove providers without touching core code
-- **Runtime Configuration** — all settings stored in KV, editable without redeployment
-- **AI Minimization** — deterministic filters run BEFORE AI to save tokens
-- **Observability** — full scheduler debug, provider analytics, admin PM notifications
+**What makes Fredy special:**
+- **Three-Layer Cron Architecture** — Cloudflare Cron for time-critical operations, external cron for background tasks
+- **Random Jitter Scheduling** — posts publish at random times within windows (not fixed slots), mimicking human behavior
+- **Zero-KV Quiet Hours** — during quiet hours, the scheduler consumes 0 KV operations
+- **Tier V Scheduled Content** — fixed-schedule posts (NASA APOD nightly) alongside random-jitter posts
+- **Duplicate Replacement Pipeline** — when a post is rejected as duplicate, Fredy automatically searches for a replacement (up to 5 attempts)
+- **Provider Variety** — no provider appears more than twice per day + 1 wildcard slot from all APIs
 
 ---
 
 ## Key Features
 
-### 20 Content Source Providers (4 Tiers)
-
-| Tier | Refresh | Providers |
-|------|---------|-----------|
-| **S** (Core) | 2h | GitHub, GitHub Releases, GitHub Trending, GitHub Events, Dev.to, Hacker News (Algolia), NASA APOD |
-| **A** (Important) | 6h | StackExchange, Cloudflare Blog, Hugging Face Blog, Product Hunt |
-| **B** (Supporting) | 12h | XKCD, GitHub Security, OpenAI News, Reddit Programming |
-| **Legacy** | 24h | News (NewsAPI), Joke, Wikimedia, Hacker News (Firebase), Reddit (old) |
-
-### AI Engine
-
-- **Google Gemini** (primary) — 6 models including gemini-3.5-flash
-- **OpenRouter** (fallback) — 6 free models (Llama 3.3, Qwen3, Gemma 4, GPT-OSS, Hermes 3, Nemotron 3)
-- **JSON repair** — automatically fixes malformed AI JSON responses (v11.4.0)
-- **Format-only fallback** — when all AI fails, publishes cleaned raw content
-- **Quality scoring** — 6-dimension quality evaluation (0-100)
-
 ### Scheduler
+- **Window-Based Scheduling** — posts belong to posting windows (08-10, 12-14, 16-18, 18-20, 20-22)
+- **EXACT Random Jitter** — `scheduledTime` is the real publish trigger (no tolerance, no early publishing)
+- **20-Minute Watcher** — Cloudflare Cron checks every 20 minutes for due posts
+- **Zero-KV Quiet Hours** — 0 reads, 0 writes during configurable quiet hours (default 00:00-07:30)
+- **Provider Smart Sleep** — Layer 2 skips refresh when queues are full during quiet hours
 
-- **Slot-based** with posting windows (5 configurable windows)
-- **Jitter** (±30min) for natural publishing times
-- **Quiet hours** (00:00–07:30 default)
-- **Grace period** (4h) for missed slots — recovers from cron gaps
-- **Multi-slot firing** — fires ALL due slots per tick (v11.2.0 fix)
-- **Crash recovery** — "publishing" marker prevents duplicate posts (v11.2.0)
-- **Admin PM alerts** for missed slots, stale ticks, strategy changes
+### Content Pipeline
+- **20 Content Providers** — GitHub (trending, releases, events, security), Dev.to, Hacker News, NASA, Reddit, StackExchange, Cloudflare Blog, Product Hunt, XKCD, and more
+- **3-Layer Dedup** — canonical ID (provider:stableId) + normalized URL + content hash (URL+title)
+- **Quality Scoring** — 6-dimension quality engine (credibility, popularity, freshness, relevance, diversity, language)
+- **AI Rewrite** — Gemini 3.6-flash (primary) + OpenRouter fallback (nemotron-3-ultra, qwen3-coder, gpt-oss-20b)
+- **Image Resolution** — unified pipeline: provider image → GitHub social preview → og:image → twitter:image
+- **Smart Link Preview** — disabled/smart/always modes with per-provider configuration
 
-### Telegram Admin Bot
+### Duplicate Replacement
+- When a post is rejected as duplicate, Fredy searches for a replacement from the **same category**
+- Up to 5 attempts before marking the slot as failed
+- Slot integrity preserved (window, scheduledTime, category never modified)
+- Admin notified with full list of rejected candidates
 
-- **12 commands**: `/start`, `/menu`, `/tiers`, `/plan`, `/debug`, `/providers`, `/force`, `/stats`, `/health`, `/checkperms`, `/soul`, `/help`
-- **16 inline screens** with toggle/stepper/choice keyboards
-- **Command menu** registered with Telegram (appears in "/" autocomplete)
-- **Bilingual** (Persian + English) admin UI
+### Tier V — Scheduled Content
+- Fixed-schedule posts that don't use random jitter or category queues
+- NASA APOD publishes nightly at 23:00 (configurable)
+- Extensible: weekly reports, monthly summaries, community posts
+- Uses the same publishing pipeline (dedup → AI → image → Telegram → history)
 
-### Manager Dashboard (Web)
-
-- 15 pages: Dashboard, Strategy, Post, Back-Test, Plugins, Queue, AI, Scheduler, **Scheduler Debug**, Statistics, Logs, Debug, Configuration, Settings, System
-- Real-time scheduler state visibility
-- Provider health monitoring
-- Full JSON diagnostic reports
+### Telegram Bot
+- 16 screens, 12 commands
+- Inline keyboards for all interactions
+- Daily plan viewer with Window | Scheduled | Status format
+- Provider management, AI testing, queue monitoring
+- Admin PM notifications (exact channel post copy + summary report)
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 4: Entry Points                                       │
-│   webhook.ts · tick.ts · cron.ts · manager.ts · health.ts   │
-│   Responsibility: parse request, dispatch, return 200.      │
-├─────────────────────────────────────────────────────────────┤
-│ Layer 3: Orchestrators                                      │
-│   admin.ts (492 lines) · scheduler.ts                       │
-│   Responsibility: compose services into workflows.          │
-├─────────────────────────────────────────────────────────────┤
-│ Layer 2: Services (57 files, ~12k LOC)                      │
-│   ai-service · content-manager · scheduler-service          │
-│   provider-engine · provider-rotation · breaking-content    │
-│   final-publisher · telegram · quality-engine · +20 more    │
-│   Responsibility: single-domain business logic.             │
-├─────────────────────────────────────────────────────────────┤
-│ Layer 1: Primitives & Types                                 │
-│   hash · time · strings · report · 16 type files            │
-│   Responsibility: pure functions, types, validators.        │
-└─────────────────────────────────────────────────────────────┘
+                    Fredy Worker
+                 (Cloudflare Workers)
+
+    ┌─────────────────────────────────────────┐
+    │              Cloudflare Cron             │
+    │                                         │
+    │  */20 * * * *  → Layer 1: Watcher       │
+    │                   (check due → publish)  │
+    │                                         │
+    │  0 0 * * *     → Layer 3: Maintenance   │
+    │                   (generate plan, cleanup)│
+    └─────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────┐
+    │          External Cron (cron-job.org)    │
+    │                                         │
+    │  Every 2h → GET /internal/provider-refresh│
+    │              → Layer 2: Provider Refresh  │
+    │                (fetch content, queues)    │
+    └─────────────────────────────────────────┘
+
+    KV Usage: ~153 reads/day, ~68 writes/day
+    (0.15% of 100K reads, 6.8% of 1K writes)
 ```
 
-### DI Container
+### Publishing Flow
 
-`buildContainer(env): Container` — constructs 40+ services in 8 layers. Rebuilt per request (no global state except shared config cache).
-
-### Storage
-
-- **Single KV namespace** (`Fredy_SETTINGS`) with prefix-namespaced keys (`fredy:*`)
-- **Config cache**: 30s in-memory TTL (reduces KV reads ~80%)
-- **Batched stats**: in-memory counters, flushed every 10 increments
-- **Source cache**: per-plugin KV cache (2h–24h TTL)
+```
+Scheduled Slot Due
+        ↓
+Acquire Candidate (same category)
+        ↓
+Publish (dedup → AI → image → Telegram)
+        ↓
+  ┌─ Success → mark published, notify admin
+  │
+  └─ Duplicate → search replacement (up to 5 attempts)
+       ↓
+  ┌─ Replacement found → publish replacement
+  │
+  └─ All 5 duplicates → NO_VALID_CONTENT_AFTER_DEDUP
+       ↓
+  Notify admin with rejected candidates list
+```
 
 ---
 
-## Provider Tier System
+## Three-Layer Cron System
 
-v11.0 replaced the old Category-based scheduling with a **Tier-based** system:
+| Layer | Schedule | Source | Responsibility | KV/tick |
+|-------|----------|--------|---------------|---------|
+| 1 — Scheduler Watcher | every 20 min | Cloudflare Cron | Check due posts → publish | 0 writes (no-due path) |
+| 2 — Provider Refresh | every 2h | External (cron-job.org) | Fetch content, maintain queues | ~3 writes |
+| 3 — Daily Maintenance | every 24h | Cloudflare Cron | Generate plan, cleanup KV | ~10 writes |
 
-- **Categories** (A/B/C) remain for **content classification** (Programming, News, Support)
-- **Tiers** (S/A/B/Legacy) determine **scheduling priority** (refresh interval)
+**Layer 1** is the only trigger that publishes posts. It checks `scheduledTime` (EXACT, no tolerance) and fires on the first tick at or after it. Expected delay: 0-20 minutes.
 
-### Central Provider Config
+**Layer 2** is triggered externally via `GET /internal/provider-refresh?key=<CRON_KEY>`. It fetches content from providers, maintains queue depth, and applies adaptive backoff. Smart Sleep: skips entirely if quiet hours AND all queues are full.
 
-All provider metadata lives in **one file**: [`src/core/providers.config.ts`](./src/core/providers.config.ts)
-
-```typescript
-{
-  id: "github-releases",
-  name: "GitHub Releases",
-  tier: "S",
-  category: "A",
-  weight: 100,              // weighted-random selection
-  refreshIntervalHours: 2,
-  cacheTtlSeconds: 14400,
-  credibility: 95,          // candidate ranking
-  reputation: 100,          // quality scoring
-  minStars: 0,
-  minScore: 0,
-  canBreak: true,           // can trigger breaking content
-  popularityExempt: false,
-  // ...
-}
-```
-
-Adding a provider = edit ONE file. A structural test (`scripts/test-plugin-registry.ts`, 65 assertions) ensures no provider is missing.
-
-### Adaptive Refresh
-
-If a provider returns no useful content 3 times consecutively, its refresh interval backs off: 2h → 4h → 6h (capped). When quality content returns, the interval resets to normal.
-
-### Provider Rotation
-
-- No same provider in consecutive publish cycles
-- No same provider until at least 2 other providers have published
-- No same topic (content hash) within the recent window
-
-### Breaking Content
-
-One extra publish slot per 24h for exceptional content:
-- GitHub Security: CVSS ≥ 9 (critical)
-- Hacker News: score ≥ 500 (very high)
-- GitHub Releases: repo ≥ 5000 stars (major)
-- OpenAI News: model release
+**Layer 3** generates tomorrow's daily plan with fresh random `scheduledTime` per window, cleans expired KV data, and resets daily counters.
 
 ---
 
-## Content Pipeline
+## Provider Tiers
 
-```
-Provider Fetch
-    ↓
-1. Normalize (SourceItem → StandardPost)
-    ↓
-2. Enrich (metadata — pure, no fetch)
-    ↓
-3. Tag (auto-assign ≤8 tags)
-    ↓
-4. Validate (structural: title, URL, category)
-    ↓
-5. Freshness Filter (news >48h, NASA >7d → reject)
-    ↓
-6. Dedup (URL hash + content hash, 30-day TTL)
-    ↓
-7. Content Enricher (live API: GitHub stars, HN score)
-    ↓
-8. Provider Quality Filter (per-provider thresholds)
-    ↓
-9. Candidate Ranking (7-factor local score, NO AI)
-    ↓
-AI Generate (prompt → fallback → parse → JSON repair)
-    ↓
-Quality Score (6-dimension weighted average)
-    ↓
-Format (build ReadyContent with footer + emoji)
-    ↓
-Enqueue (per-category FIFO, max 50, 24h TTL)
-    ↓
-Scheduler Tick (fire ALL due slots)
-    ↓
-Publish (sendPhoto/sendMessage → Telegram)
-    ↓
-History Record (90-day TTL)
-```
-
-### AI Cost Minimization
-
-All deterministic filters run **BEFORE** the AI call:
-1. Freshness filter (rejects stale → saves tokens)
-2. Popularity filter (rejects low-engagement → saves tokens)
-3. Candidate ranker (picks best candidate → only ONE AI call)
-4. Content enricher (enriches WITHOUT AI → improves AI output)
+| Tier | Refresh | Description | Providers |
+|------|---------|-------------|-----------|
+| 🥇 S | 2h | Core providers | GitHub Trending, GitHub Releases, GitHub Topic Search, GitHub Discovery, Dev.to, Hacker News |
+| 🥈 A | 6h | Important providers | StackExchange, Cloudflare Blog, Hugging Face Blog, Product Hunt |
+| 🥉 B | 12h | Supporting providers | XKCD, Reddit Programming, GitHub Security, OpenAI News |
+| 📦 Legacy | 24h | Disabled by default | Hacker News (Firebase), NewsAPI, Joke API, Wikimedia, Reddit (OAuth) |
+| 🟣 V | On-demand | Scheduled content | NASA APOD (nightly 23:00) |
 
 ---
 
-## Scheduler
+## AI Models
 
-### Cron Triggers
+### Gemini (Primary)
+1. `gemini-3.6-flash` — newest free-tier Flash
+2. `gemini-3.5-flash` — best overall, 1M context
+3. `gemini-3.1-flash-lite` — fastest lite
+4. `gemini-3-flash` — stable flash
+5. `gemini-2.5-flash` — legacy reliable
+6. `gemini-2.5-flash-lite` — legacy lite
 
-- **External** (primary): cron-job.org calls `/internal/tick` every 2 hours
-- **Internal** (backup): Cloudflare cron `0 0 * * *` every 24 hours
-
-### Tick Lifecycle
-
-```
-1. Authenticate (CRON_KEY)
-2. Acquire KV lock (fredy:tick:lock, 90s TTL)
-3. Return 200 immediately (work runs in ctx.waitUntil)
-4. [background] Provider Engine: refresh due providers (staggered, max 3)
-5. [background] Scheduler: fire ALL due slots (v11.2.0)
-6. [background] Queue: maintain min depth per category
-7. [background] Flush batched stats
-8. Release lock
-```
-
-### Missed Slot Recovery (v11.2.0)
-
-If a slot's time falls between two ticks (e.g., slot at 10:37, ticks at 10:00 and 12:00), the 12:00 tick fires it (within 4h grace). If the gap exceeds 4h, the slot is marked "failed" and an admin PM is sent.
+### OpenRouter (Fallback)
+1. `nvidia/nemotron-3-ultra-550b-a55b:free`
+2. `qwen/qwen3-coder:free`
+3. `nvidia/nemotron-3-super-120b-a12b:free`
+4. `google/gemma-4-31b-it:free`
+5. `openai/gpt-oss-20b:free`
+6. `meta-llama/llama-3.3-70b-instruct:free`
 
 ---
 
-## Telegram Admin Bot
+## Getting Started
 
-### Commands
+### Prerequisites
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome + language selection + register command menu |
-| `/menu` | Open admin dashboard (16 inline screens) |
-| `/tiers` | View all 20 providers grouped by tier |
-| `/plan` | View today's publishing plan with slot statuses |
-| `/debug` | Scheduler debug summary (due slots, lock, last tick) |
-| `/providers` | Quick provider health overview (empty/healthy) |
-| `/force` | Force publish ONE post now (doesn't affect scheduler) |
-| `/stats` | Quick stats summary |
-| `/health` | System health check (secrets, KV, Telegram, AI) |
-| `/checkperms` | Check bot permissions in target channel |
-| `/soul` | View soul.md status |
-| `/help` | List all commands |
+- [Node.js](https://nodejs.org/) 18+ or [Bun](https://bun.sh/)
+- [Cloudflare account](https://dash.cloudflare.com/sign-up/workers) (Free tier is sufficient)
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
+- A Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- A Gemini API Key (from [Google AI Studio](https://aistudio.google.com/apikey))
+- Optional: OpenRouter API Key, GitHub Token, NASA API Key, NewsAPI Key
 
-### Screens (16 total)
+### Installation
 
-`main` · `settings` · `categories` · `providers` · `ai` · `manual` · `schedule` · `soul` · `debug` · `stats` · `editor` · `language` · `strategy` · `tiers` · `plan` · `schedulerdebug`
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/fredy.git
+cd fredy
 
----
+# Install dependencies
+bun install  # or npm install
 
-## Manager Dashboard
+# Login to Cloudflare
+wrangler login
 
-Accessed at `https://<your-worker>.workers.dev/Manager?token=<DEBUG_TOKEN>`
+# Set up secrets
+wrangler secret put BOT_TOKEN
+wrangler secret put GEMINI_API_KEY
+wrangler secret put CRON_KEY
+wrangler secret put ADMIN_ID
+wrangler secret put DEBUG_TOKEN
 
-### Pages
+# Optional secrets
+wrangler secret put OPENROUTER_API_KEY
+wrangler secret put GITHUB_TOKEN
+wrangler secret put NASA_API_KEY
+wrangler secret put NEWSAPI_KEY
+wrangler secret put WEBHOOK_SECRET
+```
 
-| Page | Purpose |
-|------|---------|
-| Dashboard | System overview, quick controls, global stats |
-| Strategy | Strategy mode, weekly themes, daily plan |
-| Post to Channel | Manual publish from any provider |
-| Back-Test | 9-point system test + full checkup |
-| Plugins | Provider health, enable/disable, test |
-| Queue | Per-category queue depth, send-now |
-| AI | Provider status, model list, per-model test |
-| Scheduler | Config, daily plan, force-publish |
-| **Scheduler Debug** | Real-time scheduler state (v11.2.0) |
-| Statistics | 7-day publish history |
-| Logs | Recent updates/errors |
-| Debug | Runtime info, tick/pipeline logs |
-| Configuration | Full settings JSON viewer |
-| Settings | Runtime config editor |
-| System | Clear dedup/queue/logs/cache, reset |
+### Local Development
+
+```bash
+# Create .dev.vars with your secrets
+cp .dev.vars.example .dev.vars
+# Edit .dev.vars with your values
+
+# Start local dev server
+bun run dev  # or wrangler dev
+```
+
+### Deployment
+
+```bash
+# Deploy to Cloudflare Workers
+bun run deploy  # or wrangler deploy
+
+# Set up the webhook
+bash scripts/set-webhook.sh
+
+# Set up external cron (cron-job.org)
+# URL: https://your-worker.workers.dev/internal/provider-refresh?key=YOUR_CRON_KEY
+# Schedule: Every 2 hours
+```
 
 ---
 
 ## Configuration
 
-All configuration is stored in KV (`fredy:settings:<adminId>`) and editable at runtime via the dashboard or bot. No redeployment required.
-
-### 16 Config Sections
-
-`general` · `telegram` · `language` · `scheduler` · `categories` · `tiers` · `ai` · `providers` · `content` · `quality` · `debug` · `logging` · `nasa` · `plugins` · `future` · `strategy`
+All configuration is stored in Cloudflare KV and can be changed at runtime via the Manager Dashboard or Telegram Bot — no redeployment required.
 
 ### Key Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `scheduler.postingWindows` | 08-10, 12-14, 16-18, 18-20, 20-22 | Publishing time windows |
-| `scheduler.quietHours` | 00:00–07:30 | No-publish period |
-| `scheduler.jitterMinutes` | 30 | Random offset per slot |
-| `content.postsPerDay` | 4 | Posts per day (1-20) |
-| `quality.minScore` | 60 | Minimum quality score (0-100) |
+| `scheduler.enabled` | true | Enable/disable the scheduler |
+| `scheduler.timezone` | Asia/Tehran | Timezone for scheduling |
+| `scheduler.postingWindows` | 5 windows | Posting windows (08-10, 12-14, 16-18, 18-20, 20-22) |
+| `scheduler.quietHours` | 00:00-07:30 | No publishing during this period |
+| `scheduler.minGapMinutes` | 90 | Minimum gap between posts |
+| `content.postsPerDay` | 5 | Total posts per day |
 | `ai.primaryProvider` | gemini | Primary AI provider |
-| `tiers.tierDefaults.S.refreshIntervalHours` | 2 | Tier S refresh interval |
-
-### Secrets (via `wrangler secret put`)
-
-**Required:** `ADMIN_ID`, `BOT_TOKEN`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `CRON_KEY`
-**Recommended:** `WEBHOOK_SECRET`, `DEBUG_TOKEN`
-**Optional:** `NEWSAPI_KEY`, `NASA_API_KEY`, `GITHUB_TOKEN`, `PRODUCTHUNT_TOKEN`
+| `ai.qualityThreshold` | 80 | Minimum quality score |
+| `telegram.linkPreviewMode` | smart | Link preview mode |
+| `tierV.entries` | NASA 23:00 | Tier V scheduled content |
 
 ---
 
-## Deployment
+## Telegram Bot Commands
 
-### Prerequisites
-
-- Cloudflare account (free tier works)
-- Telegram bot token from [@BotFather](https://t.me/BotFather)
-- Google Gemini API key from [AI Studio](https://aistudio.google.com/apikey)
-- OpenRouter API key from [openrouter.ai](https://openrouter.ai/keys)
-
-### Quick Start
-
-```bash
-# 1. Clone and install
-git clone https://github.com/ILIV007/Fredy-admin.git
-cd Fredy-admin
-bun install
-
-# 2. Set secrets
-npx wrangler secret put BOT_TOKEN
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put OPENROUTER_API_KEY
-npx wrangler secret put CRON_KEY
-npx wrangler secret put ADMIN_ID
-npx wrangler secret put GITHUB_TOKEN        # recommended (higher rate limit)
-npx wrangler secret put PRODUCTHUNT_TOKEN   # optional (for API access)
-
-# 3. Deploy
-npx wrangler deploy
-
-# 4. Set webhook
-./scripts/set-webhook.sh <BOT_TOKEN> <WORKER_URL> <WEBHOOK_SECRET>
-
-# 5. Start the bot in Telegram
-# Send /start to your bot — it will register the command menu automatically.
-```
-
-### External Cron Setup
-
-1. Go to [cron-job.org](https://cron-job.org)
-2. Create a job with URL: `https://<your-worker>.workers.dev/internal/tick?key=<CRON_KEY>`
-3. Schedule: every 2 hours
-4. Timeout: 60 seconds
+| Command | Description |
+|---------|-------------|
+| `/start` | Start the bot + show main menu |
+| `/status` | System status overview |
+| `/plan` | View today's daily plan |
+| `/stats` | Publishing statistics |
+| `/queue` | Content queue depths |
+| `/plugins` | Provider list + toggle |
+| `/tiers` | Provider tier overview |
+| `/ai` | AI provider settings |
+| `/settings` | Bot settings |
+| `/help` | Help + command list |
+| `/health` | Health check |
+| `/config` | Configuration viewer |
 
 ---
 
-## API Reference
+## Manager Dashboard
+
+Access at: `https://your-worker.workers.dev/Manager` (protected by DEBUG_TOKEN)
+
+### Pages
+
+| Page | Description |
+|------|-------------|
+| Dashboard | Live clock, health gauge, next-publish countdown, recent activity feed |
+| Strategy | Active strategy, weekly schedule overview, daily plan, Tier V entries |
+| Post to Channel | Manual publish by provider (grouped by tier) |
+| Scheduler | Scheduler controls, daily plan table, posting windows |
+| Scheduler Debug | Real-time scheduler state, quiet hours, cron architecture |
+| Statistics | 7-day heatmap, category donut, plugin bars, quality distribution |
+| Plugins | Provider management, health, fetch testing |
+| Queue | Content queue viewer |
+| AI | AI model list, token usage, model testing |
+| Logs | Publish failures, errors, debug ring buffer |
+| Settings | Full configuration editor |
+| System | System info, KV test, cache stats |
+
+---
+
+## API Endpoints
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/` | GET | Public | Health check |
-| `/version` | GET | Public | Version info |
-| `/health` | GET | Public | Detailed system status |
-| `/Manager` | GET | DEBUG_TOKEN | Web dashboard |
-| `/Manager/api/*` | GET/POST | DEBUG_TOKEN | Dashboard API (~40 endpoints) |
-| `/Manager/api/scheduler/debug` | GET | DEBUG_TOKEN | Real-time scheduler state (v11.2.0) |
-| `/internal/tick` | GET/POST | CRON_KEY | Cron trigger |
-| `/webhook` | POST | WEBHOOK_SECRET | Telegram updates |
+| `/` | GET | None | Health check |
+| `/health` | GET | None | Detailed system status |
+| `/version` | GET | None | Version info |
+| `/internal/tick` | GET/POST | CRON_KEY | Manual scheduler trigger |
+| `/internal/provider-refresh` | GET | CRON_KEY | External provider refresh (cron-job.org) |
+| `/Manager` | GET | DEBUG_TOKEN | Manager dashboard |
+| `/Manager/api/*` | GET/POST | DEBUG_TOKEN | Dashboard API |
+| `/webhook` | POST | WEBHOOK_SECRET | Telegram webhook |
+| `/debug/*` | GET | DEBUG_TOKEN | Legacy debug dashboard |
 
 ---
 
@@ -407,121 +340,117 @@ npx wrangler deploy
 # Run all tests
 bun run test
 
-# Individual test suites
-bun run test:scheduler      # 41 scheduler tests
-bun run test:strategy       # 34 strategy tests
-bun run test:pipeline       # 41 pipeline tests
-bun run test:dedup          # 21 dedup tests
-bun run test:registry       # 65 plugin registry tests (v11.1.0)
+# Run individual test suites
+bun run test:scheduler    # Scheduler, TimeGenerator, QuietHours, Tier V
+bun run test:dedup        # Duplicate detection (3-layer)
+bun run test:strategy     # Strategy engine, themes, distribution
+bun run test:registry     # Plugin registry consistency
+
+# Type checking
+bun run typecheck         # tsc --noEmit
 ```
 
-**Total: 202 tests passing.**
+**Test Results:** 208 tests passing (86 scheduler + 19 dedup + 38 strategy + 65 registry)
 
 ---
 
-## Troubleshooting
+## Deployment
 
-### Posts not publishing
+### Cloudflare Workers Free Tier Limits
 
-1. Check `/debug` command — are slots "due" but not firing?
-2. Check `telegram.adminId` is set (not empty) — `/health` shows it
-3. Check scheduler is enabled and bot is enabled
-4. Check quiet hours are not active
-5. Check KV lock is not stuck (Manager → Scheduler Debug → Lock)
+| Resource | Free Limit | Fredy Usage |
+|----------|-----------|-------------|
+| Requests/day | 100,000 | ~85/day |
+| KV Reads/day | 100,000 | ~153/day |
+| KV Writes/day | 1,000 | ~68/day |
+| Cron Triggers | 5 | 2 (Cloudflare) + 1 (external) |
+| Worker Size | 1 MB | ~630 KB |
+| CPU Time | 10ms | <30ms per tick |
 
-### Plugins returning 0 items
+### External Cron Setup (cron-job.org)
 
-1. `stackexchange` — API may be throttled (shared CF IPs). Retries 3 tag sets.
-2. `producthunt` — Without `PRODUCTHUNT_TOKEN`, uses RSS fallback.
-3. `github-events` — Without `GITHUB_TOKEN`, rate limit is 60/hour. Set the token.
-4. `reddit-v2` — Reddit blocks CF Workers. RSS fallback is used.
-5. Clear source caches: Manager → System → "Clear Source Caches"
+1. Create an account at [cron-job.org](https://cron-job.org)
+2. Create a new job:
+   - **URL:** `https://your-worker.workers.dev/internal/provider-refresh?key=YOUR_CRON_KEY`
+   - **Schedule:** Every 2 hours
+   - **Method:** GET
+3. Enable "Alert me if this job doesn't run" for failure detection
 
-### AI quality score too low
+### Webhook Setup
 
-1. Check AI providers are configured: `/health`
-2. Check `ai.qualityThreshold` (default 60) — may need lowering
-3. JSON repair (v11.4.0) fixes most AI parse errors automatically
-4. Format-only fallback publishes raw content with score=1
+```bash
+# Set the Telegram webhook
+bash scripts/set-webhook.sh
 
-### Duplicate posts
-
-- v11.2.0 fixed this with "publishing" marker (written BEFORE publish)
-- If duplicates persist, check that `force-publish` is not calling `scheduler.tick()`
+# Or manually:
+curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://your-worker.workers.dev/webhook&secret_token=<WEBHOOK_SECRET>"
+```
 
 ---
 
-## Changelog
+## Project Structure
 
-See [CHANGELOG.md](./CHANGELOG.md) for the full history.
-
-### v11.6.0 (Current)
-- Global Provider Footer Refactor: every provider supplies its own displayIcon + displaySource
-- GitHub posts show "🐙 owner/repo" (e.g., "🐙 microsoft/vscode")
-- Non-GitHub posts show provider-specific label (e.g., "☁️ Cloudflare Blog", "🤗 Hugging Face")
-- Future-proof: adding providers requires NO formatter changes
-- Unified data flow: manifest → SourceItem → StandardPost → ContentItem → ReadyContent → FinalPost
-
-### v11.5.0
-- CRITICAL: Tick pipeline reordered — scheduler.tick() runs FIRST (was being killed by 30s timeout)
-- RSS fallback for stackexchange (API throttles CF Workers)
-- Search API fallback for github-events
-- GitHub source formatting (later superseded by v11.6.0 unified system)
-
-### v11.4.0
-- FIX: Double-publish bug (manual force no longer calls scheduler.tick)
-- FIX: Missing images (better og:image resolution, Dev.to API, browser UA)
-- FIX: AI JSON parse errors (automatic JSON repair)
-- FIX: stackexchange filter param removed (was causing 400)
-- FIX: producthunt RSS fallback with multiple URLs
-- NEW: setMyCommands (commands appear in Telegram "/" menu)
-- NEW: Manual Post screen with all 20 providers organized by tier
-- NEW: Professional README.md
-
-### v11.3.0
-- Plugin fixes: stackexchange, producthunt, github-events, reddit-v2
-- telegram.adminId sync from env
-- 3 new bot screens: tiers, plan, schedulerdebug
-- 5 new bot commands: /tiers, /plan, /debug, /providers, /force
-
-### v11.2.0
-- CRITICAL: Scheduler fires ALL due slots (was only first)
-- CRITICAL: Grace period 3h→4h
-- CRITICAL: "publishing" marker before publish (crash recovery)
-- force-publish acquires lock
-- Strategy-change clears both plans + markers
-- Stale-tick threshold 5h→3h
-- Admin PM on grace failure
-- Scheduler Debug dashboard page
-
-### v11.1.0
-- ProviderEngine wired into tick pipeline
-- Central providers.config.ts (single source of truth)
-- Provider Rotation + Breaking Content
-- Updated Weekly Themes
-- Plugin registry structural test (65 assertions)
-
-### v11.0.0
-- Tier-Based Provider Architecture (S/A/B/Legacy)
-- 8 new plugins (github-events, hackernews-algolia, cloudflare-blog, etc.)
-- Provider Quality Filters (per-provider)
-- ProviderEngine (adaptive refresh, staggered scheduling)
+```
+fredy/
+├── src/
+│   ├── index.ts                 # Worker entry point (fetch + scheduled handlers)
+│   ├── container.ts             # DI container (wires all services)
+│   ├── entry/                   # HTTP/cron entry handlers
+│   │   ├── cron.ts              # Cron router (Layer 1 + Layer 3)
+│   │   ├── cron-scheduler.ts    # Layer 1: 20-min scheduler watcher
+│   │   ├── cron-providers.ts    # Layer 2: provider refresh (external cron)
+│   │   ├── cron-maintenance.ts  # Layer 3: daily maintenance
+│   │   ├── provider-refresh.ts  # External endpoint for Layer 2
+│   │   ├── tick.ts              # Manual trigger endpoint
+│   │   ├── manager.ts           # Manager dashboard (HTML + API)
+│   │   ├── webhook.ts           # Telegram webhook handler
+│   │   ├── health.ts            # Health check endpoints
+│   │   └── debug.ts             # Legacy debug dashboard
+│   ├── services/                # Core services (40+ files)
+│   │   ├── scheduler-service.ts # Scheduler + replacement pipeline
+│   │   ├── strategy-engine.ts   # Daily plan generation
+│   │   ├── time-generator.ts    # Random jitter slot generation
+│   │   ├── content-manager.ts   # Content pipeline orchestrator
+│   │   ├── final-publisher.ts   # Publishing pipeline (dedup → AI → Telegram)
+│   │   ├── duplicate-detector.ts# 3-layer dedup (canonical + URL + hash)
+│   │   ├── image-resolver.ts    # Unified image resolution
+│   │   ├── provider-engine.ts   # Tier-based provider management
+│   │   ├── quiet-hours-checker.ts# Quiet hours detection
+│   │   ├── tier-v-scheduler.ts  # Tier V fixed-schedule content
+│   │   └── ...                  # AI, media, queue, history, config, etc.
+│   ├── plugins/                 # Content source plugins
+│   │   ├── ai/                  # AI providers (Gemini, OpenRouter)
+│   │   └── sources/             # 20+ content source plugins
+│   ├── admin/                   # Telegram bot admin interface
+│   │   ├── commands/            # Bot commands (/plan, /status, etc.)
+│   │   └── screens/             # Bot inline screens
+│   ├── core/                    # Configuration, constants, providers config
+│   ├── types/                   # TypeScript type definitions
+│   ├── primitives/              # Utility functions (strings, time, hash)
+│   └── orchestrators/           # Thin wrappers (scheduler, etc.)
+├── scripts/                     # Test + deployment scripts
+├── migrations/                  # D1 database migrations (optional)
+├── wrangler.toml                # Cloudflare Workers config
+├── package.json                 # Dependencies + scripts
+├── tsconfig.json                # TypeScript config
+└── README.md                    # This file
+```
 
 ---
 
 ## License
 
-MIT — See [LICENSE](./LICENSE)
+[MIT](./LICENSE) — Free to use, modify, and distribute.
 
 ---
 
-## Links
+## Credits
 
-- **Repository:** [github.com/ILIV007/Fredy-admin](https://github.com/ILIV007/Fredy-admin)
-- **Channel:** [@ILIVIR3](https://t.me/ILIVIR3)
-- **Bot:** [@Fredy_IVbot](https://t.me/Fredy_IVbot)
-- **Docs:** [ARCHITECTURE_RULES.md](./docs/ARCHITECTURE_RULES.md) · [CONFIG_GUIDE.md](./docs/CONFIG_GUIDE.md) · [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
+- **AI:** Google Gemini, OpenRouter
+- **Platform:** Cloudflare Workers
+- **Content Sources:** GitHub API, Dev.to API, Hacker News Algolia API, NASA APOD API, Reddit JSON API, StackExchange API, Product Hunt API, and more
+- **External Cron:** cron-job.org
 
 ---
 
-**Fredy v11.4.0** — Built with ❤️ for the ILIVIR3 community.
+*Fredy v12.1.0 — Production-ready autonomous content publishing. Built for Cloudflare Workers Free Tier.*
