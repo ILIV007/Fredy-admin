@@ -777,7 +777,11 @@ export async function managerHandler(
       ? DEFAULT_WEEKLY_THEMES_EXPORT
       : null;
     const tierVEntries = settings?.tierV?.entries ?? [];
-    return json({ ok: true, strategy, plan, weeklyThemes, tierVEntries });
+    // v12.1.3: Add Tier V published status (was NASA published today?)
+    const tierVStatus = settings
+      ? await container.tierVScheduler.getPublishedStatus(settings, Date.now()).catch(() => ({}))
+      : {};
+    return json({ ok: true, strategy, plan, weeklyThemes, tierVEntries, tierVStatus });
   }
   if (apiPath === "strategy" && request.method === "POST") {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -2484,6 +2488,7 @@ async function loadScheduler(){
   try{stratData=await api("strategy");}catch{}
   const stratPlan=stratData?.plan||null;
   const tierVEntries=stratData?.tierVEntries||[];
+  const tierVStatus=stratData?.tierVStatus||{};
 
   let scheduleHtml='';
   if(stratPlan&&stratPlan.posts&&stratPlan.posts.length>0){
@@ -2510,7 +2515,9 @@ async function loadScheduler(){
   if(tierVEntries&&tierVEntries.length>0){
     tierVHtml='<div class="card" style="border:1px solid #a855f7"><h3 style="margin-bottom:8px;color:#a855f7">🟣 Tier V — Scheduled Content (Fixed Schedule)</h3><p style="color:var(--text2);font-size:12px;margin-bottom:8px">Fixed-schedule posts — no random jitter, no category queue. Publishes at the exact configured time every day.</p><table style="font-size:12px"><thead><tr><th>ID</th><th>⏰ Time</th><th>Provider</th><th>Status</th><th>Description</th></tr></thead><tbody>';
     for(const entry of tierVEntries){
-      tierVHtml+='<tr style="background:rgba(168,85,247,.05)"><td><code>'+escapeHtml(entry.id)+'</code></td><td style="color:#a855f7;font-weight:bold">'+escapeHtml(entry.time)+'</td><td>'+escapeHtml(entry.providerId)+'</td><td>'+(entry.enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-red">Disabled</span>')+'</td><td style="color:var(--text2);font-size:11px">'+escapeHtml(entry.description||"")+'</td></tr>';
+      const status=tierVStatus[entry.id];
+      const pubBadge=status&&status.published?'<span class="badge badge-green">✅ Published</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      tierVHtml+='<tr style="background:rgba(168,85,247,.05)"><td><code>'+escapeHtml(entry.id)+'</code></td><td style="color:#a855f7;font-weight:bold">'+escapeHtml(entry.time)+'</td><td>'+escapeHtml(entry.providerId)+'</td><td>'+(entry.enabled?pubBadge:'<span class="badge badge-red">Disabled</span>')+'</td><td style="color:var(--text2);font-size:11px">'+escapeHtml(entry.description||"")+'</td></tr>';
     }
     tierVHtml+='</tbody></table></div>';
   }

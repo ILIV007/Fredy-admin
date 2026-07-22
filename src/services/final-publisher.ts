@@ -56,10 +56,11 @@ const MAX_RETRIES = 1;
  * already provide good images via ImageResolver, so link preview is not needed.
  */
 const GOOD_PREVIEW_PROVIDERS = new Set([
-  "github", "github-releases", "github-security",
+  "github", "github-trending", "github-releases", "github-events", "github-security",
   "openai-news", "cloudflare-blog", "huggingface-blog",
   "producthunt", "hackernews-algolia",
   "reddit-v2",
+  "devto", "stackexchange",
 ]);
 
 /**
@@ -389,7 +390,11 @@ export class FinalPublisher {
       }
     }
 
+    // v12.1.3: Track whether we attempted sendPhoto (for fallback preview logic).
+    let attemptedSendPhoto = false;
+
     if (coverUrl) {
+      attemptedSendPhoto = true;
       try {
         const result = await this.deps.tg.sendPhoto(
           channel,
@@ -417,10 +422,18 @@ export class FinalPublisher {
       }
     }
 
-    // ── v11.8.0: Smart Link Preview ─────────────────────────
-    // Resolve preview options based on mode, image status, and provider.
+    // ── v12.1.3: Link Preview for text-only posts ──────────
+    // v12.1.3: When sendPhoto fails and we fall through to text-only,
+    // ALWAYS enable link preview (show_above_text) so the post has a
+    // visual element. Previously this was governed by smart mode which
+    // could disable preview for some providers — but a text-only post
+    // WITHOUT a preview looks bare.
     const previewMode = settings?.telegram?.linkPreviewMode ?? "smart";
-    const previewOpts = resolvePreviewOptions(previewMode, false, post.internalMetadata?.pluginId ?? "");
+    // v12.1.3: If we attempted sendPhoto but failed, force-enable preview.
+    const hadImageButFailed = attemptedSendPhoto;
+    const previewOpts = hadImageButFailed
+      ? { linkPreviewOptions: { is_disabled: false, show_above_text: true }, reason: "sendPhoto failed — force preview" }
+      : resolvePreviewOptions(previewMode, false, post.internalMetadata?.pluginId ?? "");
 
     this.deps.logger.info("pipeline.start", {
       stage: "link_preview",
@@ -431,7 +444,7 @@ export class FinalPublisher {
       reason: previewOpts.reason,
     });
 
-    // ── Text-only post (with smart preview) ─────────────────
+    // ── Text-only post (with link preview) ─────────────────
     const result = await this.deps.tg.sendMessage(channel, cleanText, {
       parse_mode: parseMode,
       link_preview_options: previewOpts.linkPreviewOptions,

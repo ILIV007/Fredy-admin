@@ -177,17 +177,41 @@ export function buildSystemPrompt(
   ].join("\n");
 }
 
-/** The user prompt — contains the raw source item to process. */
+/** The user prompt — contains the raw source item to process.
+ *  v12.1.3: Added provider-specific context tags (e.g., "Discovery of the Day" for github-events). */
 export function buildUserPrompt(
   sourceItem: { readonly title: string; readonly body: string; readonly url: string; readonly source: string },
   language: string,
 ): string {
+  // v12.1.3: Add context tag for specific providers.
+  let contextTag = "";
+  const source = sourceItem.source;
+  if (source === "github-events") {
+    const tags = ["Discovery of the Day", "Repo Spotlight", "Hidden Gem", "Trending Discovery", "Project of the Day"];
+    contextTag = `\nContext: This is a ${tags[Math.floor(Math.random() * tags.length)]} — a repository discovered from recent GitHub activity. In the headline or first paragraph, briefly mention WHY this repo is interesting (e.g., growing rapidly, new release, innovative approach).\n`;
+  } else if (source === "github-trending") {
+    contextTag = "\nContext: This is a trending GitHub repository — it's gaining stars rapidly right now.\n";
+  } else if (source === "github-releases") {
+    contextTag = "\nContext: This is a new release of a popular open-source project. Highlight what changed and why users should upgrade.\n";
+  } else if (source === "github-security") {
+    contextTag = "\nContext: This is a security advisory. Treat it seriously — mention affected versions and recommended actions.\n";
+  }
+
+  // v12.1.3: Length guidance based on category interest.
+  let lengthGuidance = "";
+  if (source === "github-releases" || source === "github-security" || source === "hackernews-algolia") {
+    lengthGuidance = "\nLength: This is high-interest content — write 3-5 paragraphs with full technical detail. Don't be brief.\n";
+  } else if (source === "github-events" || source === "github-trending") {
+    lengthGuidance = "\nLength: Write 3-4 paragraphs explaining what the project does, why it's interesting, and how to get started.\n";
+  }
+
   return [
     `Generate a Telegram post from this source item.`,
     ``,
     `Requested language: ${language}`,
     `Source: ${sourceItem.source}`,
-    ``,
+    contextTag,
+    lengthGuidance,
     `=== SOURCE ITEM ===`,
     `Title: ${sourceItem.title}`,
     `Body: ${sourceItem.body}`,

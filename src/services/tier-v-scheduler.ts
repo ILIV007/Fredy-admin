@@ -215,4 +215,25 @@ export class TierVScheduler {
     }
     return next;
   }
+
+  /** v12.1.3: Get published status for all Tier V entries (for dashboard).
+   * Returns a map of entryId → { published: boolean, publishedAt: number | null }. */
+  async getPublishedStatus(settings: FredySettings, now: number): Promise<Record<string, { published: boolean; publishedAt: number | null }>> {
+    const entries = settings.tierV?.entries ?? [];
+    const result: Record<string, { published: boolean; publishedAt: number | null }> = {};
+    const tz = settings.scheduler.timezone || "UTC";
+    const today = formatDateInZone(now, tz);
+
+    for (const entry of entries) {
+      const sentKey = `${TIER_V_SENT_PREFIX}:${today}:${entry.id}`;
+      const sentValue = await this.deps.container.kv.get(sentKey).catch(() => null);
+      if (sentValue) {
+        const publishedAt = Number(sentValue);
+        result[entry.id] = { published: true, publishedAt: Number.isFinite(publishedAt) ? publishedAt : null };
+      } else {
+        result[entry.id] = { published: false, publishedAt: null };
+      }
+    }
+    return result;
+  }
 }
