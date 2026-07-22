@@ -182,6 +182,12 @@ export class GitHubReleasesPlugin implements Plugin {
 
   normalize(raw: unknown): SourceItem {
     const release = raw as GHRelease;
+    // v12.0.10: Build GitHub social preview URL for the repo image.
+    // extractGithubRepo returns "owner/repo" — used for the social preview.
+    const repoName = this.extractGithubRepo(raw);
+    const imageUrl = repoName && repoName.includes("/")
+      ? `https://opengraph.githubassets.com/1/${repoName}`
+      : undefined;
     return {
       id: `rel-${release.repo ?? "unknown"}-${release.tag_name ?? ""}`,
       source: this.metadata.id,
@@ -189,6 +195,7 @@ export class GitHubReleasesPlugin implements Plugin {
       title: `${release.repo ?? ""} ${release.tag_name ?? ""}`.trim(),
       body: String(release.body ?? release.name ?? "").slice(0, 1000),
       url: String(release.html_url ?? ""),
+      imageUrl,
       language: "en",
       publishedAt: release.published_at ? Date.parse(release.published_at) || undefined : undefined,
       metadata: {
@@ -198,7 +205,7 @@ export class GitHubReleasesPlugin implements Plugin {
         prerelease: release.prerelease,
       },
             displayIcon: this.metadata.displayIcon ?? "🐙",
-      displaySource: this.extractGithubRepo(raw),
+      displaySource: repoName,
       fetchedAt: Date.now(),
     };
   }

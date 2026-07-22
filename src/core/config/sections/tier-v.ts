@@ -35,10 +35,10 @@ export const tierVSchema = z.object({
     {
       id: "nasa-apod",
       enabled: true,
-      time: "22:30",
+      time: "23:00",
       providerId: "nasa",
       category: "V",
-      description: "NASA Astronomy Picture of the Day — nightly at 22:30",
+      description: "NASA Astronomy Picture of the Day — nightly at 23:00",
     },
   ]),
 });
@@ -51,10 +51,10 @@ export const tierVDefaults: TierVConfig = {
     {
       id: "nasa-apod",
       enabled: true,
-      time: "22:30",
+      time: "23:00",
       providerId: "nasa",
       category: "V",
-      description: "NASA Astronomy Picture of the Day — nightly at 22:30",
+      description: "NASA Astronomy Picture of the Day — nightly at 23:00",
     },
   ],
 };

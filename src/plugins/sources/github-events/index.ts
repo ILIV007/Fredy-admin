@@ -251,6 +251,8 @@ export class GitHubEventsPlugin implements Plugin {
       title: repo.full_name,
       body: bodyParts.join("\n"),
       url: repo.html_url,
+      // v12.0.10: Add GitHub social preview image URL.
+      imageUrl: `https://opengraph.githubassets.com/1/${repo.full_name}`,
       language: "en",
       publishedAt: Date.parse(repo.pushed_at) || undefined,
       metadata: {
