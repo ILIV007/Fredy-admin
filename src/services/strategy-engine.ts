@@ -257,6 +257,19 @@ export class StrategyEngine {
     return this.generatePlan(targetDate);
   }
 
+  /** v12.1.1: Mark a planned post as "skipped" — used after plan regeneration
+   *  to prevent past slots from being fired by the scheduler. */
+  async markPostSkipped(date: string, postIndex: number): Promise<void> {
+    const plan = await this.getOrGeneratePlan(date);
+    const updatedPosts = plan.posts.map((p) =>
+      p.index === postIndex
+        ? { ...p, status: "skipped" as PlannedPostStatus }
+        : p,
+    );
+    const updatedPlan = { ...plan, posts: updatedPosts };
+    await this.savePlan(date, updatedPlan);
+  }
+
   /**
    * v11.2.0: Mark a planned post as "publishing" BEFORE the actual publish call.
    *

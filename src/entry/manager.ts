@@ -832,8 +832,10 @@ export async function managerHandler(
   // ── Strategy: regenerate plan ──
   if (apiPath === "strategy/regenerate" && request.method === "POST") {
     // v8.7.0: Clear BOTH plans (daily planner + strategy) + fired markers.
-    // Previously only cleared fredy:sched:slots but not fredy:strategy:plan,
-    // so the scheduler could still read the old plan.
+    // v12.1.1: CRITICAL FIX — don't clear fired markers! When regenerating
+    // mid-day, already-published slots must be preserved as "published" in
+    // the new plan. Previously, clearing fired markers caused the scheduler
+    // to re-fire ALL past slots (burst publishing + "window expired" errors).
     try {
       const { formatDateInZone } = await import("../primitives/time");
       const { slotsKey } = await import("../core/storage/keys");
@@ -843,13 +845,32 @@ export async function managerHandler(
       await container.kv.delete(slotsKey(today));
       // Clear strategy plan (fredy:strategy:plan:<date>).
       await container.kv.delete(`fredy:strategy:plan:${today}`);
-      // Clear all fired markers for today.
-      const firedKeys = await container.kv.list(`fredy:sched:sent:${today}:`);
-      for (const k of firedKeys) {
-        await container.kv.delete(k).catch(() => {});
-      }
+      // v12.1.1: DO NOT clear fired markers — they're needed to prevent re-firing.
     } catch {}
     const plan = await container.strategyEngine.generatePlan();
+
+    // v12.1.1: Mark past slots as "skipped" so the scheduler doesn't re-fire them.
+    // Only FUTURE slots remain "pending". This prevents the burst-publish bug.
+    try {
+      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
+      const tz = settings.scheduler.timezone || "UTC";
+      const nowInTz = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date());
+      const [nowH, nowM] = nowInTz.split(":").map(Number);
+      const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+      for (const post of plan.posts) {
+        const schedTime = post.scheduledTime ?? post.time;
+        const [sH, sM] = schedTime.split(":").map(Number);
+        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
+        if (schedMin < nowMinutes) {
+          // Past slot — mark as "skipped" so scheduler doesn't fire it.
+          await container.strategyEngine.markPostSkipped(plan.date, post.index).catch(() => {});
+        }
+      }
+    } catch { /* non-fatal */ }
+
     return json({ ok: true, plan });
   }
 
@@ -1097,6 +1118,39 @@ export async function managerHandler(
         const pubResult = await container.finalPublisher.publish(result.content);
         if (pubResult.ok) {
           await container.duplicateDetector.recordPublished(result.content).catch(() => {});
+          // v12.1.1: Send the exact same post to admin PM (was missing!)
+          const adminId = Number(env.ADMIN_ID ?? "0");
+          if (adminId > 0 && container.tg && pubResult.sentText) {
+            if (pubResult.sentMediaUrl) {
+              await container.tg.sendPhoto(adminId, pubResult.sentMediaUrl, pubResult.sentText, {
+                parse_mode: "HTML",
+              }).catch(() => {});
+            } else {
+              // v12.1.1: Add link preview for text-only posts
+              const previewMode = settings.telegram.linkPreviewMode ?? "smart";
+              const pluginId = result.content.pluginId ?? "";
+              const goodPreviewProviders = new Set(["github", "github-trending", "github-releases", "github-events", "devto", "hackernews-algolia", "cloudflare-blog", "huggingface-blog", "producthunt", "openai-news"]);
+              const previewOpts = previewMode === "disabled" ? { is_disabled: true }
+                : previewMode === "always" ? { is_disabled: false, show_above_text: true }
+                : goodPreviewProviders.has(pluginId) ? { is_disabled: false, show_above_text: true }
+                : { is_disabled: true };
+              await container.tg.sendMessage(adminId, pubResult.sentText, {
+                parse_mode: "HTML",
+                link_preview_options: previewOpts,
+              }).catch(() => {});
+            }
+            // Send summary report
+            await container.tg.sendMessage(adminId, [
+              ``,
+              `<b>━━━ ⚡ MANUAL PUBLISH ━━━</b>`,
+              ``,
+              ``,
+              `<blockquote>🔌 <b>Source:</b> ${result.content.pluginId}</blockquote>`,
+              `<blockquote>📰 <b>Headline:</b> ${result.content.headline ?? "(none)"}</blockquote>`,
+              `<blockquote>📤 <b>Channel Msg ID:</b> ${pubResult.telegramMessageId}</blockquote>`,
+              `<blockquote>⭐ <b>Quality:</b> ${result.content.quality.overallScore}/100</blockquote>`,
+            ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+          }
           return json({ ok: true, message: "Published (manual, not scheduled)", contentId: result.content.id });
         }
         return json({ ok: false, error: pubResult.error ?? "Publish failed" }, 500);
@@ -1406,19 +1460,27 @@ export async function managerHandler(
       const adminId = Number(env.ADMIN_ID ?? "0");
       if (adminId > 0) {
         if (pubResult.ok) {
-          // ── SUCCESS: send formatted post + success summary ──
-          try {
-            const finalPost = await container.uxLayer.transform(result.content);
-            if (finalPost.media && finalPost.media.type === "image" && finalPost.media.url) {
-              await container.tg.sendPhoto(adminId, finalPost.media.url, finalPost.caption, {
+          // v12.1.1: Send the EXACT same post that went to the channel (not a re-transform).
+          if (pubResult.sentText) {
+            if (pubResult.sentMediaUrl) {
+              await container.tg.sendPhoto(adminId, pubResult.sentMediaUrl, pubResult.sentText, {
                 parse_mode: "HTML",
               }).catch(() => {});
             } else {
-              await container.tg.sendMessage(adminId, finalPost.fullText, {
+              // v12.1.1: Add link preview for text-only posts
+              const previewMode = settings?.telegram?.linkPreviewMode ?? "smart";
+              const pluginId2 = result.content.pluginId ?? "";
+              const goodPrev = new Set(["github","github-trending","github-releases","github-events","devto","hackernews-algolia","cloudflare-blog","huggingface-blog","producthunt","openai-news"]);
+              const prevOpts = previewMode === "disabled" ? { is_disabled: true }
+                : previewMode === "always" ? { is_disabled: false, show_above_text: true }
+                : goodPrev.has(pluginId2) ? { is_disabled: false, show_above_text: true }
+                : { is_disabled: true };
+              await container.tg.sendMessage(adminId, pubResult.sentText, {
                 parse_mode: "HTML",
+                link_preview_options: prevOpts,
               }).catch(() => {});
             }
-          } catch { /* skip if transform fails */ }
+          }
           await container.tg.sendMessage(adminId, [
             ``,
             reportBanner("📤", `MANUAL PUBLISH — ${pluginId}`),
@@ -2416,20 +2478,19 @@ async function loadScheduler(){
   const d=await api("scheduler");const c=document.getElementById("content");
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.settings||{};const st=d.status||{};
-  // v12.0.6: Cache scheduler status for toggleScheduler() (avoids temporal dead zone bug).
   window._lastSchedStatus=st;
-  // v8.2.0: Fetch strategy plan too — unify with Strategy page's Daily Plan.
-  let stratPlan=null;
-  try{const sp=await api("strategy");if(sp.ok&&sp.plan){stratPlan=sp.plan;}}catch{}
-  // v8.2.0: Build Today Schedule table using strategy plan data (provider, priority, status)
-  // to match the Strategy page's Daily Plan table exactly.
+  // v12.1.2: Also fetch strategy plan for Tier V entries + daily plan.
+  let stratData=null;
+  try{stratData=await api("strategy");}catch{}
+  const stratPlan=stratData?.plan||null;
+  const tierVEntries=stratData?.tierVEntries||[];
+
   let scheduleHtml='';
   if(stratPlan&&stratPlan.posts&&stratPlan.posts.length>0){
-    // v12: Use strategy plan posts with Window | Scheduled | Status columns
-    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v12 Window / Scheduled</h3><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
+    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
     stratPlan.posts.map(p=>{
       const status=p.status||'pending';
-      const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>':status==='failed'?'<span class="badge badge-red">❌ Failed</span>':status==='backup'?'<span class="badge badge-blue">🔄 Backup</span>':status==='publishing'?'<span class="badge badge-yellow">🔄 Publishing</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>':status==='failed'?'<span class="badge badge-red">❌ Failed</span>':status==='backup'?'<span class="badge badge-blue">🔄 Backup</span>':status==='publishing'?'<span class="badge badge-yellow">🔄 Publishing</span>':status==='skipped'?'<span class="badge badge-gray">⏭️ Skipped</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
       const win=p.time+'-'+(p.windowEnd||p.time);
       const sched=p.scheduledTime||p.time;
       const schedStyle=status==='pending'?' style="color:var(--accent);font-weight:bold"':'';
@@ -2437,12 +2498,21 @@ async function loadScheduler(){
     }).join("")+
     '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time.</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+stratPlan.theme.dayName+' — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
   }else if(st.today&&st.today.slots&&st.today.slots.length>0){
-    // v12: Fallback table also shows Window + Scheduled
     scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule — v12 Window / Scheduled</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
-    st.today.slots.map((sl,i)=>{const ss=sl.status||'pending';const badge=ss==='published'?'<span class="badge badge-green">✅ Published</span>':ss==='failed'?'<span class="badge badge-red">❌ Failed</span>':'<span class="badge badge-yellow">⏳ Pending</span>';const win=sl.time+'-'+(sl.windowEnd||sl.time);const sched=sl.scheduledTime||sl.time;return '<tr><td>'+i+'</td><td style="color:var(--text2)">'+win+'</td><td style="color:var(--accent);font-weight:bold">'+sched+'</td><td>'+sl.category+'</td><td>'+badge+'</td></tr>';}).join("")+
+    st.today.slots.map((sl,i)=>{const ss=sl.status||'pending';const badge=ss==='published'?'<span class="badge badge-green">✅ Published</span>':ss==='failed'?'<span class="badge badge-red">❌ Failed</span>':ss==='skipped'?'<span class="badge badge-gray">⏭️ Skipped</span>':'<span class="badge badge-yellow">⏳ Pending</span>';const win=sl.time+'-'+(sl.windowEnd||sl.time);const sched=sl.scheduledTime||sl.time;return '<tr><td>'+i+'</td><td style="color:var(--text2)">'+win+'</td><td style="color:var(--accent);font-weight:bold">'+sched+'</td><td>'+sl.category+'</td><td>'+badge+'</td></tr>';}).join("")+
     '</tbody></table></div>';
   }else{
     scheduleHtml='<div class="card"><p style="color:var(--red)">⚠️ Could not generate today'+ "'" +'s plan. Check scheduler settings.</p></div>';
+  }
+
+  // v12.1.2: Tier V Scheduled Content section.
+  let tierVHtml='';
+  if(tierVEntries&&tierVEntries.length>0){
+    tierVHtml='<div class="card" style="border:1px solid #a855f7"><h3 style="margin-bottom:8px;color:#a855f7">🟣 Tier V — Scheduled Content (Fixed Schedule)</h3><p style="color:var(--text2);font-size:12px;margin-bottom:8px">Fixed-schedule posts — no random jitter, no category queue. Publishes at the exact configured time every day.</p><table style="font-size:12px"><thead><tr><th>ID</th><th>⏰ Time</th><th>Provider</th><th>Status</th><th>Description</th></tr></thead><tbody>';
+    for(const entry of tierVEntries){
+      tierVHtml+='<tr style="background:rgba(168,85,247,.05)"><td><code>'+escapeHtml(entry.id)+'</code></td><td style="color:#a855f7;font-weight:bold">'+escapeHtml(entry.time)+'</td><td>'+escapeHtml(entry.providerId)+'</td><td>'+(entry.enabled?'<span class="badge badge-green">Enabled</span>':'<span class="badge badge-red">Disabled</span>')+'</td><td style="color:var(--text2);font-size:11px">'+escapeHtml(entry.description||"")+'</td></tr>';
+    }
+    tierVHtml+='</tbody></table></div>';
   }
   // Also fetch recent history for post history table
   let historyHtml='';
@@ -2470,6 +2540,7 @@ async function loadScheduler(){
     '<div class="stat-pod"><span class="sp-icon">🔄</span><div class="sp-label">Refresh</div><div class="sp-val">'+(s.refreshIntervalMinutes??"120")+'min</div><div class="sp-sub">provider interval</div></div>'+
   '</div>'+
   scheduleHtml+
+  tierVHtml+
   '<div class="card"><h3 style="margin-bottom:8px">🪟 Posting Windows (v12)</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.postingWindows||[]).map(w=>'<span class="badge badge-blue">'+w.start+'–'+w.end+'</span>').join("")+'</div><div style="margin-top:8px;color:var(--text2);font-size:11px">Each window generates one random <code>scheduledTime</code> per day. The 20-min watcher fires on the first tick at or after it.</div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">🌙 Quiet Hours (v12.0.2 Zero-KV)</h3><div style="display:flex;align-items:center;gap:8px"><span class="badge '+(s.quietHours?"badge-yellow":"badge-gray")+'">'+(s.quietHours?.start??"00:00")+' – '+(s.quietHours?.end??"07:30")+'</span><span style="color:var(--text2);font-size:11px">Layer 1 sleeps with 0 KV operations during this period</span></div></div>'+
   '<div class="card"><h3 style="margin-bottom:8px">⚙️ Legacy Slots (for reference)</h3><div style="display:flex;flex-wrap:wrap;gap:6px">'+(s.slots||[]).map(t=>'<span class="badge badge-gray">'+t+"</span>").join("")+'</div><div style="margin-top:8px;color:var(--text2);font-size:11px">Legacy fixed slot times — superseded by posting windows in v12.</div></div>'+

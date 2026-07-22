@@ -86,6 +86,18 @@ export class SchedulerService {
     return err.includes("duplicate") || err.includes("already published");
   }
 
+  /** v12.1.1: Resolve link preview options for admin PM — mirrors FinalPublisher logic. */
+  private resolvePreviewOptionsForAdmin(mode: string, pluginId: string): Record<string, unknown> {
+    if (mode === "disabled") return { is_disabled: true };
+    if (mode === "always") return { is_disabled: false, show_above_text: true };
+    // smart mode — show preview for providers with good OpenGraph
+    const goodPreviewProviders = new Set(["github", "github-trending", "github-releases", "github-events", "devto", "hackernews-algolia", "cloudflare-blog", "huggingface-blog", "producthunt", "openai-news"]);
+    if (goodPreviewProviders.has(pluginId)) {
+      return { is_disabled: false, show_above_text: true };
+    }
+    return { is_disabled: true };
+  }
+
   /**
    * Tick — called by the cron handler every minute.
    * Checks for due slots and fires them.
@@ -333,7 +345,7 @@ export class SchedulerService {
       let alreadyFired = false;
       if (stratPlan) {
         const post = stratPlan.posts.find(p => p.index === slot.index);
-        if (post && (post.status === "published" || post.status === "failed" || post.status === "backup" || post.status === "publishing")) {
+        if (post && (post.status === "published" || post.status === "failed" || post.status === "backup" || post.status === "publishing" || post.status === "skipped")) {
           alreadyFired = true;
         }
       } else {
@@ -1012,8 +1024,14 @@ export class SchedulerService {
         }).catch(() => {});
       } else {
         // Text-only post — send the same text to admin PM.
+        // v12.1.1: Add link_preview_options so admin PM shows the same preview as the channel.
+        const settings = await this.deps.settings();
+        const previewMode = settings.telegram.linkPreviewMode ?? "smart";
+        const pluginId = content.pluginId ?? "";
+        const previewOpts = this.resolvePreviewOptionsForAdmin(previewMode, pluginId);
         await this.deps.tg.sendMessage(adminId, pubResult.sentText, {
           parse_mode: "HTML",
+          link_preview_options: previewOpts,
         }).catch(() => {});
       }
     }

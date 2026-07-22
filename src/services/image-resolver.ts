@@ -79,15 +79,13 @@ export class ImageResolver {
       const ghMatch = /github\.com\/([^/]+)\/([^/?#]+)/i.exec(item.url);
       if (ghMatch) {
         const socialUrl = `https://opengraph.githubassets.com/1/${ghMatch[1]}/${ghMatch[2]}`;
-        // v12.0.10: Validate the image is actually reachable (HEAD request).
-        // The opengraph.githubassets.com service has rate limits (100/req) and
-        // may return 404/429 for private/renamed repos. If it fails, fall through
-        // to og:image instead of sending a broken photo URL to Telegram.
-        if (await this.isImageReachable(socialUrl)) {
-          const result: ResolvedImage = { url: socialUrl, source: "github-social" };
-          await this.cacheResult(cacheKey, result);
-          return result;
-        }
+        // v12.1.2: Skip HEAD validation — it adds latency and the service is reliable.
+        // If sendPhoto fails, FinalPublisher falls back to text-only. The HEAD check
+        // was actually PREVENTING images from showing because it sometimes timed out
+        // or got rate-limited (429), causing the resolver to skip a valid image.
+        const result: ResolvedImage = { url: socialUrl, source: "github-social" };
+        await this.cacheResult(cacheKey, result);
+        return result;
       }
     }
 
@@ -226,26 +224,6 @@ export class ImageResolver {
     // Reject non-image formats.
     if (lower.match(/\.(ico|gif|svg|bmp|tiff|html?|php|asp|jsp)$/)) return false;
     return true;
-  }
-
-  /** v12.0.10: Check if an image URL is actually reachable (HEAD request).
-   *  Returns true only if the server responds 200. This prevents sending
-   *  broken image URLs to Telegram sendPhoto (which fails and falls back
-   *  to text-only). Timeout: 5s. */
-  private async isImageReachable(url: string): Promise<boolean> {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(url, {
-        method: "HEAD",
-        signal: controller.signal,
-        headers: { "User-Agent": "FredyBot/1.0" },
-      });
-      clearTimeout(timeout);
-      return res.ok;
-    } catch {
-      return false;
-    }
   }
 
   /** Resolve relative URLs against the page URL. */
