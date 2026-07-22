@@ -137,13 +137,43 @@ export class StrategyEngine {
     );
 
     // 5. Assign categories + providers + priorities.
-    // v9.3.2: Do NOT mark past slots as "failed" on generation — let the
-    // scheduler's findDueSlot() handle them with the grace period. Marking
-    // them as "failed" here prevented the scheduler from ever firing them,
-    // causing all past slots to be silently skipped when a plan was
-    // regenerated mid-day.
+    // v12.0.13: Track used providers to enforce MAX_PROVIDER_REPEAT (2/day).
+    // Also designate ONE slot as "wildcard" — a fully random post from ALL
+    // active APIs regardless of category, for maximum variety.
+    const usedProviders = new Map<string, number>();
+
+    // v12.0.13: Pick a random slot index for the "wildcard" post.
+    // This slot will use a random provider from ALL categories, not just
+    // its assigned category — ensuring diverse content.
+    const wildcardSlotIndex = slots.length > 0 ? randomInt(0, slots.length - 1) : -1;
+
     const posts: PlannedPost[] = slots.map((slot, index) => {
-      const provider = this.selectProvider(slot.category, theme);
+      // v12.0.13: Wildcard slot — pick from ALL active providers for variety.
+      let provider: string | null;
+      let slotCategory = slot.category;
+
+      if (index === wildcardSlotIndex) {
+        // Wildcard: pick from ALL enabled providers across all categories.
+        const allProviders: string[] = [
+          ...(CATEGORY_PROVIDERS["A"] ?? []),
+          ...(CATEGORY_PROVIDERS["B"] ?? []),
+          ...(CATEGORY_PROVIDERS["C"] ?? []),
+        ].filter((id) => this.deps.pluginManager.isEnabled(id));
+        // Exclude providers already used 2x.
+        const available = allProviders.filter(
+          (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
+        );
+        const pool = available.length > 0 ? available : allProviders;
+        provider = pool.length > 0 ? pool[randomInt(0, pool.length - 1)]! : null;
+      } else {
+        provider = this.selectProvider(slot.category, theme, usedProviders);
+      }
+
+      // Track usage.
+      if (provider) {
+        usedProviders.set(provider, (usedProviders.get(provider) ?? 0) + 1);
+      }
+
       const priority = this.assignPriority(slot.category, strategy.mode);
       return {
         id: `plan-${targetDate}-${index}`,
@@ -151,9 +181,9 @@ export class StrategyEngine {
         date: targetDate,
         time: slot.time,
         windowEnd: slot.windowEnd ?? slot.time,
-        scheduledTime: slot.scheduledTime,  // v11.17.0: display-only random time
+        scheduledTime: slot.scheduledTime,
         epochMs: slot.epochMs,
-        category: slot.category,
+        category: slotCategory,
         provider,
         strategy: strategy.mode,
         language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,
@@ -328,25 +358,38 @@ export class StrategyEngine {
 
   /**
    * Select a provider for a category, influenced by the weekly theme.
-   * If the theme has topics that match a provider's keywords, that
-   * provider is preferred. Otherwise, a random provider is selected.
    *
    * v11.7.1: CRITICAL FIX — filters out DISABLED providers.
-   * v12.0.11: CRITICAL FIX — theme matching was too loose. The old check
-   *   `topic.includes(providerLower)` caused "github security" to match
-   *   "github" (because "github security" contains "github"), selecting the
-   *   wrong provider. Now uses exact token matching: checks if the provider
-   *   ID contains the FULL topic as a substring (e.g., "github-security"
-   *   contains "security"), NOT the reverse. Also requires the topic to be
-   *   at least 4 chars to avoid false positives with short words like "AI".
+   * v12.0.11: Fixed theme matching (provider ID must contain topic keyword).
+   * v12.0.13: MAX_PROVIDER_REPEAT = 2 — no provider appears more than twice
+   *   per day. If a provider has already been used 2x, it's excluded from
+   *   selection. This ensures variety even on themed days.
+   *
+   * @param category — the slot's category (A/B/C)
+   * @param theme — the weekly theme for today (null = no theme)
+   * @param usedProviders — map of providerId → count already assigned today
    */
-  private selectProvider(category: Category, theme: DailyTheme | null): string | null {
+  private static readonly MAX_PROVIDER_REPEAT = 2;
+
+  private selectProvider(
+    category: Category,
+    theme: DailyTheme | null,
+    usedProviders: Map<string, number> = new Map(),
+  ): string | null {
     const allProviders = CATEGORY_PROVIDERS[category];
     if (!allProviders || allProviders.length === 0) return null;
 
     // v11.7.1: Filter to only ENABLED providers.
-    const providers = allProviders.filter((id) => this.deps.pluginManager.isEnabled(id));
+    let providers = allProviders.filter((id) => this.deps.pluginManager.isEnabled(id));
     if (providers.length === 0) return null;
+
+    // v12.0.13: Exclude providers that have already been used MAX_PROVIDER_REPEAT times.
+    const availableProviders = providers.filter(
+      (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
+    );
+
+    // If all providers are exhausted (used 2x each), reset and allow all.
+    providers = availableProviders.length > 0 ? availableProviders : providers;
 
     // If no theme, pick random.
     if (!theme || theme.topics.length === 0) {
@@ -354,7 +397,6 @@ export class StrategyEngine {
     }
 
     // v12.0.11: Theme matching — provider ID must CONTAIN the topic keyword.
-    // Filter topics to meaningful ones (>= 4 chars) to avoid false positives.
     const themeTopicsLower = theme.topics
       .map((t) => t.toLowerCase())
       .filter((t) => t.length >= 4);
@@ -367,7 +409,6 @@ export class StrategyEngine {
       });
 
       if (matchedProviders.length > 0) {
-        // Pick a random matched provider (variety within the theme).
         return matchedProviders[randomInt(0, matchedProviders.length - 1)]!;
       }
     }

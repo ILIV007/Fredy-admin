@@ -11,7 +11,7 @@ export const nasaManifest: PluginManifest = {
   version: "1.1.0",
   enabled: true,
   category: "C",
-  tier: "S",
+  tier: "V", // v12.0.9: moved from S to V (scheduled content)
   priority: 1,
   rateLimit: 1000,
   supportsImages: true,
