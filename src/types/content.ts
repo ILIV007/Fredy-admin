@@ -127,6 +127,9 @@ export interface ReadyContent {
 
   /** When the item was originally fetched. */
   readonly fetchedAt: number;
+
+  /** v12.1.6: Original source item (for dedup canonical ID extraction). */
+  readonly raw?: SourceItem;
 }
 
 // ────────────────────────────────────────────────────────────

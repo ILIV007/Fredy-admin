@@ -117,13 +117,15 @@ export class DuplicateDetector {
     });
   }
 
-  /** v9.3.1: Record a ReadyContent after successful publish. */
+  /** v9.3.1: Record a ReadyContent after successful publish.
+   *  v12.1.6: Accept optional raw SourceItem for canonical ID extraction. */
   async recordPublished(content: {
     readonly id: string;
     readonly pluginId: string;
     readonly headline: string | null;
     readonly text: string;
     readonly sourceUrl: string;
+    readonly raw?: unknown;
   }): Promise<void> {
     await this.recordInternal({
       id: content.id,
@@ -132,7 +134,7 @@ export class DuplicateDetector {
       title: content.headline ?? content.id,
       body: "",
       source: content.pluginId,
-      raw: null,
+      raw: (content.raw as SourceItem | null) ?? null,
     });
   }
 
@@ -334,11 +336,17 @@ export class DuplicateDetector {
   // ─── Layer 2: Normalized URL ────────────────────────────
 
   /**
-   * v11.13.0: Normalize URL for dedup.
+   * v12.1.6: Normalize URL for dedup.
    * - Remove trailing slash
-   * - Remove query parameters (except essential ones)
-   * - Lowercase hostname
    * - Remove www. prefix
+   * - Lowercase hostname
+   * - KEEP query parameters (many providers use them for unique IDs:
+   *   HN: ?id=12345, NASA: ?date=2024-01-01, etc.)
+   * - Only strip known tracking params (utm_*, fbclid, gclid, ref, source)
+   *
+   * CRITICAL: v11.13.0 stripped ALL query params, causing HN URLs to all
+   * normalize to "https://news.ycombinator.com/item" — every HN post matched
+   * every other HN post in the URL dedup layer, causing massive false positives.
    */
   private normalizeUrl(url: string): string | null {
     if (!url || url.length < 10) return null;
@@ -354,8 +362,18 @@ export class DuplicateDetector {
       if (hostname.startsWith("www.")) {
         hostname = hostname.slice(4);
       }
-      // Reconstruct without query params (most are tracking).
-      return `${parsed.protocol}//${hostname}${pathname}`;
+      // v12.1.6: Keep query params but strip known tracking params.
+      const TRACKING_PARAMS = new Set([
+        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+        "fbclid", "gclid", "ref", "source", "mc_cid", "mc_eid",
+      ]);
+      const searchParams = new URLSearchParams(parsed.searchParams);
+      for (const key of TRACKING_PARAMS) {
+        searchParams.delete(key);
+      }
+      const queryString = searchParams.toString();
+      const search = queryString ? `?${queryString}` : "";
+      return `${parsed.protocol}//${hostname}${pathname}${search}`;
     } catch {
       return null;
     }
@@ -406,5 +424,121 @@ export class DuplicateDetector {
   async clear(): Promise<void> {
     const keys = await this.deps.kv.list("fredy:dedup:");
     await Promise.all(keys.map((k) => this.deps.kv.delete(k)));
+  }
+
+  /** v12.1.7: Audit dedup KV records — find malformed/corrupted entries.
+   *  Returns a report of all dedup keys, categorized by type and validity. */
+  async audit(): Promise<{
+    total: number;
+    canonical: number;
+    url: number;
+    hash: number;
+    malformed: number;
+    expired: number;
+    samples: Array<{ key: string; type: string; valid: boolean; issue?: string }>;
+  }> {
+    const keys = await this.deps.kv.list("fredy:dedup:");
+    const now = Date.now();
+    let canonical = 0, url = 0, hash = 0, malformed = 0, expired = 0;
+    const samples: Array<{ key: string; type: string; valid: boolean; issue?: string }> = [];
+
+    for (const key of keys) {
+      const record = await this.deps.kv.getJson<DedupRecord>(key).catch(() => null);
+      if (!record) {
+        malformed++;
+        if (samples.length < 10) samples.push({ key, type: "unknown", valid: false, issue: "unreadable JSON" });
+        continue;
+      }
+
+      // Categorize by key prefix.
+      let type = "hash";
+      if (key.startsWith("fredy:dedup:canonical:")) { type = "canonical"; canonical++; }
+      else if (key.startsWith("fredy:dedup:url:")) { type = "url"; url++; }
+      else { hash++; }
+
+      // Check validity.
+      let valid = true;
+      let issue: string | undefined;
+      if (!record.contentId) { valid = false; issue = "missing contentId"; malformed++; }
+      if (!record.pluginId) { valid = false; issue = "missing pluginId"; }
+      if (record.expiresAt && record.expiresAt < now) { expired++; issue = "expired"; }
+
+      if (!valid && samples.length < 20) {
+        samples.push({ key, type, valid, issue });
+      }
+    }
+
+    return { total: keys.length, canonical, url, hash, malformed, expired, samples };
+  }
+
+  /** v12.1.7: Clean old malformed dedup records (those with "[object Promise]" in key). */
+  async cleanMalformed(): Promise<{ deleted: number }> {
+    const keys = await this.deps.kv.list("fredy:dedup:");
+    let deleted = 0;
+    for (const key of keys) {
+      // Old v12.0.0 bug: sha1() wasn't awaited → key was "fredy:dedup:url:[object Promise]"
+      if (key.includes("[object Promise]") || key.includes("undefined") || key.includes("null")) {
+        await this.deps.kv.delete(key).catch(() => {});
+        deleted++;
+      }
+      // Old v11.13.0 bug: URL normalization stripped query params → HN URLs all shared same key
+      // These are now stale (v12.1.6 fix means new records use correct URLs)
+      // We can't distinguish them programmatically, so we leave them to expire via TTL.
+    }
+    return { deleted };
+  }
+
+  /** v12.1.7: Diagnostic — check a specific item and return detailed dedup info. */
+  async diagnose(item: SourceItem | ContentItem): Promise<{
+    canonicalId: string | null;
+    normalizedUrl: string | null;
+    contentHash: string | null;
+    urlHash: string | null;
+    canonicalMatch: DedupRecord | null;
+    urlMatch: DedupRecord | null;
+    hashMatch: DedupRecord | null;
+    isDuplicate: boolean;
+    duplicateReason: string | null;
+    duplicateLayer: string | null;
+  }> {
+    const canonicalId = this.extractCanonicalId(item);
+    const normalizedUrl = this.normalizeUrl(item.url);
+    const contentHash = await this.computeContentHash(item);
+    const urlHash = normalizedUrl ? await sha1(normalizedUrl) : null;
+
+    const canonicalMatch = canonicalId ? await this.findByCanonicalId(canonicalId) : null;
+    const urlMatch = normalizedUrl ? await this.findByUrl(normalizedUrl) : null;
+    const hashMatch = await this.findByHash(contentHash);
+
+    let isDuplicate = false;
+    let duplicateReason: string | null = null;
+    let duplicateLayer: string | null = null;
+
+    if (canonicalMatch) {
+      isDuplicate = true;
+      duplicateReason = `canonical ID "${canonicalId}" matched existing "${canonicalMatch.contentId}"`;
+      duplicateLayer = "canonical";
+    } else if (urlMatch) {
+      isDuplicate = true;
+      duplicateReason = `URL hash matched existing "${urlMatch.contentId}" (normalized URL: ${normalizedUrl})`;
+      duplicateLayer = "url";
+    } else if (hashMatch) {
+      isDuplicate = true;
+      duplicateReason = `content hash matched existing "${hashMatch.contentId}" (hash: ${contentHash})`;
+      duplicateLayer = "hash";
+    }
+
+    return {
+      canonicalId,
+      normalizedUrl,
+      contentHash,
+      urlHash,
+      canonicalMatch,
+      urlMatch,
+      hashMatch,
+      isDuplicate,
+      duplicateReason,
+      duplicateLayer,
+    };
   }
 }

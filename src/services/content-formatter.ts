@@ -107,6 +107,7 @@ export class ContentFormatter {
       estimatedCost,
       processedAt: Date.now(),
       fetchedAt: item.fetchedAt,
+      raw: item.raw, // v12.1.6: Carry raw SourceItem for dedup canonical ID extraction
     };
   }
 

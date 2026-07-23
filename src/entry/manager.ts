@@ -1192,6 +1192,46 @@ export async function managerHandler(
   // ── Clear actions ──
   if (apiPath === "clear/logs" && request.method === "POST") { await container.debug.clearLogs(); return json({ ok: true }); }
   if (apiPath === "clear/dedup" && request.method === "POST") { await container.duplicateDetector.clear(); return json({ ok: true }); }
+
+  // v12.1.7: Dedup audit — inspect KV dedup records
+  if (apiPath === "dedup/audit" && request.method === "GET") {
+    try {
+      const audit = await container.duplicateDetector.audit();
+      return json({ ok: true, audit });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
+  // v12.1.7: Clean malformed dedup records
+  if (apiPath === "dedup/clean" && request.method === "POST") {
+    try {
+      const result = await container.duplicateDetector.cleanMalformed();
+      return json({ ok: true, deleted: result.deleted });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
+
+  // v12.1.7: Dedup diagnose — check a specific URL
+  if (apiPath === "dedup/diagnose" && request.method === "POST") {
+    try {
+      const body = await request.json().catch(() => ({})) as { url?: string; pluginId?: string };
+      if (!body.url) return json({ ok: false, error: "Missing url" }, 400);
+      const result = await container.duplicateDetector.diagnose({
+        id: "diagnose-test",
+        source: body.pluginId ?? "",
+        category: "A" as const,
+        title: "",
+        body: "",
+        url: body.url,
+        fetchedAt: Date.now(),
+      } as unknown as import("../types/api").SourceItem);
+      return json({ ok: true, diagnose: result });
+    } catch (error) {
+      return json({ ok: false, error: errMsg(error) }, 500);
+    }
+  }
   if (apiPath === "clear/queue" && request.method === "POST") { await container.queue.clearAll(); return json({ ok: true }); }
 
   // ── Toggle bot enabled ──
@@ -2889,7 +2929,63 @@ async function loadDebug(){
   '<div class="card"><h3 style="margin-bottom:8px">Runtime Config</h3>'+preWithCopy("rt-cfg",JSON.stringify(r,null,2))+'</div>'+
   (d.tickLog?'<div class="card"><h3 style="margin-bottom:8px">Last Tick Log</h3>'+preWithCopy("tick-log",JSON.stringify(d.tickLog,null,2))+'</div>':'')+
   (d.pipelineLog?'<div class="card"><h3 style="margin-bottom:8px">Last Pipeline Log</h3>'+preWithCopy("pipe-log",JSON.stringify(d.pipelineLog,null,2))+'</div>':'')+
-  '<div class="card"><h3 style="margin-bottom:8px">Secrets Status</h3>'+Object.entries(d.secrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>';
+  '<div class="card"><h3 style="margin-bottom:8px">Secrets Status</h3>'+Object.entries(d.secrets||{}).map(([k,v])=>'<span class="badge '+(v?"badge-green":"badge-red")+'" style="margin:2px">'+k+": "+(v?"✓":"✗")+"</span>").join(" ")+'</div>'+
+  '<div class="card" style="border:1px solid var(--accent)"><h3 style="margin-bottom:8px">🔍 Dedup Diagnostics (v12.1.7)</h3>'+
+  '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+  '<button class="btn btn-sm" onclick="dedupAudit()">📊 Audit KV</button>'+
+  '<button class="btn btn-sm btn-ghost" onclick="dedupClean()">🧹 Clean Malformed</button>'+
+  '<button class="btn btn-sm btn-danger" onclick="clearDedup()">⚠️ Clear All Dedup</button>'+
+  '</div>'+
+  '<div style="margin-bottom:8px"><input type="text" id="dedup-url" placeholder="Enter URL to diagnose..." style="width:70%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px">'+
+  '<input type="text" id="dedup-plugin" placeholder="pluginId" style="width:20%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:6px;margin-left:4px">'+
+  '<button class="btn btn-sm" onclick="dedupDiagnose()" style="margin-left:4px">🔍 Diagnose</button></div>'+
+  '<div id="dedup-result"></div></div>';
+}
+async function dedupAudit(){
+  const el=document.getElementById("dedup-result");
+  if(el)el.innerHTML='<div class="card">⏳ Auditing KV dedup records...</div>';
+  const d=await api("dedup/audit");
+  if(el)el.innerHTML='<div class="card"><h4>Dedup KV Audit</h4><div class="card-grid">'+
+    card("Total Records",d.audit.total)+
+    card("Canonical",d.audit.canonical)+
+    card("URL",d.audit.url)+
+    card("Hash",d.audit.hash)+
+    card("Malformed",'<span style="color:'+(d.audit.malformed>0?'var(--red)':'var(--green)')+'">'+d.audit.malformed+'</span>')+
+    card("Expired",d.audit.expired)+
+    '</div>'+(d.audit.samples&&d.audit.samples.length>0?'<h4 style="margin-top:12px">Malformed Samples</h4><pre>'+escapeHtml(JSON.stringify(d.audit.samples,null,2))+'</pre>':'<p style="color:var(--green);margin-top:8px">✅ No malformed records found</p>')+'</div>';
+  toast(d.ok?"✅ Audit complete":"❌ Audit failed");
+}
+async function dedupClean(){
+  if(!confirm("Clean malformed dedup records? This removes entries with [object Promise] or undefined keys."))return;
+  const d=await api("dedup/clean","POST");
+  toast(d.ok?"✅ Cleaned "+d.deleted+" malformed records":"❌ Clean failed");
+  dedupAudit();
+}
+async function dedupDiagnose(){
+  const url=document.getElementById("dedup-url").value.trim();
+  const pluginId=document.getElementById("dedup-plugin").value.trim();
+  if(!url){toast("❌ Enter a URL");return;}
+  const el=document.getElementById("dedup-result");
+  if(el)el.innerHTML='<div class="card">⏳ Diagnosing...</div>';
+  const d=await api("dedup/diagnose","POST",{url,pluginId});
+  if(d.ok&&d.diagnose){
+    const dg=d.diagnose;
+    const dupColor=dg.isDuplicate?'var(--red)':'var(--green)';
+    if(el)el.innerHTML='<div class="card"><h4>Dedup Diagnosis</h4><div class="card-grid">'+
+      card("Is Duplicate",'<span style="color:'+dupColor+';font-weight:bold">'+(dg.isDuplicate?'YES ❌':'NO ✅')+'</span>')+
+      card("Duplicate Layer",dg.duplicateLayer||'—')+
+      card("Canonical ID",dg.canonicalId||'<span style="color:var(--text2)">null</span>')+
+      card("Normalized URL",escapeHtml(dg.normalizedUrl||'null'))+
+      card("URL Hash",dg.urlHash?dg.urlHash.slice(0,16)+'...':'null')+
+      card("Content Hash",dg.contentHash?dg.contentHash.slice(0,16)+'...':'null')+
+      '</div>'+(dg.duplicateReason?'<div style="margin-top:8px;padding:8px;background:rgba(239,68,68,.1);border-radius:6px;color:var(--red);font-size:12px"><b>Reason:</b> '+escapeHtml(dg.duplicateReason)+'</div>':'')+
+      (dg.canonicalMatch?'<div style="margin-top:8px"><b>Canonical Match:</b><pre style="font-size:10px">'+escapeHtml(JSON.stringify(dg.canonicalMatch,null,2))+'</pre></div>':'')+
+      (dg.urlMatch?'<div style="margin-top:8px"><b>URL Match:</b><pre style="font-size:10px">'+escapeHtml(JSON.stringify(dg.urlMatch,null,2))+'</pre></div>':'')+
+      (dg.hashMatch?'<div style="margin-top:8px"><b>Hash Match:</b><pre style="font-size:10px">'+escapeHtml(JSON.stringify(dg.hashMatch,null,2))+'</pre></div>':'')+
+      '</div>';
+  } else {
+    if(el)el.innerHTML='<div class="card">❌ Diagnosis failed: '+(d.error||'unknown')+'</div>';
+  }
 }
 
 async function loadSettings(){
