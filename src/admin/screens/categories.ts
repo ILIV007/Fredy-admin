@@ -39,6 +39,14 @@ export const categoriesScreen: Screen = {
       kv("Weight", c.C.weight),
       kv("Fallback", c.C.fallback),
       "",
+      // v13.0.2: Added Category H display.
+      header("Category H — Hardware Headlines (v13)", "🔧"),
+      kv("Enabled", statusBadge(c.H?.enabled ?? false)),
+      kv("Daily limit", c.H?.dailyLimit ?? 4),
+      kv("Priority", c.H?.priority ?? 2),
+      kv("Weight", c.H?.weight ?? 30),
+      kv("Fallback", c.H?.fallback ?? "retry"),
+      "",
       header("Rotation", "🔄"),
       kv("Order", c.rotationOrder.join(" → ")),
       kv("Allow same twice", statusBadge(c.allowSameCategoryTwice)),
@@ -63,6 +71,11 @@ export const categoriesScreen: Screen = {
       [toggleButton("C enabled", c.C.enabled, "set:categories:C:toggle")],
       stepperRow("C limit", c.C.dailyLimit, "set:categories:C:limit:dec", "set:categories:C:limit:inc"),
       stepperRow("C weight", c.C.weight, "set:categories:C:weight:dec", "set:categories:C:weight:inc"),
+      // v13.0.2: Category H keyboard controls.
+      [labelButton("─── Category H (v13) ───")],
+      [toggleButton("H enabled", c.H?.enabled ?? false, "set:categories:H:toggle")],
+      stepperRow("H limit", c.H?.dailyLimit ?? 4, "set:categories:H:limit:dec", "set:categories:H:limit:inc"),
+      stepperRow("H weight", c.H?.weight ?? 30, "set:categories:H:weight:dec", "set:categories:H:weight:inc"),
       [labelButton("─── Rotation ───")],
       [toggleButton("Same twice", c.allowSameCategoryTwice, "set:categories:sameTwice:toggle")],
     ]);

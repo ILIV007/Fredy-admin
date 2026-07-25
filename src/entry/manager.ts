@@ -2122,14 +2122,17 @@ async function loadPost(){
   if(!d.ok){c.innerHTML='<div class="card">Error loading plugins</div>';return;}
   const enabledPlugins=d.plugins.filter(p=>p.enabled);
   // v12.0.11: Group by tier — includes Tier V (scheduled content)
+  // v13.0.2: Added Tier H (Hardware & Technology Headlines)
   const tierS=enabledPlugins.filter(p=>p.tier==="S");
   const tierA=enabledPlugins.filter(p=>p.tier==="A");
   const tierB=enabledPlugins.filter(p=>p.tier==="B");
+  const tierH=enabledPlugins.filter(p=>p.tier==="H");
   const tierV=enabledPlugins.filter(p=>p.tier==="V");
 
   function pluginCard(p){
-    const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":p.tier==="V"?"#a855f7":"var(--text2)";
-    const tierEmoji=p.tier==="S"?"🥇":p.tier==="A"?"🥈":p.tier==="V"?"🟣":"🥉";
+    // v13.0.2: Added Tier H color (#14b8a6 teal) + emoji (🔧).
+    const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":p.tier==="H"?"#14b8a6":p.tier==="V"?"#a855f7":"var(--text2)";
+    const tierEmoji=p.tier==="S"?"🥇":p.tier==="A"?"🥈":p.tier==="H"?"🔧":p.tier==="V"?"🟣":"🥉";
     return '<div class="post-card" data-tier-color="'+tierColor+'" onclick="postToChannel('+ "'" +p.id+ "'" +')">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
         '<span style="font-weight:600;font-size:13px">'+tierEmoji+' '+p.name+'</span>'+
@@ -2158,6 +2161,9 @@ async function loadPost(){
   }
   if(tierB.length>0){
     html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🥉</span><h4 style="margin:0;color:var(--text2)">Tier B — Supporting ('+tierB.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierB.map(pluginCard).join("")+'</div></div>';
+  }
+  if(tierH.length>0){
+    html+='<div class="card" style="border:1px solid #14b8a6"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🔧</span><h4 style="margin:0;color:#14b8a6">Tier H — Hardware Headlines ('+tierH.length+') · v13.0.0</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierH.map(pluginCard).join("")+'</div></div>';
   }
   if(tierV.length>0){
     html+='<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:16px">🟣</span><h4 style="margin:0;color:#a855f7">Tier V — Scheduled ('+tierV.length+')</h4></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+tierV.map(pluginCard).join("")+'</div></div>';
@@ -2539,8 +2545,10 @@ async function loadScheduler(){
     // (showPostError), skipped badge, and 🔬 Debug button. Same header emoji
     // (📅) and same column order as the Strategy screen so the two views are
     // always identical.
-    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
-    stratPlan.posts.map(p=>{
+    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v13 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
+    // v13.0.2: Sort posts by scheduledTime so H slots are interleaved with A/B/C
+    // (was: H slots appended at end, breaking chronological order).
+    [...stratPlan.posts].sort((a,b)=>{const ta=(a.scheduledTime||a.time)||'';const tb=(b.scheduledTime||b.time)||'';return ta.localeCompare(tb);}).map(p=>{
       const status=p.status||'pending';
       const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>'
         :status==='failed'?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>'
@@ -2553,7 +2561,7 @@ async function loadScheduler(){
       const schedStyle=status==='pending'?' style="color:var(--accent);font-weight:bold"':'';
       return '<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+statusBadge+'</td></tr>';
     }).join("")+
-    '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day).</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">📅 Today Theme: <b>'+stratPlan.theme.dayName+'</b> — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
+    '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within window (v13 EXACT trigger). 20-min watcher fires on first tick ≥ this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day) OR 2/day cap reached. <b>Cat H</b> = Tier H hardware posts (additive, v13.0.0). Posts sorted by scheduledTime.</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">📅 Today Theme: <b>'+stratPlan.theme.dayName+'</b> — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
   }else if(st.today&&st.today.slots&&st.today.slots.length>0){
     scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule — v12 Window / Scheduled</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
     st.today.slots.map((sl,i)=>{const ss=sl.status||'pending';const badge=ss==='published'?'<span class="badge badge-green">✅ Published</span>':ss==='failed'?'<span class="badge badge-red">❌ Failed</span>':ss==='skipped'?'<span class="badge badge-gray">⏭️ Skipped</span>':'<span class="badge badge-yellow">⏳ Pending</span>';const win=sl.time+'-'+(sl.windowEnd||sl.time);const sched=sl.scheduledTime||sl.time;return '<tr><td>'+i+'</td><td style="color:var(--text2)">'+win+'</td><td style="color:var(--accent);font-weight:bold">'+sched+'</td><td>'+sl.category+'</td><td>'+badge+'</td></tr>';}).join("")+
@@ -2865,11 +2873,13 @@ async function loadStrategy(){
   // same status badges (including ⏭️ Skipped), same button set (Fire Next +
   // Regenerate + Debug). Both tables must always render identically so the
   // admin sees a consistent view regardless of which page they're on.
-  html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+plan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div>';
+  html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+plan.date+') — v13 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div>';
 
   if(plan.posts&&plan.posts.length>0){
     html+='<table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
-    for(const p of plan.posts){
+    // v13.0.2: Sort posts by scheduledTime so H slots are interleaved with A/B/C.
+    const sortedPosts=[...plan.posts].sort((a,b)=>{const ta=(a.scheduledTime||a.time)||'';const tb=(b.scheduledTime||b.time)||'';return ta.localeCompare(tb);});
+    for(const p of sortedPosts){
       const st=p.status||"pending";
       // v12.3.1: Same badge set as the Scheduler screen — includes "skipped".
       const badge=st==="published"?'<span class="badge badge-green">✅ Published</span>'
@@ -2884,7 +2894,7 @@ async function loadStrategy(){
       html+='<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';
     }
     html+='</tbody></table>';
-    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day).</div>';
+    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within window (v13 EXACT trigger). 20-min watcher fires on first tick ≥ this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme OR 2/day cap reached. <b>Cat H</b> = Tier H hardware posts (additive, v13.0.0). Posts sorted by scheduledTime.</div>';
   } else {
     html+='<p>No plan generated yet.</p>';
   }

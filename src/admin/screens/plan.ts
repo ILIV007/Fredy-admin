@@ -78,7 +78,13 @@ export const planScreen: Screen = {
       html += `\n`;
 
       // v12: Show Window | Scheduled | Cat | Provider per slot
-      for (const post of plan.posts) {
+      // v13.0.2: Sort by scheduledTime so H slots are interleaved with A/B/C.
+      const sortedPosts = [...plan.posts].sort((a, b) => {
+        const ta = (a.scheduledTime ?? a.time) || "";
+        const tb = (b.scheduledTime ?? b.time) || "";
+        return ta.localeCompare(tb);
+      });
+      for (const post of sortedPosts) {
         const schedTime = post.scheduledTime ?? post.time;
         const [sH, sM] = schedTime.split(":").map(Number);
         const schedMin = (sH ?? 0) * 60 + (sM ?? 0);

@@ -31,6 +31,7 @@ export const statsScreen: Screen = {
       kv("A published", state.today.categoriesPublished.A),
       kv("B published", state.today.categoriesPublished.B),
       kv("C published", state.today.categoriesPublished.C),
+      kv("H published", state.today.categoriesPublished.H ?? 0),
       "",
       header("Last", "⏱️"),
       kv("Published", formatRelativeTime(state.lastPublishedAt)),

@@ -27,7 +27,7 @@ export const statsCommand: Command = {
       "<b>Today:</b>",
       `  Date: ${state.today.date}`,
       `  Slots fired: ${state.today.slotsFired.length}`,
-      `  A: ${state.today.categoriesPublished.A} | B: ${state.today.categoriesPublished.B} | C: ${state.today.categoriesPublished.C}`,
+      `  A: ${state.today.categoriesPublished.A} | B: ${state.today.categoriesPublished.B} | C: ${state.today.categoriesPublished.C} | H: ${state.today.categoriesPublished.H ?? 0}`,
       "",
       "<b>Last:</b>",
       `  Published: ${formatRelativeTime(state.lastPublishedAt)}`,

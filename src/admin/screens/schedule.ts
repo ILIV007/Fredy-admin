@@ -24,9 +24,13 @@ export const scheduleScreen: Screen = {
       const plan = await ctx.container.strategyEngine.getOrGeneratePlan();
       if (plan && plan.posts && plan.posts.length > 0) {
         // v12.3.1: Unified status emoji set with the dashboard tables + plan.ts.
-        // Previously this used ⏭️ for "failed" (wrong — ⏭️ is for "skipped")
-        // and had no "skipped" case (fell through to ⏳ Pending).
-        const statusLines = plan.posts.map(p => {
+        // v13.0.2: Sort by scheduledTime so H slots are interleaved with A/B/C.
+        const sortedPosts = [...plan.posts].sort((a, b) => {
+          const ta = (a.scheduledTime ?? a.time) || "";
+          const tb = (b.scheduledTime ?? b.time) || "";
+          return ta.localeCompare(tb);
+        });
+        const statusLines = sortedPosts.map(p => {
           let s = p.status || "pending";
           // Check if fired from scheduler status.
           if (status.today && status.today.slots) {
