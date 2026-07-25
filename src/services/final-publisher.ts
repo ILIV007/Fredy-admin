@@ -136,42 +136,20 @@ export class FinalPublisher {
     const settings = await this.deps.settings();
     const minScore = settings.ai.qualityThreshold;
 
-    // v11.9.0: CRITICAL — Pre-publish dedup check.
-    // Even if the pipeline already checked dedup, we check AGAIN here right
-    // before publishing. This catches the case where a manual publish happened
-    // BETWEEN the pipeline's dedup check and this publish call.
-    if (this.deps.duplicateDetector && content.sourceUrl) {
-      try {
-        const dupCheck = await this.deps.duplicateDetector.check({
-          id: content.id,
-          source: content.pluginId,
-          category: content.category,
-          title: content.headline ?? "",
-          body: content.text ?? "",
-          url: content.sourceUrl,
-          fetchedAt: Date.now(),
-        } as import("../types/api").SourceItem);
-        if (dupCheck.isDuplicate) {
-          this.deps.logger.warn("quality.reject", {
-            contentId: content.id,
-            reason: "duplicate_pre_publish",
-            duplicateOf: dupCheck.existingId,
-            url: content.sourceUrl,
-            message: "Pre-publish dedup check: content already published",
-          });
-          return {
-            ok: false,
-            contentId: content.id,
-            category: content.category,
-            telegramMessageId: null,
-            telegramChatId: null,
-            publishedAt: Date.now(),
-            error: `Duplicate content (already published as ${dupCheck.existingId ?? "unknown"})`,
-            attempts: 0,
-          };
-        }
-      } catch { /* non-fatal — proceed with publish */ }
-    }
+    // v11.9.0: Pre-publish dedup check.
+    // v12.1.8: REMOVED — this was causing the main false-positive issue.
+    // The pre-publish check used content.headline (AI-generated) as the title,
+    // which matched the recordPublished() call that ALSO used content.headline.
+    // This created a SELF-MATCH: the content was recorded by the SAME publish()
+    // method on a previous call, and the pre-publish check matched it.
+    //
+    // The content-manager.ts pipeline already checks dedup at stage 6 using
+    // the ORIGINAL source item (with raw metadata). That check is sufficient.
+    // The pre-publish check was redundant and harmful.
+    //
+    // If a manual publish happens between pipeline check and publish, the
+    // 3-layer dedup (canonical + URL + hash) in the pipeline is still active
+    // for the NEXT time the same content is fetched.
 
     // ── Quality Gate (HARD RULE) ────────────────────────────
     if (content.quality.overallScore < minScore) {

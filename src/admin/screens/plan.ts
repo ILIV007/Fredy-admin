@@ -161,7 +161,7 @@ export const planScreen: Screen = {
         if (result.ok && result.content) {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
-            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
+            // v12.1.8: FinalPublisher.publish() records dedup internally.
             return { toast: `⚡ Published! (manual, not scheduled)`, redirectTo: "plan" };
           }
           return { alert: `❌ Publish failed: ${pubResult.error}` };

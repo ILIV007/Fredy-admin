@@ -37,7 +37,7 @@ export const forceCommand: Command = {
 
       const pubResult = await ctx.container.finalPublisher.publish(result.content);
       if (pubResult.ok) {
-        await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
+        // v12.1.8: FinalPublisher.publish() records dedup internally.
         const html = [
           `<b>━━━ ✅ PUBLISHED ━━━</b>`,
           ``,

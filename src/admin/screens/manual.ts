@@ -127,7 +127,7 @@ export const manualScreen: Screen = {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
             // v9.3.1: Record in dedup store ONLY after successful publish.
-            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
+            // v12.1.8: FinalPublisher.publish() records dedup internally.
             // v11.7.0: Send admin PM with same image as channel post.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);
@@ -276,7 +276,7 @@ export const manualScreen: Screen = {
           const pubResult = await ctx.container.finalPublisher.publish(result.content);
           if (pubResult.ok) {
             // v9.3.1: Record in dedup store ONLY after successful publish.
-            await ctx.container.duplicateDetector.recordPublished(result.content).catch(() => {});
+            // v12.1.8: FinalPublisher.publish() records dedup internally.
             // v11.7.0: Send admin PM with same image as channel post.
             try {
               const finalPost = await ctx.container.uxLayer.transform(result.content);

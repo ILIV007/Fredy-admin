@@ -234,8 +234,7 @@ export async function managerHandler(
       const pubResult = await container.finalPublisher.publish(target.content);
       if (pubResult.ok) {
         await container.queue.deleteItem(cat, body.contentId);
-        // v9.3.1: Record in dedup store ONLY after successful publish.
-        await container.duplicateDetector.recordPublished(target.content).catch(() => {});
+        // v12.1.8: FinalPublisher.publish() records dedup internally — no need to duplicate.
         const adminId = Number(env.ADMIN_ID ?? "0");
         if (adminId > 0) {
           // Send formatted post to admin PM.
@@ -1121,7 +1120,7 @@ export async function managerHandler(
       if (result.ok && result.content) {
         const pubResult = await container.finalPublisher.publish(result.content);
         if (pubResult.ok) {
-          await container.duplicateDetector.recordPublished(result.content).catch(() => {});
+          // v12.1.8: FinalPublisher.publish() records dedup internally.
           // v12.1.1: Send the exact same post to admin PM (was missing!)
           const adminId = Number(env.ADMIN_ID ?? "0");
           if (adminId > 0 && container.tg && pubResult.sentText) {
@@ -1486,7 +1485,7 @@ export async function managerHandler(
       const pubResult = await container.finalPublisher.publish(result.content);
       // v9.3.1: Record in dedup store ONLY after successful publish.
       if (pubResult.ok) {
-        await container.duplicateDetector.recordPublished(result.content).catch(() => {});
+        // v12.1.8: FinalPublisher.publish() records dedup internally.
       }
       stages["publish"] = {
         ok: pubResult.ok,

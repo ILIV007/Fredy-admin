@@ -81,8 +81,13 @@ export class SchedulerService {
   private isDedupFailure(result: PublishResult): boolean {
     if (result.ok) return false;
     const err = (result.error ?? "").toLowerCase();
-    // Pre-publish dedup: "Duplicate content (already published as ...)"
-    // Pipeline dedup: "duplicate_canonical", "duplicate_url", "duplicate_hash"
+    // v12.1.8: Pre-publish dedup check was REMOVED from FinalPublisher.
+    // So "Duplicate content (already published as ...)" errors no longer
+    // come from the pre-publish check. They can still come from:
+    // - content-manager.ts pipeline dedup (duplicate_canonical/url/hash)
+    // - The isDuplicate check is now only in the pipeline, not in FinalPublisher.
+    // This method is still needed for the replacement pipeline to detect
+    // pipeline-level dedup rejections.
     return err.includes("duplicate") || err.includes("already published");
   }
 
@@ -647,8 +652,13 @@ export class SchedulerService {
             });
           });
           // v9.3.1: Record in dedup store ONLY after successful publish.
+          // v12.1.8: FinalPublisher.publish() now records dedup internally
+          // (line 297-303), so this call is REDUNDANT. Keeping it as a
+          // safety net in case FinalPublisher's recording fails.
           if (this.deps.duplicateDetector) {
-            await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
+            // Only record if FinalPublisher didn't already (check by looking at result)
+            // Actually, just let FinalPublisher handle it — remove this redundant call.
+            // await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
           }
         }
 
@@ -854,9 +864,7 @@ export class SchedulerService {
                 plugin: lastContent.pluginId,
                 contentId: lastContent.id,
               }).catch(() => {});
-              if (this.deps.duplicateDetector) {
-                await this.deps.duplicateDetector.recordPublished(fbResult.content).catch(() => {});
-              }
+              // v12.1.8: FinalPublisher.publish() records dedup internally — no need to duplicate.
 
               // v12.0.7: Send the EXACT backup post to admin PM (same as channel), then the report.
               const adminId = this.deps.adminId?.() ?? 0;
@@ -1072,10 +1080,12 @@ export class SchedulerService {
    * is handled by the caller).
    */
   private getFallbackPlugins(category: Category): string[] {
+    // v12.1.9: Updated fallback list to match CATEGORY_PROVIDERS + remove disabled providers.
+    // Old list had "news" and "hackernews" (both legacy/disabled) and "wikimedia"/"joke" (legacy).
     const providers: Record<string, readonly string[]> = {
-      A: ["github", "github-trending", "github-releases", "devto", "stackexchange"],
-      B: ["news", "hackernews"],
-      C: ["nasa", "xkcd", "wikimedia", "joke", "reddit"],
+      A: ["github", "github-trending", "github-releases", "github-events", "github-security", "devto", "stackexchange", "huggingface-blog", "reddit-v2"],
+      B: ["hackernews-algolia", "cloudflare-blog", "producthunt", "openai-news"],
+      C: ["xkcd"],
     };
     return [...(providers[category] ?? [])];
   }

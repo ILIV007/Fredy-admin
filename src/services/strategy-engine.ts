@@ -410,9 +410,10 @@ export class StrategyEngine {
     }
 
     // v12.0.11: Theme matching — provider ID must CONTAIN the topic keyword.
+    // v12.1.9: Removed the >= 4 char filter — it was dropping "AI" (2 chars)
+    // and "NASA" (4 chars, kept but barely). All topics are meaningful.
     const themeTopicsLower = theme.topics
-      .map((t) => t.toLowerCase())
-      .filter((t) => t.length >= 4);
+      .map((t) => t.toLowerCase());
 
     if (themeTopicsLower.length > 0) {
       // Find providers whose ID contains a theme topic keyword.
