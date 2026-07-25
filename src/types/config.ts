@@ -75,12 +75,14 @@ export interface FredyState {
   };
   readonly lastPublishedAt: number | null;
   readonly lastSource: string | null;
-  readonly lastCategory: "A" | "B" | "C" | null;
+  /** v13.0.0: Added "H" for Category H (Hardware & Technology Headlines). */
+  readonly lastCategory: "A" | "B" | "C" | "H" | null;
   readonly lastSourceEmojis: readonly string[];
   readonly today: {
     readonly date: string; // YYYY-MM-DD
     readonly slotsFired: readonly number[];
-    readonly categoriesPublished: Readonly<Record<"A" | "B" | "C", number>>;
+    /** v13.0.0: Added "H" — Category H daily published count. */
+    readonly categoriesPublished: Readonly<Record<"A" | "B" | "C" | "H", number>>;
   };
 }
 

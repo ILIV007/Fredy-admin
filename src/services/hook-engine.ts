@@ -229,12 +229,14 @@ export class HookEngine {
     return cleaned;
   }
 
-  /** Fallback hook if all strategies fail. */
+  /** Fallback hook if all strategies fail.
+   *  v13.0.0: Added Category H fallback. */
   private fallbackHook(content: ReadyContent): string {
     const fallbacks: Readonly<Record<Category, string>> = {
       A: "This deserves a look.",
       B: "Something just happened in tech.",
       C: "Here's something interesting.",
+      H: "Hardware news worth following.",
     };
     return fallbacks[content.category] ?? "Worth checking out.";
   }

@@ -27,7 +27,8 @@ export interface CategoryResolveResult {
   readonly mismatch: boolean;
 }
 
-/** Keywords per category (for content-based detection). */
+/** Keywords per category (for content-based detection).
+ *  v13.0.0: Added "H" for Hardware & Technology Headlines. */
 const CATEGORY_KEYWORDS: Readonly<Record<Category, readonly string[]>> = {
   A: [
     "programming", "code", "github", "open source", "framework", "library",
@@ -43,6 +44,13 @@ const CATEGORY_KEYWORDS: Readonly<Record<Category, readonly string[]>> = {
   C: [
     "nasa", "astronomy", "space", "galaxy", "planet", "star", "telescope",
     "joke", "funny", "humor", "quote", "fact", "trivia", "did you know",
+  ],
+  // v13.0.0: Category H — hardware and technology headlines keywords.
+  H: [
+    "hardware", "cpu", "gpu", "chip", "processor", "motherboard", "ram",
+    "ssd", "storage", "benchmark", "review", "amd", "nvidia", "intel",
+    "qualcomm", "arm", "x86", "risc-v", "tesla", "ev", "battery",
+    "smartphone", "laptop", "pc", "server", "datacenter", "semiconductor",
   ],
 };
 
@@ -96,7 +104,8 @@ export class CategoryResolver {
   /** Detect category from content text. */
   private detectFromContent(item: ContentItem): { category: Category; confidence: number } {
     const text = `${item.title} ${item.body}`.toLowerCase();
-    const scores: Record<Category, number> = { A: 0, B: 0, C: 0 };
+    // v13.0.0: Added "H" to the scores record.
+    const scores: Record<Category, number> = { A: 0, B: 0, C: 0, H: 0 };
 
     for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
       for (const kw of keywords) {
@@ -106,7 +115,8 @@ export class CategoryResolver {
       }
     }
 
-    const max = Math.max(scores.A, scores.B, scores.C);
+    // v13.0.0: Include H in the max comparison.
+    const max = Math.max(scores.A, scores.B, scores.C, scores.H);
     if (max === 0) {
       // No keywords matched — default to A (most common).
       return { category: "A", confidence: 30 };

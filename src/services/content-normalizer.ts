@@ -95,7 +95,7 @@ export class ContentNormalizer {
     if (!item.url || item.url.trim().length === 0) {
       throw new Error("SourceItem missing required field: url");
     }
-    if (!item.category || !["A", "B", "C"].includes(item.category)) {
+    if (!item.category || !["A", "B", "C", "H"].includes(item.category)) {
       throw new Error(`SourceItem has invalid category: "${item.category}"`);
     }
   }

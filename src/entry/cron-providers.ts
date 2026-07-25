@@ -105,6 +105,7 @@ async function runProviderRefresh(container: Container, env: Env): Promise<void>
         A: settings.content.queueMinA,
         B: settings.content.queueMinB,
         C: settings.content.queueMinC,
+        H: 0, // v13.0.0: H is on-demand
       };
       const allQueuesOk = categories.every(cat =>
         !settings.categories[cat].enabled || (depthMap[cat] ?? 0) >= minMap[cat]
@@ -235,11 +236,13 @@ async function maintainQueue(
     A: settings.content.queueMinA,
     B: settings.content.queueMinB,
     C: settings.content.queueMinC,
+    H: 0, // v13.0.0: H is on-demand
   };
   const targetMap: Record<Category, number> = {
     A: settings.content.queueTargetA,
     B: settings.content.queueTargetB,
     C: settings.content.queueTargetC,
+    H: 0, // v13.0.0: H is on-demand
   };
 
   // Batch depth checks — use depth() once instead of depthFor() per category.

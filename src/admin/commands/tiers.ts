@@ -16,12 +16,14 @@ export const tiersCommand: Command = {
     const statuses = ctx.container.plugins.getAllStatuses();
     const statusMap = new Map(statuses.map((s) => [s.pluginId, s]));
 
-    const tiers: readonly Tier[] = ["S", "A", "B", "legacy", "V"];
-    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦", V: "🟣" };
+    // v13.0.0: Added Tier H for Hardware & Technology Headlines.
+    const tiers: readonly Tier[] = ["S", "A", "B", "H", "legacy", "V"];
+    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", H: "🔧", legacy: "📦", V: "🟣" };
     const tierNames: Record<Tier, string> = {
       S: "Tier S (Core · 2h)",
       A: "Tier A (Important · 6h)",
       B: "Tier B (Supporting · 12h)",
+      H: "Tier H (Hardware · 4h) — v13.0.0",
       legacy: "Legacy (Disabled · 24h)",
       V: "Tier V (Scheduled · Fixed)",
     };

@@ -105,7 +105,8 @@ export const manualScreen: Screen = {
     }
 
     if (type === "category") {
-      if (!["A", "B", "C"].includes(arg)) {
+      // v13.0.0: Added "H" to valid categories.
+      if (!["A", "B", "C", "H"].includes(arg)) {
         return { alert: "❌ Invalid category" };
       }
       try {

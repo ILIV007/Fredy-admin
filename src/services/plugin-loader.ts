@@ -53,6 +53,11 @@ import { createGitHubSecurityPlugin } from "../plugins/sources/github-security/i
 import { createOpenAINewsPlugin } from "../plugins/sources/openai-news/index";
 import { createRedditV2Plugin } from "../plugins/sources/reddit-v2/index";
 
+// v13.0.0: Tier H — Hardware & Technology Headlines (RSS, refresh every 4h)
+import { createArsTechnicaPlugin } from "../plugins/sources/ars-technica/index";
+import { createTomsHardwarePlugin } from "../plugins/sources/toms-hardware/index";
+import { createAnandtechPlugin } from "../plugins/sources/anandtech/index";
+
 // AI providers
 import { GeminiProvider } from "../plugins/ai/gemini";
 import { OpenRouterProvider } from "../plugins/ai/openrouter";
@@ -110,6 +115,11 @@ export class PluginLoader {
       { id: "reddit-v2", factory: createRedditV2Plugin },
       { id: "github-security", factory: createGitHubSecurityPlugin },
       { id: "openai-news", factory: createOpenAINewsPlugin },
+
+      // ─── v13.0.0 Tier H — Hardware & Technology Headlines (RSS, refresh every 4h) ───
+      { id: "ars-technica", factory: createArsTechnicaPlugin },
+      { id: "toms-hardware", factory: createTomsHardwarePlugin },
+      { id: "anandtech", factory: createAnandtechPlugin },
     ];
 
     for (const { id, factory } of sources) {

@@ -46,5 +46,10 @@ export { GitHubSecurityPlugin, createGitHubSecurityPlugin, githubSecurityManifes
 export { OpenAINewsPlugin, createOpenAINewsPlugin, openaiNewsManifest } from "./openai-news";
 export { RedditV2Plugin, createRedditV2Plugin, redditV2Manifest } from "./reddit-v2";
 
+// ─── v13.0.0: Tier H — Hardware & Technology Headlines (RSS, refresh every 4h) ───
+export { ArsTechnicaPlugin, createArsTechnicaPlugin, arsTechnicaManifest } from "./ars-technica";
+export { TomsHardwarePlugin, createTomsHardwarePlugin, tomsHardwareManifest } from "./toms-hardware";
+export { AnandtechPlugin, createAnandtechPlugin, anandtechManifest } from "./anandtech";
+
 // Re-export the Plugin interface for convenience.
 export type { Plugin, PluginManifest, PluginStatus, ProviderQualityResult } from "../../types/plugin";

@@ -13,14 +13,18 @@ import type { Category } from "./category";
 // Strategy Modes
 // ────────────────────────────────────────────────────────────
 
-/** Built-in publishing strategies. */
+/** Built-in publishing strategies.
+ *  v13.0.0: Added conservative, aggressive, turbo modes for Tier H scaling. */
 export type StrategyMode =
   | "minimal"
   | "balanced"
   | "active"
   | "ai_priority"
   | "news_priority"
-  | "custom";
+  | "custom"
+  | "conservative"
+  | "aggressive"
+  | "turbo";
 
 /** Category distribution for a strategy. */
 export interface StrategyDistribution {
@@ -28,6 +32,8 @@ export interface StrategyDistribution {
   readonly B: number;
   readonly C: number;
   readonly total: number;
+  /** v13.0.0: Number of Tier H (Hardware) posts for this strategy mode. */
+  readonly H?: number;
 }
 
 /** Quality threshold override (for ai_priority strategy). */

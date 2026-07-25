@@ -30,9 +30,10 @@ export const tiersScreen: Screen = {
     const statuses = ctx.container.plugins.getAllStatuses();
     const statusMap = new Map(statuses.map((s) => [s.pluginId, s]));
 
-    const tiers: readonly Tier[] = ["S", "A", "B", "legacy", "V"];
-    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", legacy: "📦", V: "🟣" };
-    const tierNames: Record<Tier, string> = { S: "Tier S (Core)", A: "Tier A (Important)", B: "Tier B (Supporting)", legacy: "Legacy (Disabled)", V: "Tier V (Scheduled)" };
+    // v13.0.0: Added Tier H for Hardware & Technology Headlines.
+    const tiers: readonly Tier[] = ["S", "A", "B", "H", "legacy", "V"];
+    const tierEmojis: Record<Tier, string> = { S: "🥇", A: "🥈", B: "🥉", H: "🔧", legacy: "📦", V: "🟣" };
+    const tierNames: Record<Tier, string> = { S: "Tier S (Core)", A: "Tier A (Important)", B: "Tier B (Supporting)", H: "Tier H (Hardware) — v13.0.0", legacy: "Legacy (Disabled)", V: "Tier V (Scheduled)" };
 
     let html = `<b>━━━ 📊 Provider Tiers ━━━</b>\n\n`;
 
@@ -199,7 +200,9 @@ function getTierRefreshHours(tier: Tier): number {
     case "S": return 2;
     case "A": return 6;
     case "B": return 12;
+    case "H": return 4; // v13.0.0: Tier H — RSS refresh every 4 hours
     case "legacy": return 24;
     case "V": return 0; // on-demand fetch, no refresh interval
+    default: return 6;
   }
 }

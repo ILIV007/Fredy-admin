@@ -83,18 +83,22 @@ export const categoriesScreen: Screen = {
     // Handle "sameTwice" toggle (special — not a category).
     if (cat === "sameTwice" && field === "toggle") {
       patch = { categories: { ...c, allowSameCategoryTwice: !c.allowSameCategoryTwice } };
-    } else if (["A", "B", "C"].includes(cat)) {
+    } else if (["A", "B", "C", "H"].includes(cat)) {
+      // v13.0.0: Added "H" to editable categories.
       const category = cat as Category;
 
       if (field === "toggle") {
         const item = c[category];
+        if (!item) return { alert: "❌ Category not configured" };
         patch = { categories: { ...c, [category]: { ...item, enabled: !item.enabled } } };
       } else if (field === "limit") {
         const item = c[category];
+        if (!item) return { alert: "❌ Category not configured" };
         const next = action === "inc" ? Math.min(50, item.dailyLimit + 1) : Math.max(0, item.dailyLimit - 1);
         patch = { categories: { ...c, [category]: { ...item, dailyLimit: next } } };
       } else if (field === "weight") {
         const item = c[category];
+        if (!item) return { alert: "❌ Category not configured" };
         const next = action === "inc" ? Math.min(100, item.weight + 5) : Math.max(0, item.weight - 5);
         patch = { categories: { ...c, [category]: { ...item, weight: next } } };
       }

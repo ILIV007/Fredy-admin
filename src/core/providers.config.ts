@@ -398,6 +398,74 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
   },
 
   // ════════════════════════════════════════════════════════════
+  // v13.0.0: Tier H — Hardware & Technology Headlines (RSS, refresh every 4h)
+  // These back Category H — the new additive Strategy Category.
+  // Adding future providers (TechPowerUp, VideoCardz, Phoronix, etc.)
+  // requires ONLY adding a new entry here + a new plugin folder. No scheduler
+  // modifications needed.
+  // ════════════════════════════════════════════════════════════
+  {
+    id: "ars-technica",
+    name: "Ars Technica",
+    tier: "H",
+    category: "H",
+    weight: 90,
+    refreshIntervalHours: 4,
+    cacheTtlSeconds: 4 * 3600,
+    credibility: 92,
+    reputation: 90,
+    rateLimit: 0,
+    enabledByDefault: true,
+    supportsImages: true,
+    minStars: 0,
+    minScore: 0,
+    popularityExempt: true,
+    canBreak: true, // major hardware launches
+    homepage: "https://arstechnica.com",
+    docsUrl: "https://arstechnica.com/rss-feeds/",
+  },
+  {
+    id: "toms-hardware",
+    name: "Tom's Hardware",
+    tier: "H",
+    category: "H",
+    weight: 88,
+    refreshIntervalHours: 4,
+    cacheTtlSeconds: 4 * 3600,
+    credibility: 90,
+    reputation: 88,
+    rateLimit: 0,
+    enabledByDefault: true,
+    supportsImages: true,
+    minStars: 0,
+    minScore: 0,
+    popularityExempt: true,
+    canBreak: true, // GPU/CPU launches
+    homepage: "https://www.tomshardware.com",
+    docsUrl: "https://www.tomshardware.com/feeds",
+  },
+  {
+    id: "anandtech",
+    name: "AnandTech",
+    tier: "H",
+    category: "H",
+    weight: 86,
+    refreshIntervalHours: 4,
+    cacheTtlSeconds: 4 * 3600,
+    credibility: 93,
+    reputation: 90,
+    rateLimit: 0,
+    enabledByDefault: true,
+    supportsImages: true,
+    minStars: 0,
+    minScore: 0,
+    popularityExempt: true,
+    canBreak: true, // deep-dive analysis
+    homepage: "https://www.anandtech.com",
+    docsUrl: "https://www.anandtech.com/rss/",
+  },
+
+  // ════════════════════════════════════════════════════════════
   // Legacy providers (disabled by default, kept for compatibility)
   // ════════════════════════════════════════════════════════════
   {

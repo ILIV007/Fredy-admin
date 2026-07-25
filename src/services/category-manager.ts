@@ -26,9 +26,11 @@ export class CategoryManager {
     const state = await this.deps.state();
 
     // Filter enabled categories that haven't met their quota.
+    // v13.0.0: Include Category H in the candidate pool.
     const candidates: Array<{ category: Category; weight: number; priority: number }> = [];
-    for (const cat of ["A", "B", "C"] as const) {
+    for (const cat of ["A", "B", "C", "H"] as const) {
       const item = config[cat];
+      if (!item) continue;
       if (!item.enabled) continue;
       const published = state.today.categoriesPublished[cat] ?? 0;
       if (published >= item.dailyLimit) continue;

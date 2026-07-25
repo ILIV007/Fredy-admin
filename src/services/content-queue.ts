@@ -148,7 +148,8 @@ export class ContentQueue {
    *  out — causing the dashboard to show "depth 2" but an empty table.
    *  Also opportunistically cleans up expired items from KV when found. */
   async depth(): Promise<readonly QueueDepth[]> {
-    const categories: Category[] = ["A", "B", "C"];
+    // v13.0.0: Include Category H in depth reporting.
+    const categories: Category[] = ["A", "B", "C", "H"];
     const now = Date.now();
     const depths = await Promise.all(
       categories.map(async (cat) => {

@@ -53,14 +53,15 @@ const TAG_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   "hardware": ["hardware", "cpu", "gpu", "ram", "ssd", "chip", "silicon"],
 };
 
-/** Category-based default tags. */
+/** Category-based default tags. v13.0.0: Added Category H. */
 const CATEGORY_TAGS: Readonly<Record<Category, readonly string[]>> = {
   A: ["programming", "developer"],
   B: ["news", "tech"],
   C: ["support"],
+  H: ["hardware", "tech", "headline"], // v13.0.0
 };
 
-/** Source-based tags. */
+/** Source-based tags. v13.0.0: Added Tier H sources. */
 const SOURCE_TAGS: Readonly<Record<string, readonly string[]>> = {
   github: ["github", "open-source"],
   "github-trending": ["github", "open-source", "trending"],
@@ -74,6 +75,10 @@ const SOURCE_TAGS: Readonly<Record<string, readonly string[]>> = {
   joke: ["joke", "humor"],
   xkcd: ["xkcd", "comic"],
   wikimedia: ["history", "wikipedia"],
+  // v13.0.0: Tier H — Hardware & Technology Headlines
+  "ars-technica": ["ars-technica", "hardware"],
+  "toms-hardware": ["toms-hardware", "hardware"],
+  anandtech: ["anandtech", "hardware"],
 };
 
 /** Maximum tags per post. */

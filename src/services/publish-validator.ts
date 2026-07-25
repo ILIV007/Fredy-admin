@@ -38,7 +38,7 @@ export class PublishValidator {
     const reasons: string[] = [];
     const settings = await this.deps.settings();
 
-    // 1. Disabled category.
+    // 1. Disabled category. v13.0.0: Category H may not exist in older settings.
     if (!settings.categories[content.category]?.enabled) {
       reasons.push(`Category ${content.category} is disabled`);
     }

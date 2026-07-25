@@ -8,7 +8,7 @@
  *  Bump together with VERSION file and CHANGELOG.md entry.
  *  All "version" strings in API responses should read from here, not be
  *  hardcoded inline (otherwise they drift, like the v6.2.0 strings did). */
-export const APP_VERSION = "12.3.4" as const;
+export const APP_VERSION = "13.0.0" as const;
 
 /** Build date — bump with each release. */
 export const APP_BUILD_DATE = "2026-07-25" as const;
@@ -66,6 +66,8 @@ export const TIER_S_REFRESH_HOURS = 2 as const;
 export const TIER_A_REFRESH_HOURS = 6 as const;
 /** Default refresh interval for Tier B providers (supporting, every 12 hours). */
 export const TIER_B_REFRESH_HOURS = 12 as const;
+/** v13.0.0: Default refresh interval for Tier H providers (hardware RSS, every 4 hours). */
+export const TIER_H_REFRESH_HOURS = 4 as const;
 /** Default refresh interval for Legacy providers (every 24 hours). */
 export const TIER_LEGACY_REFRESH_HOURS = 24 as const;
 

@@ -76,8 +76,8 @@ export class ContentValidator {
       errors.push(`Source plugin "${item.pluginId}" is not registered`);
     }
 
-    // 5. Category check.
-    if (!["A", "B", "C"].includes(item.category)) {
+    // 5. Category check. v13.0.0: Added "H".
+    if (!["A", "B", "C", "H"].includes(item.category)) {
       errors.push(`Invalid category: "${item.category}"`);
     }
 

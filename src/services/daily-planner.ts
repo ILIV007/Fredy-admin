@@ -139,13 +139,15 @@ export class DailyPlanner {
     await this.deps.kv.setJson(key, { contentId, firedAt: Date.now() }, PLAN_TTL_SECONDS);
   }
 
-  /** Build category distribution from settings. */
+  /** Build category distribution from settings.
+   *  v13.0.0: Added Category H. */
   private buildDistribution(settings: FredySettings): Readonly<Record<Category, number>> {
     const cats = settings.categories;
     return {
       A: cats.A.enabled ? cats.A.dailyLimit : 0,
       B: cats.B.enabled ? cats.B.dailyLimit : 0,
       C: cats.C.enabled ? cats.C.dailyLimit : 0,
+      H: cats.H?.enabled ? (cats.H.dailyLimit ?? 0) : 0,
     };
   }
 

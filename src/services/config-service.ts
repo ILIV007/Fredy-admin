@@ -45,7 +45,7 @@ export function defaultState(): FredyState {
     today: {
       date: new Date().toISOString().slice(0, 10),
       slotsFired: [],
-      categoriesPublished: { A: 0, B: 0, C: 0 },
+      categoriesPublished: { A: 0, B: 0, C: 0, H: 0 },
     },
   };
 }

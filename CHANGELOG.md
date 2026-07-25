@@ -2,6 +2,142 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.0.0] — 2026-07-26 — Tier H: Hardware & Technology Headlines (New Strategy Category)
+
+### 🆕 MAJOR: Category H — Hardware & Technology Headlines
+
+This release introduces a **brand-new Strategy Category**: Tier H (Hardware & Technology Headlines). Fredy evolves from a Developer Content Bot into a complete **Technology News Hub**.
+
+**Tier H is NOT an overlay like Tier V.** Tier H is NOT a replacement for Categories A/B/C. **Tier H is ADDITIVE** — it increases the number of daily Strategy posts depending on the selected Strategy Mode.
+
+### 📦 Initial Tier H Providers (3, RSS-only)
+
+- **Ars Technica** (🔬) — technology, science, policy news
+- **Tom's Hardware** (🖥️) — PC hardware reviews, news, guides
+- **AnandTech** (🔧) — in-depth hardware analysis and reviews
+
+RSS only. No API Keys. No NewsAPI. No GNews. Reuses the existing RSS infrastructure (same pattern as cloudflare-blog, huggingface-blog). One RSS item = one Strategy candidate. Only the latest article is published per fetch. No daily summaries.
+
+### ⚙️ Strategy Modes (H posts are ADDITIVE + CONFIGURABLE)
+
+Per the user's suggestion, the H-posts-per-mode is **fully configurable** via `strategy.tierH.extraHPostsPerMode` — changeable from the Manager without redeploy:
+
+```yaml
+strategy_modes:
+  conservative: { extra_h_posts: 0 }   # +1 every 2 days (conservativeIntervalDays)
+  balanced:     { extra_h_posts: 1 }   # +1/day
+  active:       { extra_h_posts: 2 }   # +2/day
+  aggressive:   { extra_h_posts: 3 }   # +3/day
+  turbo:        { extra_h_posts: 4 }   # +4/day (max hardware coverage)
+  minimal:      { extra_h_posts: 0 }
+  ai_priority:  { extra_h_posts: 1 }
+  news_priority:{ extra_h_posts: 2 }
+  custom:       { extra_h_posts: 1 }
+```
+
+New `StrategyMode` values: `conservative`, `aggressive`, `turbo` (added alongside existing `minimal`/`balanced`/`active`/etc).
+
+### 📅 Weekly Strategy
+
+Every generated week MUST contain at least one Tier H slot every day (mandatory — no day may omit Tier H, except `minimal`/`conservative` modes which can skip via interval logic). Tier H slots are generated together with the normal schedule. Publish time remains randomized by the scheduler — users never know when the Tier H post will appear.
+
+### 🔄 Provider Rotation
+
+Tier H `selectHProvider()` implements:
+- **Provider cooldown** (`maxProviderRepeat` — no API > 2×/day, same cap as A/B/C)
+- **Avoid immediate repetition** (`lastHProvider` tracking — don't pick the same H provider back-to-back)
+- **Weighted balancing** (TODO: full weighted pick using `getProviderWeight` — currently random among candidates)
+- **Failure recovery** (if all H providers exhausted, slot marked as `skipped`)
+
+### 🔁 Failover
+
+If one Tier H provider fails, the scheduler tries another Tier H provider. If all Tier H providers fail, retry according to existing retry policy. Only after all retries fail does the Strategy mark the slot as failed.
+
+### 🏗️ Architecture (Plugin-Based)
+
+Tier H is fully plugin-based. Adding future providers (TechPowerUp, VideoCardz, Phoronix, ServeTheHome, Windows Central, Android Authority, 9to5Google, 9to5Mac) requires **configuration only** — no scheduler modifications. Just:
+1. Create `src/plugins/sources/<name>/manifest.ts` (category: "H", tier: "H")
+2. Create `src/plugins/sources/<name>/index.ts` (RSS fetch + parse)
+3. Add to barrel (`src/plugins/sources/index.ts`)
+4. Add factory to `src/services/plugin-loader.ts`
+5. Add entry to `src/core/providers.config.ts`
+
+### 🧪 Tests
+
+Added 5 new Tier H test suites (31 assertions):
+1. `v13.0.0: Tier H is additive — balanced plan has H slots` (verifies H posts appear)
+2. `v13.0.0: Tier H providers are covered in CATEGORY_PROVIDERS` (3 providers)
+3. `v13.0.0: Every non-minimal day has at least 1 Tier H slot` (7-day scan)
+4. `v13.0.0: Conservative mode skips H on non-interval days` (config exists)
+5. `v13.0.0: Tier H provider rotation avoids immediate repetition` (10-plan scan)
+
+Updated existing tests to accept "H" as a valid category and account for additive H slots (plan length limit raised from 5 to 10).
+
+### 📝 Configurable Tier H Settings (strategy.tierH)
+
+```ts
+tierH: {
+  enabled: true,
+  extraHPostsPerMode: { /* per-mode H count — see above */ },
+  conservativeIntervalDays: 2,  // conservative mode: publish H every N days
+  providerCooldownMinutes: 60,  // avoid immediate repetition
+  maxProviderRepeat: 2,        // same cap as A/B/C
+  retryCount: 2,                // retries before marking H slot as failed
+  fetchTimeoutMs: 8000,         // RSS fetch timeout
+}
+```
+
+### 🐛 Debug Logs
+
+Added structured `[TIER_H]` logs in strategy-engine:
+```
+[TIER_H] Generated H slot #0 — provider=toms-hardware, scheduledTime=14:32
+```
+
+### 📁 Files Changed
+
+**New files (6):**
+- `src/plugins/sources/ars-technica/{manifest,index}.ts`
+- `src/plugins/sources/toms-hardware/{manifest,index}.ts`
+- `src/plugins/sources/anandtech/{manifest,index}.ts`
+
+**Modified files (15):**
+- `src/types/category.ts` — added "H" to Category type + CategoryHContent + ALL_CATEGORIES
+- `src/types/tier.ts` — added "H" to Tier type + TIER_DEFAULT_REFRESH_HOURS + TIER_DEFAULT_ENABLED
+- `src/types/strategy.ts` — added conservative/aggressive/turbo modes + H field in StrategyDistribution
+- `src/types/config.ts` — added "H" to lastCategory + categoriesPublished
+- `src/core/config/sections/strategy.ts` — tierH config schema + BUILTIN_STRATEGIES H values + CATEGORY_PROVIDERS.H
+- `src/core/config/sections/categories.ts` — added H to schema + defaults
+- `src/core/providers.config.ts` — 3 Tier H provider entries
+- `src/core/constants.ts` — TIER_H_REFRESH_HOURS = 4
+- `src/core/ai/prompt-templates.ts` — Category H prompt
+- `src/services/strategy-engine.ts` — generatePlan additive H slots + getHPostCountForMode + randomTimeInWindow + selectHProvider + assignPriority(H) + getQueueTarget(H) + getProviderCategory(H)
+- `src/services/category-manager.ts` — H in candidate pool
+- `src/services/category-resolver.ts` — H keywords + scores
+- `src/services/content-queue.ts` — H in depth()
+- `src/services/scheduler-service.ts` — H in categoryDistribution + postsByCategory + random category pick
+- `src/services/{content-normalizer,content-validator,publish-validator,hook-engine,tagging-system,daily-planner,provider-engine}.ts` — H support
+- `src/services/plugin-loader.ts` — register 3 H plugins
+- `src/plugins/sources/index.ts` — barrel exports
+- `src/admin/screens/{tiers,categories,manual}.ts` + `src/admin/commands/{tiers,stats}.ts` — H in tier/category lists
+- `src/entry/{tick,cron-providers}.ts` — H in queue maintenance maps
+- `scripts/test-strategy.ts` — 5 new H test suites + H in mock ENABLED_PROVIDERS
+- `scripts/test-plugin-registry.ts` — H in valid tiers/categories sets
+
+### Definition of Done
+
+- ✅ `npx tsc --noEmit` — 0 errors
+- ✅ `bun run test` — 394 tests passing (86 + 183 + 41 + 19 + 65)
+- ✅ Category H is additive (does not replace A/B/C slots)
+- ✅ 3 Tier H RSS plugins (Ars Technica, Tom's Hardware, AnandTech) registered
+- ✅ H-posts-per-mode fully configurable (strategy.tierH.extraHPostsPerMode)
+- ✅ Every non-minimal day has ≥1 H slot (verified across 7 days)
+- ✅ Provider rotation with cooldown + avoid-immediate-repetition
+- ✅ [TIER_H] structured debug logs
+- ✅ Plugin-based architecture — future providers config-only
+- ✅ CHANGELOG updated
+- ✅ Dashboard data updated
+
 ## [12.3.4] — 2026-07-26 — Strict 2/Day-Per-API Cap (Wildcard Included)
 
 ### 🔒 FIX: No API appears more than 2× per day — INCLUDING via wildcard

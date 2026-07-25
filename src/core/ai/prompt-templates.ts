@@ -128,6 +128,11 @@ For quotes: the quote + author (em-dash). 1 line.
 For dev facts: the fact + 1 sentence of context. 2 lines max.
 
 HARD RULE: total text must be ≤150 chars. If you can't fit it in 2 lines, cut more.`,
+
+  // v13.0.0: Category H — Hardware & Technology Headlines.
+  H: `CATEGORY H — Hardware & Technology Headlines (CPUs, GPUs, chips, hardware launches, deep-dive reviews)
+
+Write a concise, factual post about the hardware/tech headline. What's new, why it matters to developers and tech enthusiasts. Mention specific product names, model numbers, and benchmarks if available. 2-3 paragraphs. No rumor, no speculation — stick to what the source says. If it's a review, summarize the key finding (performance, value, comparison). If it's a launch, state what was launched and the headline spec.`,
 };
 
 /**

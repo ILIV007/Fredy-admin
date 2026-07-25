@@ -1,10 +1,15 @@
 /**
  * src/types/category.ts
  * Content category system. See FREDY_GUIDELINES.md §1.
+ *
+ * v13.0.0: Added Category "H" (Hardware & Technology Headlines).
+ * Category H is a REAL Strategy Category (not an overlay, not a replacement
+ * for A/B/C). It is ADDITIVE — increases the number of daily Strategy posts
+ * depending on the selected Strategy Mode. See strategy.ts extraHPosts.
  */
 
-/** The three content categories. */
-export type Category = "A" | "B" | "C";
+/** The content categories. v13.0.0: added "H". */
+export type Category = "A" | "B" | "C" | "H";
 
 /** Per-category runtime configuration. */
 export interface CategoryConfig {
@@ -70,5 +75,21 @@ export interface DevFactContent {
   readonly sourceUrl: string;
 }
 
+/** v13.0.0: Category H — Hardware & Technology Headlines.
+ *  One RSS item = one Strategy candidate. Same pipeline as A/B/C. */
+export interface CategoryHContent {
+  readonly type: "hardware_headline" | "tech_news";
+  readonly headline: string;
+  readonly summary: string;
+  readonly sourceUrl: string;
+  readonly imageUrl?: string;
+}
+
 /** Discriminated union of all category content shapes. */
-export type CategoryContent = CategoryAContent | CategoryBContent | CategoryCContent;
+export type CategoryContent = CategoryAContent | CategoryBContent | CategoryCContent | CategoryHContent;
+
+/** v13.0.0: All valid categories as a readonly tuple (for iteration). */
+export const ALL_CATEGORIES: readonly Category[] = ["A", "B", "C", "H"] as const;
+
+/** v13.0.0: Legacy A/B/C categories (for code that should NOT include H). */
+export const ABC_CATEGORIES: readonly Category[] = ["A", "B", "C"] as const;

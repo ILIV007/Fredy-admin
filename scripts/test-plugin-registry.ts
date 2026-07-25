@@ -76,15 +76,15 @@ const ids = PROVIDERS_CONFIG.map((p) => p.id);
 const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
 assert(duplicates.length === 0, `No duplicates found${duplicates.length > 0 ? ` (found: ${duplicates.join(", ")})` : ""}`);
 
-// Test 7: All entries have valid tiers (v12.0.9: added "V")
+// Test 7: All entries have valid tiers (v12.0.9: added "V", v13.0.0: added "H")
 console.log("\nTest 7: All entries have valid tiers");
-const validTiers = new Set(["S", "A", "B", "legacy", "V"]);
+const validTiers = new Set(["S", "A", "B", "H", "legacy", "V"]);
 const invalidTiers = PROVIDERS_CONFIG.filter((p) => !validTiers.has(p.tier));
 assert(invalidTiers.length === 0, `All tiers valid${invalidTiers.length > 0 ? ` (invalid: ${invalidTiers.map((p) => p.id).join(", ")})` : ""}`);
 
-// Test 8: All entries have valid categories
+// Test 8: All entries have valid categories (v13.0.0: added "H")
 console.log("\nTest 8: All entries have valid categories");
-const validCategories = new Set(["A", "B", "C"]);
+const validCategories = new Set(["A", "B", "C", "H"]);
 const invalidCategories = PROVIDERS_CONFIG.filter((p) => !validCategories.has(p.category));
 assert(invalidCategories.length === 0, `All categories valid${invalidCategories.length > 0 ? ` (invalid: ${invalidCategories.map((p) => p.id).join(", ")})` : ""}`);
 

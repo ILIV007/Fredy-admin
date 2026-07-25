@@ -18,7 +18,9 @@ export const categoriesSchema = z.object({
   A: categoryItemSchema,
   B: categoryItemSchema,
   C: categoryItemSchema,
-  rotationOrder: z.array(z.enum(["A", "B", "C"])).default(["A", "B", "A", "C"]),
+  /** v13.0.0: Category H — Hardware & Technology Headlines. */
+  H: categoryItemSchema.default({ enabled: true, dailyLimit: 4, priority: 2, weight: 30, fallback: "retry" }),
+  rotationOrder: z.array(z.enum(["A", "B", "C", "H"])).default(["A", "B", "A", "C"]),
   allowSameCategoryTwice: z.boolean().default(false),
 });
 
@@ -30,6 +32,8 @@ export const categoriesDefaults: CategoriesConfig = {
   A: { enabled: true, dailyLimit: 2, priority: 1, weight: 50, fallback: "skip" },
   B: { enabled: true, dailyLimit: 1, priority: 2, weight: 25, fallback: "skip" },
   C: { enabled: true, dailyLimit: 1, priority: 3, weight: 25, fallback: "skip" },
+  // v13.0.0: Category H — additive, higher daily limit (up to 4 in turbo mode).
+  H: { enabled: true, dailyLimit: 4, priority: 2, weight: 30, fallback: "retry" },
   rotationOrder: ["A", "B", "A", "C"],
   allowSameCategoryTwice: false,
 };

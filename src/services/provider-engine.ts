@@ -30,6 +30,7 @@ import {
   TIER_S_REFRESH_HOURS,
   TIER_A_REFRESH_HOURS,
   TIER_B_REFRESH_HOURS,
+  TIER_H_REFRESH_HOURS, // v13.0.0
   TIER_LEGACY_REFRESH_HOURS,
 } from "../core/constants";
 import { getReputationScore, getRefreshInterval as getConfigRefreshInterval } from "../core/providers.config";
@@ -128,14 +129,17 @@ export class ProviderEngine {
   }
 
   /** Get the base refresh interval (in hours) for a tier.
-   *  v12.0.9: Tier V = 0 (on-demand fetch, not refreshed by Layer 2). */
+   *  v12.0.9: Tier V = 0 (on-demand fetch, not refreshed by Layer 2).
+   *  v13.0.0: Added Tier H (4 hours — RSS feeds don't need frequent refresh). */
   private getRefreshInterval(tier: Tier): number {
     switch (tier) {
       case "S": return TIER_S_REFRESH_HOURS;
       case "A": return TIER_A_REFRESH_HOURS;
       case "B": return TIER_B_REFRESH_HOURS;
+      case "H": return TIER_H_REFRESH_HOURS; // v13.0.0
       case "legacy": return TIER_LEGACY_REFRESH_HOURS;
       case "V": return 0; // on-demand, not refreshed by provider engine
+      default: return TIER_A_REFRESH_HOURS;
     }
   }
 
@@ -239,10 +243,12 @@ export class ProviderEngine {
     const due = this.getDueProviders();
     const dueIds = new Set(due.map((d) => d.pluginId));
 
+    // v13.0.0: Added Tier H to the byTier record.
     const byTier: Record<Tier, { total: number; enabled: number; due: number }> = {
       S: { total: 0, enabled: 0, due: 0 },
       A: { total: 0, enabled: 0, due: 0 },
       B: { total: 0, enabled: 0, due: 0 },
+      H: { total: 0, enabled: 0, due: 0 },
       legacy: { total: 0, enabled: 0, due: 0 },
       V: { total: 0, enabled: 0, due: 0 },
     };

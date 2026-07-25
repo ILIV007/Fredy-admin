@@ -254,16 +254,22 @@ async function maintainQueue(
   settings: FredySettings,
   log: string[],
 ): Promise<void> {
+  // v13.0.0: Category H is ADDITIVE — it has its own queue maintenance but
+  // uses the same queueMin/queueTarget fields (H reuses queueMinC defaults
+  // unless explicitly configured). For now, only A/B/C get queue maintenance
+  // here; H slots are filled on-demand by the strategy engine + scheduler.
   const categories: import("../types/category").Category[] = ["A", "B", "C"];
   const minMap: Record<import("../types/category").Category, number> = {
     A: settings.content.queueMinA,
     B: settings.content.queueMinB,
     C: settings.content.queueMinC,
+    H: 0, // v13.0.0: H is on-demand, no min queue
   };
   const targetMap: Record<import("../types/category").Category, number> = {
     A: settings.content.queueTargetA,
     B: settings.content.queueTargetB,
     C: settings.content.queueTargetC,
+    H: 0, // v13.0.0: H is on-demand
   };
 
   const allDepths = await container.queue.depth();

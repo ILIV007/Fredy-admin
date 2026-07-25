@@ -201,7 +201,7 @@ export class SchedulerService {
           generatedAt: stratPlan.generatedAt,
           timezone: stratPlan.timezone,
           postsPerDay: stratPlan.posts.length,
-          categoryDistribution: { A: 0, B: 0, C: 0 },
+          categoryDistribution: { A: 0, B: 0, C: 0, H: 0 },
         };
         // Fill categoryDistribution from posts.
         for (const p of stratPlan.posts) {
@@ -1376,8 +1376,9 @@ export class SchedulerService {
       );
     } else {
       // Publish random — pick a random enabled category.
-      const categories: Category[] = ["A", "B", "C"];
-      const enabled = categories.filter((c) => settings.categories[c]?.enabled);
+      // v13.0.0: Include Category H in the random pick.
+      const categories: Category[] = ["A", "B", "C", "H"];
+      const enabled = categories.filter((c) => settings.categories[c]?.enabled ?? (c === "H" && false));
       if (enabled.length === 0) {
         return {
           ok: false,
@@ -1476,7 +1477,7 @@ export class SchedulerService {
           generatedAt: stratPlan.generatedAt,
           timezone: stratPlan.timezone,
           postsPerDay: stratPlan.posts.length,
-          categoryDistribution: { A: 0, B: 0, C: 0 },
+          categoryDistribution: { A: 0, B: 0, C: 0, H: 0 },
         };
         for (const p of stratPlan.posts) {
           const dist = plan!.categoryDistribution as Record<string, number>;
@@ -1535,7 +1536,7 @@ export class SchedulerService {
     // Load today's history for published counts.
     const todayHistory = await this.deps.history.getToday().catch(() => ({ entries: [] }));
     const published = todayHistory.entries.filter((e) => e.telegramMessageId > 0);
-    const postsByCategory: Record<Category, number> = { A: 0, B: 0, C: 0 };
+    const postsByCategory: Record<Category, number> = { A: 0, B: 0, C: 0, H: 0 }; // v13.0.0: added H
     for (const entry of published) {
       postsByCategory[entry.category] = (postsByCategory[entry.category] ?? 0) + 1;
     }
