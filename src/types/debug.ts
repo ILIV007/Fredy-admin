@@ -55,7 +55,15 @@ export type DebugEventName =
   | "tierV.publish_start"
   | "tierV.publish_success"
   | "tierV.publish_failed"
-  | "tierV.publish_error";
+  | "tierV.publish_error"
+  // v12.2.1: Stuck publishing + time budget events
+  | "scheduler.stuck_publishing"
+  | "scheduler.time_budget_exceeded"
+  | "scheduler.time_budget_failed"
+  // v12.2.2: Preferred provider events
+  | "scheduler.preferred_provider"
+  | "scheduler.preferred_failed"
+  | "scheduler.preferred_error";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

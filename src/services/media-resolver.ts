@@ -197,21 +197,15 @@ export class MediaResolver {
   }
 
   // ────────────────────────────────────────────────────────────
-  // Priority 4: Official Logo
+  // Priority 4: Official Logo (DISABLED in v12.2.0)
   // ────────────────────────────────────────────────────────────
 
-  /** Fetch the official logo/favicon for a provider. */
-  private async fetchOfficialLogo(sourceId: string): Promise<SourceMedia | null> {
-    // Map source IDs to known logos.
-    const logo = PROVIDER_LOGOS[sourceId];
-    if (!logo) return null;
-
-    return {
-      type: "image",
-      url: logo,
-      alt: `${sourceId} logo`,
-      source: "logo",
-    };
+  /** v12.2.0: Disabled official logo fallback — it was serving the Dev.to
+   *  default logo and StackExchange logo for ALL posts from those providers,
+   *  instead of the article's own cover image. Now returns null, and the
+   *  pipeline falls through to ImageResolver (og:image) or text-only. */
+  private async fetchOfficialLogo(_sourceId: string): Promise<SourceMedia | null> {
+    return null;
   }
 
   // ────────────────────────────────────────────────────────────
@@ -254,6 +248,7 @@ export class MediaResolver {
  *  Removed buggy entries that pointed at .ico/.gif/.svg files (these
  *  were the root cause of the "wrong type of web page content" errors
  *  when used as fallback media). */
+/* v12.2.0: Disabled — no longer used (logos served wrong images for Dev.to + StackExchange)
 const PROVIDER_LOGOS: Readonly<Record<string, string>> = {
   github: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
   devto: "https://dev.to/assets/devlogo-pwa-512.png",
@@ -261,14 +256,8 @@ const PROVIDER_LOGOS: Readonly<Record<string, string>> = {
   xkcd: "https://xkcd.com/s/0b7742.png",
   "github-releases": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
   "github-trending": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-  // news / nasa / joke / hackernews / reddit / wikimedia entries removed:
-  //   - news: .png  (kept but with a NOTE: newsapi logo may 403 — better to rely on OG)
-  //   - nasa: was .svg (rejected by Telegram)
-  //   - joke: was .ico (rejected by Telegram)
-  //   - hackernews: was .gif (rejected by Telegram)
-  //   - reddit: was .png (kept but small)
-  //   - wikimedia: was a .svg thumb (rejected by Telegram)
 };
+*/
 
 /** Check if a URL points to an image Telegram can send as a photo.
  *  Telegram supports: jpg, jpeg, png, webp (not .ico, .gif, .svg).

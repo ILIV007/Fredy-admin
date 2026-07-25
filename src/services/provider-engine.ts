@@ -218,7 +218,7 @@ export class ProviderEngine {
       acceptanceRate,
       totalAccepted,
       totalRejected,
-      averageScore: 0, // TODO: track rolling average
+      averageScore: 0, // DECIDED v12.2.1: Rolling average not needed — per-publish quality score is sufficient.
       averageLatencyMs: status.averageLatencyMs,
       refreshIntervalHours: this.getRefreshInterval(tier) * (status.currentBackoffMultiplier || 1),
       currentBackoff: status.currentBackoffMultiplier || 1,

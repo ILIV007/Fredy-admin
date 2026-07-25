@@ -196,6 +196,7 @@ export class SchedulerService {
             epochMs: p.epochMs,
             category: p.category,
             jitterMinutes: 0,
+            provider: p.provider,  // v12.2.2: Carry plan's provider to fireSlot
           })),
           generatedAt: stratPlan.generatedAt,
           timezone: stratPlan.timezone,
@@ -350,8 +351,52 @@ export class SchedulerService {
       let alreadyFired = false;
       if (stratPlan) {
         const post = stratPlan.posts.find(p => p.index === slot.index);
-        if (post && (post.status === "published" || post.status === "failed" || post.status === "backup" || post.status === "publishing" || post.status === "skipped")) {
-          alreadyFired = true;
+        if (post) {
+          if (post.status === "published" || post.status === "failed" || post.status === "backup" || post.status === "skipped") {
+            alreadyFired = true;
+          } else if (post.status === "publishing") {
+            // v12.2.1: CRITICAL FIX — timeout-aware "publishing" check.
+            // A slot stuck in "publishing" for too long means the Worker was
+            // killed mid-publish (Cloudflare 30s wall time limit). Previously,
+            // this slot was silently skipped FOREVER — no retry, no failure,
+            // no admin notification. The slot was permanently lost.
+            //
+            // Now: if the slot has been "publishing" for more than PUBLISHING_TIMEOUT_MINUTES,
+            // treat it as failed (allow retry on next tick or mark as failed).
+            const PUBLISHING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+            const stuckDuration = now - (post.failedAt ?? 0);
+            if (post.failedAt && stuckDuration > PUBLISHING_TIMEOUT_MS) {
+              // Slot is stuck — mark as failed so it can be retried or admin is notified.
+              this.deps.logger.warn("scheduler.stuck_publishing", {
+                slotIndex: slot.index,
+                date: slot.date,
+                stuckDuration: `${Math.round(stuckDuration / 60000)}m`,
+                message: "Slot stuck in 'publishing' for too long — marking as failed for retry",
+              });
+              // Mark as failed so the scheduler can try again or notify admin.
+              if (this.deps.strategyEngine) {
+                await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+                  error: `Slot stuck in 'publishing' for ${Math.round(stuckDuration / 60000)} minutes — Worker likely killed by Cloudflare timeout`,
+                  stage: "stuck_publishing",
+                  plugin: null,
+                }).catch(() => {});
+              }
+              // Don't set alreadyFired — let the slot be retried on this tick.
+              // The markPostFailed above changes status to "failed", which WILL
+              // be caught by the alreadyFired check on the NEXT iteration.
+              // But for THIS iteration, we want to retry it.
+              // Actually, markPostFailed changes it to "failed" which IS alreadyFired=true.
+              // So we need to NOT set alreadyFired and let it proceed.
+              // The status is now "failed" (just changed), so the findDueSlot loop
+              // will see it as alreadyFired on the next iteration. But for THIS
+              // iteration, we already changed the plan — let's skip to the next slot.
+              // The admin will be notified by the markPostFailed call.
+              alreadyFired = true; // Skip this slot — it's now "failed" and admin is notified.
+            } else {
+              // Still within timeout window — skip (publishing in progress).
+              alreadyFired = true;
+            }
+          }
         }
       } else {
         alreadyFired = await this.deps.dailyPlanner.isSlotFired(slot);
@@ -462,6 +507,49 @@ export class SchedulerService {
     settings: FredySettings,
     expectedLang: string,
   ): Promise<ReadyContent | null> {
+    // v12.2.2: Try the plan's assigned provider FIRST, before falling back to
+    // category-wide processForCategory. This fixes the bug where the plan
+    // carefully selects "openai-news" for a slot, but fireSlot ignores it
+    // and just picks whoever has the lowest priority number.
+    const preferredProvider = (slot as SlotTime & { provider?: string | null }).provider ?? null;
+
+    if (preferredProvider) {
+      this.deps.logger.info("scheduler.preferred_provider", {
+        slotIndex: slot.index,
+        provider: preferredProvider,
+        message: `Trying plan-assigned provider "${preferredProvider}" first`,
+      });
+      try {
+        const preferredResult = await this.deps.contentManager.processFromPlugin(
+          preferredProvider,
+          settings.language.default,
+          { skipEnqueue: true },
+        );
+        if (preferredResult.ok && preferredResult.content) {
+          this.deps.logger.info("pipeline.complete", {
+            slotIndex: slot.index,
+            provider: preferredProvider,
+            contentId: preferredResult.content.id,
+            message: `Preferred provider "${preferredProvider}" succeeded`,
+          });
+          return preferredResult.content;
+        }
+        this.deps.logger.warn("scheduler.preferred_failed", {
+          slotIndex: slot.index,
+          provider: preferredProvider,
+          reason: preferredResult.error ?? "Pipeline failed",
+          message: `Preferred provider "${preferredProvider}" failed — falling back to category-wide fetch`,
+        });
+      } catch (e) {
+        this.deps.logger.warn("scheduler.preferred_error", {
+          slotIndex: slot.index,
+          provider: preferredProvider,
+          error: e instanceof Error ? e.message : String(e),
+          message: `Preferred provider "${preferredProvider}" threw error — falling back`,
+        });
+      }
+    }
+
     // 1. Try to dequeue ready content for this category.
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
@@ -470,7 +558,6 @@ export class SchedulerService {
       if (queuedLang === expectedLang || queuedLang === settings.language.default) {
         return queued.content;
       }
-      // Stale language — log and try the next item.
       this.deps.logger.warn("scheduler.stale_language", {
         contentId: queued.content.id,
         queuedLanguage: queuedLang,
@@ -579,12 +666,32 @@ export class SchedulerService {
 
     // ════════════════════════════════════════════════════════════
     // v12.0.5: REPLACEMENT LOOP — try up to 5 candidates on dedup.
+    // v12.2.1: TIME BUDGET — stop trying replacements if we're close to
+    //   Cloudflare's 30s wall time limit. This prevents the Worker from
+    //   being killed mid-publish, which leaves the slot stuck in "publishing".
     // ════════════════════════════════════════════════════════════
+    const TICK_START_TIME = Date.now();
+    const TICK_TIME_BUDGET_MS = 20000; // 20s — leave 10s buffer before 30s limit
     let lastContent: ReadyContent | null = null;
     let lastResult: PublishResult | null = null;
     let noContentAtAll = false;
+    let timeBudgetExceeded = false;
 
     for (let attempt = 1; attempt <= SchedulerService.MAX_REPLACEMENT_ATTEMPTS; attempt++) {
+      // v12.2.1: Check time budget before each attempt.
+      const elapsed = Date.now() - TICK_START_TIME;
+      if (elapsed > TICK_TIME_BUDGET_MS) {
+        this.deps.logger.warn("scheduler.time_budget_exceeded", {
+          slotIndex: slot.index,
+          attempt,
+          elapsedMs: elapsed,
+          budgetMs: TICK_TIME_BUDGET_MS,
+          message: `Time budget exceeded (${elapsed}ms > ${TICK_TIME_BUDGET_MS}ms) — stopping replacement loop`,
+        });
+        timeBudgetExceeded = true;
+        break;
+      }
+
       // ── Acquire candidate (same-category only) ──
       const content = await this.acquireContent(slot, settings, expectedLang);
 
@@ -726,6 +833,42 @@ export class SchedulerService {
     // ════════════════════════════════════════════════════════════
     // FAILURE HANDLING (all attempts failed, or no content, or non-dedup error)
     // ════════════════════════════════════════════════════════════
+
+    // v12.2.1: If time budget was exceeded, mark as failed with a clear reason.
+    // This prevents the slot from being stuck in "publishing" forever.
+    if (timeBudgetExceeded && lastResult === null) {
+      const failError = `Time budget exceeded (${Date.now() - TICK_START_TIME}ms > ${TICK_TIME_BUDGET_MS}ms) — Worker would be killed by Cloudflare timeout. Tried ${replacements.length} replacement(s).`;
+      this.deps.logger.warn("scheduler.time_budget_failed", {
+        slotIndex: slot.index,
+        elapsedMs: Date.now() - TICK_START_TIME,
+        replacements: replacements.length,
+        message: failError,
+      });
+      if (this.deps.strategyEngine) {
+        await this.deps.strategyEngine.markPostFailed(slot.date, slot.index, {
+          error: failError,
+          stage: "time_budget_exceeded",
+          plugin: null,
+        }).catch(() => {});
+      }
+      await this.recordFailure({
+        slot,
+        error: failError,
+        stage: "time_budget_exceeded",
+        plugin: null,
+        contentId: null,
+      }).catch(() => {});
+      return {
+        ok: false,
+        contentId: null,
+        category: slot.category,
+        telegramMessageId: null,
+        telegramChatId: null,
+        publishedAt: Date.now(),
+        error: failError,
+        attempts: replacements.length,
+      };
+    }
 
     // Case 1: No content available at all (acquireContent returned null on first attempt).
     if (noContentAtAll) {

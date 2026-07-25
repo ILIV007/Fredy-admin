@@ -19,7 +19,7 @@ export class LanguageManager {
     sourceItem: SourceItem,
   ): "en" | "fa" {
     if (setting !== "auto") return setting;
-    // TODO: implement detection in Phase 2 (AI layer).
+    // DECIDED v12.2.1: Not implementing — language is set via config, auto-detect not needed for single-channel bot.
     // For the scaffold, default to the configured default language.
     void sourceItem;
     return this.deps.defaultLanguage;

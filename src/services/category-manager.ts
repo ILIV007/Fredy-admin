@@ -97,7 +97,7 @@ export class CategoryManager {
 
   /** Record that a category was published (called by the pipeline after success). */
   async recordPublish(category: Category): Promise<void> {
-    // TODO: implement in Phase 4 (Scheduler) — increment state via ConfigService.updateState.
+    // DECIDED v12.2.1: Not implementing — category usage stats are tracked via history-service, not ConfigService state.
     void category;
   }
 }

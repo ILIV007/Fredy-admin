@@ -20,7 +20,7 @@ export interface PostingWindow {
 }
 
 /** A generated slot time for a day.
- *  v11.17.0: Domain Separation — Window fields drive scheduling, time fields are display-only.
+ *  v12.2.1: scheduledTime is the REAL publish trigger (since v11.18.0). NOT display-only.
  *
  *  SCHEDULING FIELDS (used by scheduler to make publish decisions):
  *  - time (windowStart)
@@ -38,9 +38,9 @@ export interface SlotTime {
   readonly time: string;
   /** Window end time "HH:MM" — SCHEDULING FIELD */
   readonly windowEnd: string;
-  /** v11.17.0: Scheduled time "HH:MM" — DISPLAY ONLY (random within window) */
+  /** v12.2.1: Scheduled time "HH:MM" — REAL publish trigger (random within window, scheduler fires when now >= this) */
   readonly scheduledTime?: string;
-  /** Epoch ms for window START — DISPLAY ONLY (for ordering, NOT for firing) */
+  /** Epoch ms for window START — ordering only (NOT used for scheduling decisions) */
   readonly epochMs: number;
   /** v11.17.0: Actual publish time (epoch ms) — set after successful publish */
   readonly publishedAt?: number;
@@ -50,6 +50,8 @@ export interface SlotTime {
   readonly fired?: boolean;
   /** v8.7.0: Real 3-state status from strategy plan — "published" | "failed" | "pending" | "publishing". */
   readonly status?: string;
+  /** v12.2.2: Provider assigned by the strategy plan — used by acquireContent() to try the plan's provider first. */
+  readonly provider?: string | null;
 }
 
 // ────────────────────────────────────────────────────────────

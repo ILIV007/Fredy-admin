@@ -234,7 +234,7 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
   // ════════════════════════════════════════════════════════════
   {
     id: "stackexchange",
-    name: "Stack Exchange",
+    name: "Stack Overflow", // v12.2.0: renamed from "Stack Exchange"
     tier: "A",
     category: "A",
     weight: 80,
@@ -244,7 +244,7 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
     reputation: 85,
     rateLimit: 300,
     enabledByDefault: true,
-    supportsImages: false,
+    supportsImages: true, // v12.2.0: Now extracts images from body HTML
     minStars: 0,
     minScore: 10, // min 10 score
     popularityExempt: false,

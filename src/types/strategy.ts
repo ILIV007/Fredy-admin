@@ -81,9 +81,9 @@ export interface PlannedPost {
   readonly time: string;
   /** v11.15.0: Window end time "HH:MM". SCHEDULING FIELD. */
   readonly windowEnd?: string;
-  /** v11.17.0: Scheduled time "HH:MM" — DISPLAY ONLY (random within window). */
+  /** v12.2.1: Scheduled time "HH:MM" — REAL publish trigger (random within window). */
   readonly scheduledTime?: string;
-  /** Epoch milliseconds for the window start — DISPLAY ONLY (for ordering). */
+  /** Epoch milliseconds for the window start — ordering only (NOT used for scheduling). */
   readonly epochMs: number;
   /** v11.17.0: Actual publish time (epoch ms) — set after successful publish. */
   readonly publishedAt?: number;

@@ -49,7 +49,7 @@ export class SourceFormatter {
       // we'll use a simple KV approach via the state callback.
       // The state is managed by ConfigService.updateState.
       // For now, we just keep in-memory rotation (better than nothing).
-      // TODO: wire to config.updateState for true persistence.
+      // DECIDED v12.2.1: Not implementing — source rotation is in-memory only, no persistence needed.
     } catch { /* non-fatal */
       // ignore
     }

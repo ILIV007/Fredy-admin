@@ -109,10 +109,10 @@ export class TimeGenerator {
     generatedTimes.sort((a, b) => a.minutes - b.minutes);
 
     // Build SlotTime objects.
-    // v11.17.0: Domain Separation — Window fields drive scheduling, scheduledTime is display-only.
+    // v12.2.1: scheduledTime is the REAL publish trigger (since v11.18.0). NOT display-only.
     // - time/windowEnd: SCHEDULING — when the scheduler should consider this slot due
-    // - scheduledTime: DISPLAY ONLY — a random time within the window for UI/analytics
-    // - epochMs: DISPLAY ONLY — window start epoch for ordering
+    // - scheduledTime: REAL TRIGGER — random time within window, scheduler fires when now >= scheduledTime
+    // - epochMs: window start epoch for ordering only (not used for scheduling)
     const slots: SlotTime[] = generatedTimes.map((entry, index) => {
       const range = minuteRanges[entry.windowIndex]!;
       const startHh = Math.floor(range.start / 60).toString().padStart(2, "0");
@@ -135,8 +135,8 @@ export class TimeGenerator {
         date,
         time,         // Window START — SCHEDULING
         windowEnd,    // Window END — SCHEDULING
-        scheduledTime, // Random time — DISPLAY ONLY
-        epochMs,      // Window start epoch — DISPLAY ONLY (ordering)
+        scheduledTime, // v12.2.1: REAL TRIGGER — scheduler fires when now >= this
+        epochMs,      // Window start epoch — ordering only
         category: entry.category,
         jitterMinutes: config.jitterMinutes,
       };

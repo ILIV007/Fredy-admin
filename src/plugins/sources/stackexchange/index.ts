@@ -183,6 +183,14 @@ export class StackExchangePlugin implements Plugin {
     const body = q.body ?? q.excerpt ?? (q.tags && q.tags.length > 0
       ? `Tags: ${q.tags.join(", ")}`
       : "");
+    // v12.2.0: Try to extract image from body HTML (StackExchange doesn't have cover_image).
+    let imageUrl: string | undefined;
+    if (body) {
+      const imgMatch = /<img[^>]+src=["']([^"']+)["']/i.exec(body);
+      if (imgMatch?.[1] && imgMatch[1].startsWith("http")) {
+        imageUrl = imgMatch[1];
+      }
+    }
     return {
       id: String(q.question_id ?? ""),
       source: this.metadata.id,
@@ -190,6 +198,7 @@ export class StackExchangePlugin implements Plugin {
       title: String(q.title ?? ""),
       body: String(body),
       url: String(q.link ?? ""),
+      imageUrl,
       language: "en",
       publishedAt: q.creation_date ? q.creation_date * 1000 : undefined,
       metadata: {
@@ -198,8 +207,9 @@ export class StackExchangePlugin implements Plugin {
         isAnswered: q.is_answered,
         author: q.owner?.display_name,
       },
-            displayIcon: this.metadata.displayIcon ?? "🌌",
-      displaySource: this.metadata.displaySource ?? "Source",
+      // v12.2.0: Use proper display icon + source name for StackExchange.
+      displayIcon: this.metadata.displayIcon ?? "📚",
+      displaySource: this.metadata.displaySource ?? "Stack Overflow",
       fetchedAt: Date.now(),
     };
   }
