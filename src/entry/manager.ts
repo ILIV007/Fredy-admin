@@ -2526,21 +2526,34 @@ async function loadScheduler(){
   let stratData=null;
   try{stratData=await api("strategy");}catch{}
   const stratPlan=stratData?.plan||null;
+  // v12.3.1: Cache the plan so showPostError() works on the Scheduler page
+  // too — previously it only worked on the Strategy page (where _lastPlan
+  // was set). Now both pages share the same clickable Failed/Backup badges.
+  window._lastPlan=stratPlan;
   const tierVEntries=stratData?.tierVEntries||[];
   const tierVStatus=stratData?.tierVStatus||{};
 
   let scheduleHtml='';
   if(stratPlan&&stratPlan.posts&&stratPlan.posts.length>0){
-    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
+    // v12.3.1: Unified with Strategy screen — clickable Failed/Backup badges
+    // (showPostError), skipped badge, and 🔬 Debug button. Same header emoji
+    // (📅) and same column order as the Strategy screen so the two views are
+    // always identical.
+    scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
     stratPlan.posts.map(p=>{
       const status=p.status||'pending';
-      const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>':status==='failed'?'<span class="badge badge-red">❌ Failed</span>':status==='backup'?'<span class="badge badge-blue">🔄 Backup</span>':status==='publishing'?'<span class="badge badge-yellow">🔄 Publishing</span>':status==='skipped'?'<span class="badge badge-gray">⏭️ Skipped</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>'
+        :status==='failed'?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>'
+        :status==='backup'?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Backup</span></a>'
+        :status==='publishing'?'<span class="badge badge-yellow">🔄 Publishing</span>'
+        :status==='skipped'?'<span class="badge badge-gray" title="Slot skipped — no matching provider for today'+ "'" +'s theme">⏭️ Skipped</span>'
+        :'<span class="badge badge-yellow">⏳ Pending</span>';
       const win=p.time+'-'+(p.windowEnd||p.time);
       const sched=p.scheduledTime||p.time;
       const schedStyle=status==='pending'?' style="color:var(--accent);font-weight:bold"':'';
       return '<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+statusBadge+'</td></tr>';
     }).join("")+
-    '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time.</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">Theme: '+stratPlan.theme.dayName+' — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
+    '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day).</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">📅 Today Theme: <b>'+stratPlan.theme.dayName+'</b> — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
   }else if(st.today&&st.today.slots&&st.today.slots.length>0){
     scheduleHtml='<div class="card"><h3 style="margin-bottom:8px">📅 Today Schedule — v12 Window / Scheduled</h3><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Category</th><th>Status</th></tr></thead><tbody>'+
     st.today.slots.map((sl,i)=>{const ss=sl.status||'pending';const badge=ss==='published'?'<span class="badge badge-green">✅ Published</span>':ss==='failed'?'<span class="badge badge-red">❌ Failed</span>':ss==='skipped'?'<span class="badge badge-gray">⏭️ Skipped</span>':'<span class="badge badge-yellow">⏳ Pending</span>';const win=sl.time+'-'+(sl.windowEnd||sl.time);const sched=sl.scheduledTime||sl.time;return '<tr><td>'+i+'</td><td style="color:var(--text2)">'+win+'</td><td style="color:var(--accent);font-weight:bold">'+sched+'</td><td>'+sl.category+'</td><td>'+badge+'</td></tr>';}).join("")+
@@ -2848,20 +2861,30 @@ async function loadStrategy(){
   }
 
   // ── DAILY PLAN ──
-  html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📋 Daily Plan ('+plan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button></div></div>';
+  // v12.3.1: Unified with the Scheduler screen — same 📅 emoji, same columns,
+  // same status badges (including ⏭️ Skipped), same button set (Fire Next +
+  // Regenerate + Debug). Both tables must always render identically so the
+  // admin sees a consistent view regardless of which page they're on.
+  html+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+plan.date+') — v12 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div>';
 
   if(plan.posts&&plan.posts.length>0){
     html+='<table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
     for(const p of plan.posts){
       const st=p.status||"pending";
-      const badge=st==="published"?'<span class="badge badge-green">✅ Published</span>':st==="failed"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>':st==="backup"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Backup</span></a>':st==="publishing"?'<span class="badge badge-yellow">🔄 Publishing</span>':'<span class="badge badge-yellow">⏳ Pending</span>';
+      // v12.3.1: Same badge set as the Scheduler screen — includes "skipped".
+      const badge=st==="published"?'<span class="badge badge-green">✅ Published</span>'
+        :st==="failed"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-red" style="cursor:pointer" title="Click to see error">❌ Failed</span></a>'
+        :st==="backup"?'<a href="javascript:void(0)" onclick="showPostError('+p.index+')" style="text-decoration:none"><span class="badge badge-blue" style="cursor:pointer" title="Click to see why primary failed">🔄 Backup</span></a>'
+        :st==="publishing"?'<span class="badge badge-yellow">🔄 Publishing</span>'
+        :st==="skipped"?'<span class="badge badge-gray" title="Slot skipped — no matching provider for today'+ "'" +'s theme">⏭️ Skipped</span>'
+        :'<span class="badge badge-yellow">⏳ Pending</span>';
       const win=p.time+'-'+(p.windowEnd||p.time);
       const sched=p.scheduledTime||p.time;
       const schedStyle=st==='pending'?' style="color:var(--accent);font-weight:bold"':'';
       html+='<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';
     }
     html+='</tbody></table>';
-    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time.</div>';
+    html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within each window (v12 EXACT trigger). The 20-min watcher fires on the first tick at or after this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day).</div>';
   } else {
     html+='<p>No plan generated yet.</p>';
   }

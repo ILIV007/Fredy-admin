@@ -186,24 +186,68 @@ export class StrategyEngine {
 
     const posts: PlannedPost[] = slots.map((slot, index) => {
       // v12.0.13: Wildcard slot — pick from ALL active providers for variety.
+      // v12.3.2: Was made "truly random" (no filter).
+      // v12.3.4: RE-ADDED the MAX_PROVIDER_REPEAT=2 filter per user request —
+      // "no API should appear more than 2 times per day, INCLUDING via wildcard".
+      // The wildcard now picks from providers that haven't hit the 2/day cap yet.
+      // If ALL providers are exhausted (rare — needs 14 providers × 2 = 28 slots,
+      // but we only have ~5 slots/day), fall back to all providers (rare path).
+      // Only ONE wildcard per day (wildcardSlotIndex is a single random index
+      // picked once above).
       let provider: string | null;
       let slotCategory = slot.category;
+      // v12.3.1: Track whether this slot was "skipped" due to theme mismatch
+      // (e.g. Cat C on Saturday where the theme has no Cat C providers).
+      // Such slots are marked "skipped" at generation time so the scheduler
+      // knows not to fire them, and the dashboard shows a clear ⏭️ badge.
+      let slotStatus: PlannedPostStatus = "pending";
 
       if (index === wildcardSlotIndex) {
-        // Wildcard: pick from ALL enabled providers across all categories.
+        // v12.3.4: Wildcard picks from ALL enabled providers across all
+        // categories, BUT excludes providers already used 2× today
+        // (MAX_PROVIDER_REPEAT). This enforces the 2/day-per-API limit.
         const allProviders: string[] = [
           ...(CATEGORY_PROVIDERS["A"] ?? []),
           ...(CATEGORY_PROVIDERS["B"] ?? []),
           ...(CATEGORY_PROVIDERS["C"] ?? []),
         ].filter((id) => this.deps.pluginManager.isEnabled(id));
-        // Exclude providers already used 2x.
+        // v12.3.4: Filter out providers that have already been used 2× today.
         const available = allProviders.filter(
           (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
         );
+        // If all providers are exhausted (all used 2×), fall back to all providers.
+        // This is rare (needs >28 slots/day) but prevents the wildcard from
+        // being null when the plan has many slots.
         const pool = available.length > 0 ? available : allProviders;
-        provider = pool.length > 0 ? pool[randomInt(0, pool.length - 1)]! : null;
+        provider = pool.length > 0
+          ? pool[randomInt(0, pool.length - 1)]!
+          : null;
+        // v12.3.2: When wildcard picks a provider from a DIFFERENT category
+        // than the slot's original category, update slotCategory to match
+        // the provider's actual category. This ensures the scheduler fires
+        // the right content pipeline (Cat A pipeline for a Cat A provider,
+        // even if the slot was originally Cat C). Otherwise a Cat C slot
+        // with a Cat A provider would try to process Cat C content and fail.
+        if (provider) {
+          const providerCat = this.getProviderCategory(provider);
+          if (providerCat && providerCat !== slotCategory) {
+            slotCategory = providerCat;
+          }
+        }
       } else {
         provider = this.selectProvider(slot.category, theme, usedProviders);
+      }
+
+      // v12.3.1: If selectProvider returned null AND the theme is enabled with
+      // preferredProviders, mark the slot as "skipped" (no matching provider
+      // for the day's theme). The slot stays in the plan with status=skipped
+      // so the dashboard shows a clear ⏭️ badge and the scheduler skips it.
+      // v12.3.4: Also mark as "skipped" when selectProvider returns null due
+      // to the 2/day cap being hit (all providers in the category at MAX_PROVIDER_REPEAT).
+      // This can happen on Friday when the wildcard already used xkcd once,
+      // and 2 Cat C slots bring xkcd to 2× — the 3rd Cat C slot gets skipped.
+      if (!provider) {
+        slotStatus = "skipped" as PlannedPostStatus;
       }
 
       // Track usage.
@@ -211,7 +255,7 @@ export class StrategyEngine {
         usedProviders.set(provider, (usedProviders.get(provider) ?? 0) + 1);
       }
 
-      const priority = this.assignPriority(slot.category, strategy.mode);
+      const priority = this.assignPriority(slotCategory, strategy.mode);
       return {
         id: `plan-${targetDate}-${index}`,
         index,
@@ -226,7 +270,7 @@ export class StrategyEngine {
         language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,
         priority,
         queueTarget: this.getQueueTarget(slot.category),
-        status: "pending" as PlannedPostStatus,
+        status: slotStatus,
         windowIndex: index,
       };
     });
@@ -414,6 +458,11 @@ export class StrategyEngine {
    * v12.0.13: MAX_PROVIDER_REPEAT = 2 — no provider appears more than twice
    *   per day. If a provider has already been used 2x, it's excluded from
    *   selection. This ensures variety even on themed days.
+   * v12.3.1: THEME-SLOT SKIP — if theme.preferredProviders is set and NONE
+   *   of them are in the slot's category AND the category has only ONE
+   *   enabled provider (e.g. Cat C with just xkcd), return null to mark
+   *   the slot as "skipped". This prevents off-theme providers (like xkcd
+   *   on AI-themed Saturday) from being force-assigned to a slot.
    *
    * @param category — the slot's category (A/B/C)
    * @param theme — the weekly theme for today (null = no theme)
@@ -438,8 +487,21 @@ export class StrategyEngine {
       (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
     );
 
-    // If all providers are exhausted (used 2x each), reset and allow all.
-    providers = availableProviders.length > 0 ? availableProviders : providers;
+    // v12.3.4: STRICT 2/day cap — if all providers in this category are
+    // already at MAX_PROVIDER_REPEAT, return null (mark slot as "skipped")
+    // INSTEAD of resetting to all providers. The old "reset to all" behavior
+    // broke the 2/day-per-API limit: e.g. on Friday, Cat C has only xkcd;
+    // if the wildcard already used xkcd once, the first Cat C slot brings it
+    // to 2×, and the second Cat C slot would "reset" and force xkcd to 3×.
+    // Now the second Cat C slot gets status="skipped" instead.
+    // This is safe because with ~5 slots/day and MAX_PROVIDER_REPEAT=2,
+    // exhausting a multi-provider category (needs 2× providerCount slots)
+    // is impossible — only single-provider categories (Cat C with just xkcd)
+    // can be exhausted, and skipping them is the correct behavior.
+    if (availableProviders.length === 0) {
+      return null;
+    }
+    providers = availableProviders;
 
     // v12.3.0: NEW — Use theme.preferredProviders FIRST.
     // Each day has an explicit list of 4-5 provider IDs that should be prioritized.
@@ -452,6 +514,19 @@ export class StrategyEngine {
       if (preferred.length > 0) {
         // Pick a random preferred provider that hasn't been used too many times.
         return preferred[randomInt(0, preferred.length - 1)]!;
+      }
+
+      // v12.3.1: THEME-SLOT SKIP — if the theme has preferredProviders but NONE
+      // of them are in the slot's category providers, AND the slot's category
+      // has only ONE enabled provider (e.g. Cat C with just xkcd), return null
+      // so the slot gets marked as "skipped" instead of forcing an off-theme
+      // provider. This is what makes xkcd NOT appear on Saturday (AI day) —
+      // Cat C has only xkcd, and Saturday's preferredProviders are all Cat A.
+      const themeHasCategoryProvider = theme.preferredProviders.some((id) =>
+        allProviders.includes(id) && this.deps.pluginManager.isEnabled(id),
+      );
+      if (!themeHasCategoryProvider && providers.length === 1) {
+        return null;
       }
     }
 
@@ -470,6 +545,27 @@ export class StrategyEngine {
 
     // No theme, no preferred, no topic match — pick random.
     return providers[randomInt(0, providers.length - 1)]!;
+  }
+
+  // ────────────────────────────────────────────────────────
+  // Internal: Provider Category Lookup
+  // ────────────────────────────────────────────────────────
+
+  /**
+   * v12.3.2: Look up which category a provider belongs to.
+   * Used by the wildcard slot logic — when the wildcard picks a provider from
+   * a different category than the slot's original category, we need to know the
+   * provider's actual category so the scheduler fires the right pipeline.
+   *
+   * Returns null if the provider isn't in CATEGORY_PROVIDERS (shouldn't happen
+   * for enabled providers, but defensive).
+   */
+  private getProviderCategory(providerId: string): Category | null {
+    for (const cat of ["A", "B", "C"] as const) {
+      const list = CATEGORY_PROVIDERS[cat];
+      if (list && list.includes(providerId)) return cat;
+    }
+    return null;
   }
 
   // ────────────────────────────────────────────────────────

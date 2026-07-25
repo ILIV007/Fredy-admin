@@ -6,9 +6,14 @@ import type { PluginManifest } from "../../../types/plugin";
 export const githubTrendingManifest: PluginManifest = {
   id: "github-trending",
   name: "GitHub Trending",
-  version: "1.0.0",
+  version: "1.1.0",
   enabled: true,
-  category: "C",
+  // v12.3.2: Was "C" — mismatched central config (providers.config.ts) and
+  // CATEGORY_PROVIDERS (both said "A"). Now consistent: Cat A, same as the
+  // other GitHub Tier S plugins (github, github-releases, github-events).
+  // GitHub Trending is core developer content (open source discovery),
+  // not "supporting/fun" content like Cat C (XKCD).
+  category: "A",
   tier: "S",
   priority: 4,
   rateLimit: 60,

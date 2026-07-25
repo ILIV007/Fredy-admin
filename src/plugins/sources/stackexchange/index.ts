@@ -102,14 +102,18 @@ export class StackExchangePlugin implements Plugin {
     for (const tags of shuffledTags.slice(0, 3)) {
       const tagged = tags.join(";");
 
+      // v12.3.1: Use filter=withbody so the question body is returned.
+      // Without this, the default filter returns only title/score/tags/link —
+      // no body, no excerpt, no images. We need the body to extract <img> tags
+      // for the post's cover image. Stack Overflow questions often contain
+      // diagrams/screenshots embedded as <img src="..."> in the body.
       const params = new URLSearchParams({
         order: "desc",
         sort: "votes",
         tagged,
         site: "stackoverflow",
         pagesize: "20",
-        // v11.4.0: Use default filter (no custom filter param — custom filters
-        // can cause 400 errors if they're invalid or expired).
+        filter: "withbody",
       });
 
       const url = `${SO_API}/questions?${params.toString()}`;
@@ -179,16 +183,28 @@ export class StackExchangePlugin implements Plugin {
 
   normalize(raw: unknown): SourceItem {
     const q = raw as SOQuestion;
-    // When no body is returned (default filter), build a fallback body from tags.
+    // When no body is returned (rare with filter=withbody, but possible if API
+    // throttles and falls back to default filter), build a fallback body from tags.
     const body = q.body ?? q.excerpt ?? (q.tags && q.tags.length > 0
       ? `Tags: ${q.tags.join(", ")}`
       : "");
     // v12.2.0: Try to extract image from body HTML (StackExchange doesn't have cover_image).
+    // v12.3.1: Also resolve relative URLs (e.g. /assets/img.png → https://...
+    // sstatic.net/assets/img.png). Stack Overflow uses relative URLs for some
+    // embedded images (e.g. user uploaded screenshots).
     let imageUrl: string | undefined;
     if (body) {
       const imgMatch = /<img[^>]+src=["']([^"']+)["']/i.exec(body);
-      if (imgMatch?.[1] && imgMatch[1].startsWith("http")) {
-        imageUrl = imgMatch[1];
+      if (imgMatch?.[1]) {
+        const rawUrl = imgMatch[1];
+        if (rawUrl.startsWith("http")) {
+          imageUrl = rawUrl;
+        } else if (rawUrl.startsWith("//")) {
+          imageUrl = `https:${rawUrl}`;
+        } else if (rawUrl.startsWith("/")) {
+          // Resolve relative URL against stackoverflow.com.
+          imageUrl = `https://stackoverflow.com${rawUrl}`;
+        }
       }
     }
     return {
@@ -286,6 +302,12 @@ export class StackExchangePlugin implements Plugin {
             score: 0,
             source: "rss",
           },
+          // v12.3.1: Set displayIcon + displaySource in RSS path too —
+          // previously missing, which caused RSS-fetched posts to fall back
+          // to the generic "Source" label with a random emoji instead of
+          // showing "📚 Stack Overflow" as the link text.
+          displayIcon: this.metadata.displayIcon ?? "📚",
+          displaySource: this.metadata.displaySource ?? "Stack Overflow",
           fetchedAt: Date.now(),
         });
       }
