@@ -105,33 +105,37 @@ describe("getActiveStrategy — custom uses customDistribution", () => {
 });
 
 describe("getThemeForDate — returns correct theme for each day", () => {
-  // v12.0.0: Updated to match v11.1.0 theme config.
-  // Monday (day=1): topics = ["Web Development", "Frameworks", "React", "Next.js"]
-  // Sunday (day=0): topics = ["Cloud", "Backend", "Cloudflare", "DevOps"]
-  // Saturday (day=6): topics = ["AI", "Open Source", "Hugging Face", "GitHub"]
-  // Friday (day=5): topics = ["Community", "Space", "NASA", "XKCD"]
+  // v12.3.0: Updated to match new theme config with preferredProviders.
+  // Monday (day=1): topics = ["Web Development", "Frameworks", "Tools"], providers = github, github-trending, devto, hackernews-algolia
+  // Sunday (day=0): topics = ["Cloud", "Backend", "Infrastructure"], providers = cloudflare-blog, github-releases, stackexchange, producthunt
+  // Saturday (day=6): topics = ["AI", "Open Source", "Innovation"], providers = huggingface-blog, github-events, devto, openai-news
+  // Friday (day=5): topics = ["Community", "Fun", "Space"], providers = xkcd, github, reddit-v2, github-trending
 
   // 2026-07-13 is a Monday (day=1)
   const monday = engine.getThemeForDate("2026-07-13", true);
   assert(monday !== null, "Monday has a theme");
   assert(monday!.dayName === "Monday", "Monday theme dayName is Monday");
-  assert(monday!.topics.includes("React"), "Monday includes React topic");
+  assert(monday!.topics.includes("Web Development"), "Monday includes Web Development topic");
+  assert(monday!.preferredProviders.includes("github"), "Monday includes github provider");
 
   // 2026-07-19 is a Sunday (day=0)
   const sunday = engine.getThemeForDate("2026-07-19", true);
   assert(sunday !== null, "Sunday has a theme");
   assert(sunday!.dayName === "Sunday", "Sunday theme dayName is Sunday");
-  assert(sunday!.topics.includes("Cloudflare"), "Sunday includes Cloudflare topic");
+  assert(sunday!.topics.includes("Cloud"), "Sunday includes Cloud topic");
+  assert(sunday!.preferredProviders.includes("cloudflare-blog"), "Sunday includes cloudflare-blog provider");
 
-  // 2026-07-18 is a Saturday (day=6) — has AI topic
+  // 2026-07-18 is a Saturday (day=6)
   const saturday = engine.getThemeForDate("2026-07-18", true);
   assert(saturday !== null, "Saturday has a theme");
   assert(saturday!.topics.includes("AI"), "Saturday includes AI topic");
+  assert(saturday!.preferredProviders.includes("huggingface-blog"), "Saturday includes huggingface-blog provider");
 
-  // 2026-07-17 is a Friday (day=5) — has XKCD topic
+  // 2026-07-17 is a Friday (day=5)
   const friday = engine.getThemeForDate("2026-07-17", true);
   assert(friday !== null, "Friday has a theme");
-  assert(friday!.topics.includes("XKCD"), "Friday includes XKCD topic");
+  assert(friday!.topics.includes("Fun"), "Friday includes Fun topic");
+  assert(friday!.preferredProviders.includes("xkcd"), "Friday includes xkcd provider");
 
   // Disabled returns null
   const disabled = engine.getThemeForDate("2026-07-13", false);

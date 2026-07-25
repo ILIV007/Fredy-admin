@@ -106,15 +106,45 @@ export const BUILTIN_STRATEGIES: Readonly<Record<string, StrategyDefinition>> = 
 import type { WeeklyThemes } from "../../../types/strategy";
 
 export const DEFAULT_WEEKLY_THEMES: WeeklyThemes = [
-  // v11.1.0: Updated weekly themes per refactor spec.
+  // v12.3.0: Complete rewrite — each day has explicit preferredProviders.
   // Day 0 = Sunday (JS getDay()), 1 = Monday, ... 6 = Saturday.
-  { day: 6, dayName: "Saturday",  topics: ["AI", "Open Source", "Hugging Face", "GitHub"] },
-  { day: 0, dayName: "Sunday",    topics: ["Cloud", "Backend", "Cloudflare", "DevOps"] },
-  { day: 1, dayName: "Monday",    topics: ["Web Development", "Frameworks", "React", "Next.js"] },
-  { day: 2, dayName: "Tuesday",   topics: ["Open Source", "GitHub", "Community"] },
-  { day: 3, dayName: "Wednesday", topics: ["Security", "Advisories", "GitHub Security"] },
-  { day: 4, dayName: "Thursday",  topics: ["Developer Tools", "Product Hunt", "Dev.to"] },
-  { day: 5, dayName: "Friday",    topics: ["Community", "Space", "NASA", "XKCD"] },
+  // Every day covers different APIs so all 15 active providers are used across the week.
+  // Each day has 4-5 preferred providers; the scheduler picks from these first.
+  {
+    day: 6, dayName: "Saturday",
+    topics: ["AI", "Open Source", "Innovation"],
+    preferredProviders: ["huggingface-blog", "github-events", "devto", "openai-news"],
+  },
+  {
+    day: 0, dayName: "Sunday",
+    topics: ["Cloud", "Backend", "Infrastructure"],
+    preferredProviders: ["cloudflare-blog", "github-releases", "stackexchange", "producthunt"],
+  },
+  {
+    day: 1, dayName: "Monday",
+    topics: ["Web Development", "Frameworks", "Tools"],
+    preferredProviders: ["github", "github-trending", "devto", "hackernews-algolia"],
+  },
+  {
+    day: 2, dayName: "Tuesday",
+    topics: ["Open Source", "Community", "Discovery"],
+    preferredProviders: ["github-events", "github-trending", "reddit-v2", "cloudflare-blog"],
+  },
+  {
+    day: 3, dayName: "Wednesday",
+    topics: ["Security", "Advisories", "Best Practices"],
+    preferredProviders: ["github-security", "github-releases", "stackexchange", "hackernews-algolia"],
+  },
+  {
+    day: 4, dayName: "Thursday",
+    topics: ["Developer Tools", "Products", "Innovation"],
+    preferredProviders: ["producthunt", "huggingface-blog", "openai-news", "devto"],
+  },
+  {
+    day: 5, dayName: "Friday",
+    topics: ["Community", "Fun", "Space"],
+    preferredProviders: ["xkcd", "github", "reddit-v2", "github-trending"],
+  },
 ];
 
 // ────────────────────────────────────────────────────────────

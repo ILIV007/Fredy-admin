@@ -441,19 +441,23 @@ export class StrategyEngine {
     // If all providers are exhausted (used 2x each), reset and allow all.
     providers = availableProviders.length > 0 ? availableProviders : providers;
 
-    // If no theme, pick random.
-    if (!theme || theme.topics.length === 0) {
-      return providers[randomInt(0, providers.length - 1)]!;
+    // v12.3.0: NEW — Use theme.preferredProviders FIRST.
+    // Each day has an explicit list of 4-5 provider IDs that should be prioritized.
+    // We pick from the intersection of preferredProviders ∩ availableProviders.
+    if (theme && theme.preferredProviders && theme.preferredProviders.length > 0) {
+      const preferred = theme.preferredProviders
+        .filter((id) => providers.includes(id))
+        .filter((id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT);
+
+      if (preferred.length > 0) {
+        // Pick a random preferred provider that hasn't been used too many times.
+        return preferred[randomInt(0, preferred.length - 1)]!;
+      }
     }
 
-    // v12.0.11: Theme matching — provider ID must CONTAIN the topic keyword.
-    // v12.1.9: Removed the >= 4 char filter — it was dropping "AI" (2 chars)
-    // and "NASA" (4 chars, kept but barely). All topics are meaningful.
-    const themeTopicsLower = theme.topics
-      .map((t) => t.toLowerCase());
-
-    if (themeTopicsLower.length > 0) {
-      // Find providers whose ID contains a theme topic keyword.
+    // Fallback: if no preferred providers available, use topic matching (old logic).
+    if (theme && theme.topics.length > 0) {
+      const themeTopicsLower = theme.topics.map((t) => t.toLowerCase());
       const matchedProviders = providers.filter((provider) => {
         const providerLower = provider.toLowerCase();
         return themeTopicsLower.some((topic) => providerLower.includes(topic));
@@ -464,7 +468,7 @@ export class StrategyEngine {
       }
     }
 
-    // No match — pick random.
+    // No theme, no preferred, no topic match — pick random.
     return providers[randomInt(0, providers.length - 1)]!;
   }
 

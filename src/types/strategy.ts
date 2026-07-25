@@ -48,11 +48,15 @@ export interface StrategyDefinition {
 // Weekly Themes
 // ────────────────────────────────────────────────────────────
 
-/** A daily theme with topics that influence provider selection. */
+/** A daily theme with topics that influence provider selection.
+ *  v12.3.0: Added preferredProviders — explicit list of provider IDs that
+ *  should be prioritized on this day. The scheduler will try these first. */
 export interface DailyTheme {
   readonly day: number; // 0=Sunday, 1=Monday, ..., 6=Saturday
   readonly dayName: string;
   readonly topics: readonly string[];
+  /** v12.3.0: Explicit provider IDs to prioritize on this day. */
+  readonly preferredProviders: readonly string[];
 }
 
 /** Weekly theme configuration (7 days). */

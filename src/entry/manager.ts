@@ -2824,22 +2824,23 @@ async function loadStrategy(){
     html+='<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>';
   }
 
-  // ── v12.0.12: WEEKLY SCHEDULE OVERVIEW ──
+  // ── v12.3.0: WEEKLY SCHEDULE OVERVIEW (with preferred providers) ──
   if(d.weeklyThemes){
-    html+='<div class="card" style="border:1px solid var(--accent)"><h3 style="margin-bottom:8px">📅 Weekly Schedule — Themes & Topics</h3>';
-    html+='<p style="color:var(--text2);font-size:12px;margin-bottom:10px">Each day has a theme that influences provider selection. On themed days, providers matching the theme topics are prioritized.</p>';
-    const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    html+='<div class="card" style="border:1px solid var(--accent)"><h3 style="margin-bottom:8px">📅 Weekly Schedule — Themes & APIs</h3>';
+    html+='<p style="color:var(--text2);font-size:12px;margin-bottom:10px">Each day prioritizes specific APIs. 1 wildcard post per day from a random API across all categories. +1 Tier V (NASA) nightly at 23:00.</p>';
     const dayEmojis=['☀️','📅','🔥','⭐','💡','🎉','🌙'];
     const today=new Date().getDay();
     for(const theme of d.weeklyThemes){
       const isToday=theme.day===today;
       const borderColor=isToday?'var(--accent)':'var(--border)';
       const bg=isToday?'rgba(99,102,241,.08)':'var(--surface)';
+      const providers=theme.preferredProviders||[];
       html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid '+borderColor+';border-radius:8px;margin-bottom:6px;background:'+bg+'">'+
         '<span style="font-size:20px">'+(dayEmojis[theme.day]||'📅')+'</span>'+
         '<div style="flex:1">'+
           '<div style="font-weight:600;font-size:14px">'+escapeHtml(theme.dayName)+(isToday?' <span class="badge badge-blue" style="margin-left:4px">TODAY</span>':'')+'</div>'+
-          '<div style="font-size:11px;color:var(--text2);margin-top:2px">'+theme.topics.map(t=>'<span class="badge badge-gray" style="margin:1px">'+escapeHtml(t)+'</span>').join(' ')+'</div>'+
+          '<div style="font-size:10px;color:var(--text2);margin-top:2px">Topics: '+theme.topics.map(t=>'<span class="badge badge-gray" style="margin:1px;font-size:9px">'+escapeHtml(t)+'</span>').join(' ')+'</div>'+
+          '<div style="font-size:10px;margin-top:4px"><b style="color:var(--accent)">APIs:</b> '+providers.map(p=>'<span class="badge badge-blue" style="margin:1px;font-size:9px">'+escapeHtml(p)+'</span>').join(' ')+'</div>'+
         '</div>'+
       '</div>';
     }

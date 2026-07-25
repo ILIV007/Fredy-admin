@@ -1466,11 +1466,12 @@ export class SchedulerService {
             time: p.time,
             epochMs: p.epochMs,
             windowEnd: p.windowEnd ?? p.time,
-            scheduledTime: p.scheduledTime,  // v11.17.0: display-only
+            scheduledTime: p.scheduledTime,
             category: p.category,
+            provider: p.provider,  // v12.2.2: Carry provider for display
             jitterMinutes: 0,
             fired: p.status === "published" || p.status === "failed" || p.status === "backup",
-            status: p.status, // v8.7.0: carry real 3-state status
+            status: p.status,
           })),
           generatedAt: stratPlan.generatedAt,
           timezone: stratPlan.timezone,
