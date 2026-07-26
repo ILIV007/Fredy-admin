@@ -2027,7 +2027,7 @@ async function loadDashboard(){
       const failed = plan.posts.filter(p => p.status === "failed");
 
       html += '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-        '<h3 style="margin:0">📅 Today\'s Plan Preview</h3>'+
+        '<h3 style="margin:0">📅 Today&rsquo;s Plan Preview</h3>'+
         '<span style="font-size:11px;color:var(--text2)">'+escapeHtml(plan.date)+' · '+escapeHtml(plan.strategy||"—")+'</span>'+
       '</div>';
 
@@ -2064,7 +2064,7 @@ async function loadDashboard(){
       }
 
       html += '<div style="margin-top:8px;font-size:10px;color:var(--text2)">'+
-        'Full details: <a href="#" onclick="loadPage(\'scheduler\');return false" style="color:var(--blue)">Open Scheduler →</a>'+
+        'Full details: <a href="#" onclick="loadPage('+"'"+'scheduler'+"'"+');return false" style="color:var(--blue)">Open Scheduler →</a>'+
       '</div>';
       html += '</div>';
     }
