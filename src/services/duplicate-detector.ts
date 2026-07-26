@@ -212,6 +212,11 @@ export class DuplicateDetector {
    * Cloudflare Blog: "cloudflare-blog:slug"
    * HuggingFace: "huggingface-blog:slug"
    * OpenAI News: "openai-news:slug"
+   * v13.1.3: Tier H RSS providers:
+   *   Ars Technica: "ars-technica:slug"
+   *   Tom's Hardware: "toms-hardware:slug"
+   *   TechPowerUp: "techpowerup:slug"
+   *   AnandTech (legacy): "anandtech:slug"
    * NASA: "nasa:date"
    * XKCD: "xkcd:comicId"
    */
@@ -312,6 +317,52 @@ export class DuplicateDetector {
     if (source === "openai-news") {
       const match = /openai\.com\/(?:index|blog)\/([^/?#]+)/i.exec(url);
       if (match) return `openai-news:${match[1]}`;
+      return null;
+    }
+
+    // v13.1.3: Tier H RSS providers — extract slug from URL.
+    // These have stable article URLs with a unique slug at the end of the path.
+    // Same pattern as cloudflare-blog / huggingface-blog / openai-news above.
+    // Without this, Tier H items would fall back to the URL-hash + content-hash
+    // layers, which works but is less efficient and misses the fastest/most-
+    // reliable dedup layer (canonical ID).
+    if (source === "ars-technica") {
+      // Examples: https://arstechnica.com/science/2026/07/long-slug-here/
+      //           https://arstechnica.com/gadgets/2026/07/another-slug/
+      const match = /arstechnica\.com\/(?:[^/]+\/){0,3}([^/?#]+)/i.exec(url);
+      if (match && match[1] && !["science", "tech-policy", "gadgets", "ai", "security", "space"].includes(match[1])) {
+        return `ars-technica:${match[1]}`;
+      }
+      return null;
+    }
+    if (source === "toms-hardware") {
+      // Examples: https://www.tomshardware.com/tech-industry/computing/some-slug-here
+      //           https://www.tomshardware.com/news/some-news-slug
+      const match = /tomshardware\.com\/(?:[^/]+\/){0,3}([^/?#]+)/i.exec(url);
+      if (match && match[1] && !["news", "reviews", "tech-industry", "computing", "components"].includes(match[1])) {
+        return `toms-hardware:${match[1]}`;
+      }
+      return null;
+    }
+    if (source === "techpowerup") {
+      // Examples: https://www.techpowerup.com/news/123456/some-slug-here
+      //           https://www.techpowerup.com/review/123456/some-slug
+      // The numeric ID is the most stable — slugs can be edited.
+      const idMatch = /techpowerup\.com\/(?:news|review|article)\/(\d+)/i.exec(url);
+      if (idMatch) return `techpowerup:${idMatch[1]}`;
+      // Fallback: extract slug.
+      const slugMatch = /techpowerup\.com\/(?:[^/]+\/){0,2}([^/?#]+)/i.exec(url);
+      if (slugMatch && slugMatch[1]) return `techpowerup:${slugMatch[1]}`;
+      return null;
+    }
+    if (source === "anandtech") {
+      // Examples: https://www.anandtech.com/show/12345/some-slug
+      // The numeric show ID is the most stable canonical identifier.
+      const idMatch = /anandtech\.com\/show\/(\d+)/i.exec(url);
+      if (idMatch) return `anandtech:${idMatch[1]}`;
+      // Fallback: slug.
+      const slugMatch = /anandtech\.com\/(?:[^/]+\/){0,2}([^/?#]+)/i.exec(url);
+      if (slugMatch && slugMatch[1]) return `anandtech:${slugMatch[1]}`;
       return null;
     }
 

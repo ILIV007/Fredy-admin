@@ -340,6 +340,110 @@ describe("9. v9.3.1: recordPublished() with empty body uses fallback hash", asyn
   assert(!result.isDuplicate, "different empty-body HN post is NOT a duplicate");
 });
 
+// v13.1.3: Tests for canonical ID extraction for Tier H RSS providers.
+// Ars Technica, Tom's Hardware, TechPowerUp, AnandTech all have stable article
+// URLs. The canonical ID layer is the fastest/most-reliable dedup layer.
+describe("10. v13.1.3: ars-technica canonical ID extraction", async () => {
+  const { detector } = makeDetector();
+  await detector.record({
+    id: "ars-1", pluginId: "ars-technica",
+    url: "https://arstechnica.com/science/2026/07/spacex-starship-test-flight/",
+    title: "SpaceX Starship Test Flight",
+    body: "", source: "ars-technica",
+    raw: {} as ContentItem["raw"],
+  });
+  // Same URL with DIFFERENT title — should be detected as duplicate via canonical ID.
+  const dup = await detector.check({
+    id: "ars-2", source: "ars-technica",
+    url: "https://arstechnica.com/science/2026/07/spacex-starship-test-flight/",
+    title: "Different Title", body: "",
+    raw: {} as ContentItem["raw"],
+    language: "en", fetchedAt: Date.now(),
+  });
+  assert(dup.isDuplicate, "ars-technica: same URL (different title) detected as duplicate");
+  assert(dup.reason === "canonical", `ars-technica: detected via canonical ID (got: ${dup.reason})`);
+});
+
+describe("11. v13.1.3: toms-hardware canonical ID extraction", async () => {
+  const { detector } = makeDetector();
+  await detector.record({
+    id: "tom-1", pluginId: "toms-hardware",
+    url: "https://www.tomshardware.com/tech-industry/computing/amd-ryzen-9000-launch",
+    title: "AMD Ryzen 9000 Launch",
+    body: "", source: "toms-hardware",
+    raw: {} as ContentItem["raw"],
+  });
+  const dup = await detector.check({
+    id: "tom-2", source: "toms-hardware",
+    url: "https://www.tomshardware.com/tech-industry/computing/amd-ryzen-9000-launch",
+    title: "Different Title", body: "",
+    raw: {} as ContentItem["raw"],
+    language: "en", fetchedAt: Date.now(),
+  });
+  assert(dup.isDuplicate, "toms-hardware: same URL detected as duplicate");
+  assert(dup.reason === "canonical", `toms-hardware: detected via canonical ID (got: ${dup.reason})`);
+});
+
+describe("12. v13.1.3: techpowerup canonical ID extraction (numeric ID is stable)", async () => {
+  const { detector } = makeDetector();
+  await detector.record({
+    id: "tpu-1", pluginId: "techpowerup",
+    url: "https://www.techpowerup.com/news/98765/some-gpu-launch",
+    title: "GPU Launch",
+    body: "", source: "techpowerup",
+    raw: {} as ContentItem["raw"],
+  });
+  // Same numeric ID, DIFFERENT slug — should still be detected via canonical ID.
+  const dup = await detector.check({
+    id: "tpu-2", source: "techpowerup",
+    url: "https://www.techpowerup.com/news/98765/changed-slug",
+    title: "Different", body: "",
+    raw: {} as ContentItem["raw"],
+    language: "en", fetchedAt: Date.now(),
+  });
+  assert(dup.isDuplicate, "techpowerup: same numeric ID detected as duplicate even if slug changes");
+  assert(dup.reason === "canonical", `techpowerup: detected via canonical ID (got: ${dup.reason})`);
+});
+
+describe("13. v13.1.3: anandtech canonical ID extraction (numeric show ID)", async () => {
+  const { detector } = makeDetector();
+  await detector.record({
+    id: "anand-1", pluginId: "anandtech",
+    url: "https://www.anandtech.com/show/12345/some-cpu-review",
+    title: "CPU Review",
+    body: "", source: "anandtech",
+    raw: {} as ContentItem["raw"],
+  });
+  const dup = await detector.check({
+    id: "anand-2", source: "anandtech",
+    url: "https://www.anandtech.com/show/12345/changed-slug",
+    title: "Different", body: "",
+    raw: {} as ContentItem["raw"],
+    language: "en", fetchedAt: Date.now(),
+  });
+  assert(dup.isDuplicate, "anandtech: same show ID detected as duplicate even if slug changes");
+  assert(dup.reason === "canonical", `anandtech: detected via canonical ID (got: ${dup.reason})`);
+});
+
+describe("14. v13.1.3: different ars-technica articles are NOT duplicates", async () => {
+  const { detector } = makeDetector();
+  await detector.record({
+    id: "ars-1", pluginId: "ars-technica",
+    url: "https://arstechnica.com/science/2026/07/article-one/",
+    title: "Article One",
+    body: "", source: "ars-technica",
+    raw: {} as ContentItem["raw"],
+  });
+  const dup = await detector.check({
+    id: "ars-2", source: "ars-technica",
+    url: "https://arstechnica.com/science/2026/07/different-article-here/",
+    title: "Different Article", body: "",
+    raw: {} as ContentItem["raw"],
+    language: "en", fetchedAt: Date.now(),
+  });
+  assert(!dup.isDuplicate, "different ars-technica article NOT flagged as duplicate");
+});
+
 // ────────────────────────────────────────────────────────────
 // Runner
 // ────────────────────────────────────────────────────────────

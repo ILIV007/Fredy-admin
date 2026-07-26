@@ -32,6 +32,9 @@ import {
   DEFAULT_WEEKLY_THEMES,
   CATEGORY_PROVIDERS,
 } from "../core/config/sections/strategy";
+// v13.1.3: selectProviderWeighted replaces uniform-random provider selection.
+// Reads the `weight` field from each provider's config entry in providers.config.ts.
+import { selectProviderWeighted } from "../core/providers.config";
 import type { TimeGenerator } from "./time-generator";
 import type { QuietHoursChecker } from "./quiet-hours-checker";
 import type { KVStore } from "./kv-store";
@@ -129,12 +132,44 @@ export class StrategyEngine {
     // Previously: if strategy said 9 posts but only 8 windows, it scaled DOWN to 8.
     // Now: time-generator supports multiple posts per window (v13.0.9 fix).
     // So we pass the FULL distribution to time-generator — no scaling needed.
-    // Category H is additive and added AFTER A/B/C slots.
+    //
+    // v13.1.3: CRITICAL FIX — Tier H slots are now INCLUDED in the time-generator's
+    // equal-segment algorithm. Previously, H slots were generated separately AFTER
+    // A/B/C, using randomTimeInWindow() with effectiveGap = min(90, windowSize/2)
+    // = 60 min for a 2h window. On high-post-count days (turbo: 11 A/B/C + 4 H =
+    // 15 posts in ~14 hours), a strict 60-min gap between H and any A/B/C post was
+    // mathematically impossible (needs 15 × 120 = 30h, only 14h available), so
+    // the algorithm fell back to randomTimeInWindow() which has NO gap check.
+    // This produced collisions like two posts at 11:16, or H 10 min after a B.
+    //
+    // Now H is part of the same equal-segment algorithm. Each H post gets its own
+    // dedicated segment of the day, and effectiveGap is dynamically scaled based
+    // on the actual post count (segmentSize/2). This guarantees uniform spread.
+    const tierHConfig = strategyConfig.tierH;
+    let hCount = 0;
+    if (tierHConfig?.enabled) {
+      hCount = this.getHPostCountForMode(strategyConfig.mode, tierHConfig);
+      // Conservative mode: publish H every N days (not daily).
+      if (strategyConfig.mode === "conservative" && hCount === 0) {
+        const dayOfYear = Math.floor(Date.parse(targetDate + "T00:00:00Z") / 86400000);
+        const interval = tierHConfig.conservativeIntervalDays ?? 2;
+        if (dayOfYear % interval === 0) {
+          hCount = 1; // Conservative publishes 1 H post on interval days.
+        }
+      }
+      // User spec: "Every generated week MUST contain at least one Tier H slot
+      // every day." So if H count is 0 for non-conservative modes, force 1.
+      // (minimal mode is the only exception — it's explicitly low-activity.)
+      if (hCount === 0 && strategyConfig.mode !== "minimal" && strategyConfig.mode !== "conservative") {
+        hCount = 1;
+      }
+    }
+
     const scaledDist: Record<Category, number> = {
       A: distribution.A,
       B: distribution.B,
       C: distribution.C,
-      H: 0, // H is added separately below
+      H: hCount, // v13.1.3: H is now part of the equal-segment algorithm
     };
     const categoryDist: Record<Category, number> = scaledDist;
     const slots = this.deps.timeGenerator.generate(
@@ -149,10 +184,22 @@ export class StrategyEngine {
     // active APIs regardless of category, for maximum variety.
     const usedProviders = new Map<string, number>();
 
-    // v12.0.13: Pick a random slot index for the "wildcard" post.
-    // This slot will use a random provider from ALL categories, not just
-    // its assigned category — ensuring diverse content.
-    const wildcardSlotIndex = slots.length > 0 ? randomInt(0, slots.length - 1) : -1;
+    // v13.1.3: Pick a random slot index for the "wildcard" post — but NEVER
+    // pick an H slot. Wildcard changes slotCategory to match the picked
+    // provider's category, so an H-slot wildcard could pick a non-H provider
+    // and convert the H slot to A/B/C — reducing the daily H count below 1
+    // (which violates the "no day may omit Tier H" spec). Excluding H slots
+    // from the wildcard pool guarantees every day keeps its H quota.
+    // Fallback: if ALL slots are H (degenerate case — only happens in tests
+    // with H-only distributions), allow wildcard on any slot.
+    const nonHSlotIndices: number[] = [];
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i]!.category !== "H") nonHSlotIndices.push(i);
+    }
+    const wildcardPool = nonHSlotIndices.length > 0 ? nonHSlotIndices : slots.map((_, i) => i);
+    const wildcardSlotIndex = wildcardPool.length > 0
+      ? wildcardPool[randomInt(0, wildcardPool.length - 1)]!
+      : -1;
 
     const posts: PlannedPost[] = slots.map((slot, index) => {
       // v12.0.13: Wildcard slot — pick from ALL active providers for variety.
@@ -199,6 +246,11 @@ export class StrategyEngine {
             slotCategory = providerCat;
           }
         }
+      } else if (slot.category === "H" && tierHConfig?.enabled) {
+        // v13.1.3: H slots are now interleaved into the equal-segment algorithm
+        // by the time-generator (buildCategoryList round-robins A/B/H). Here we
+        // just need to pick a Tier H provider for the slot.
+        provider = this.selectHProvider(tierHConfig, usedProviders, theme);
       } else {
         provider = this.selectProvider(slot.category, theme, usedProviders);
       }
@@ -257,125 +309,21 @@ export class StrategyEngine {
       };
     });
 
-    // v13.0.0: ADDITIVE Tier H slots.
-    // Category H is ADDITIVE — it does NOT replace A/B/C slots. Instead, H
-    // slots are appended to the plan AFTER the A/B/C slots. The number of H
-    // slots per day depends on the active strategy mode (configurable via
-    // strategy.tierH.extraHPostsPerMode). Every day MUST have at least 1 H
-    // slot (per user spec: "No day may omit Tier H"), unless the mode
-    // explicitly sets H=0 (conservative/minimal) AND the conservative interval
-    // logic skips today.
-    const tierHConfig = strategyConfig.tierH;
+    // v13.1.3: Tier H slots are now generated INSIDE the time-generator's
+    // equal-segment algorithm (buildCategoryList interleaves A/B/H). The old
+    // separate H-generation block (randomTimeInWindow + fallback that ignored
+    // minGap) is removed — see the v13.1.3 changelog entry for the full root
+    // cause analysis. H providers are still picked via selectHProvider() with
+    // its rotation/cooldown/anti-repeat logic, just called from the slots.map
+    // loop above when slot.category === "H".
     if (tierHConfig?.enabled) {
-      // Determine H count for today's mode.
-      let hCount = this.getHPostCountForMode(strategyConfig.mode, tierHConfig);
-
-      // Conservative mode: publish H every N days (not daily).
-      if (strategyConfig.mode === "conservative" && hCount === 0) {
-        // Check if today is an H day (based on date day-of-year modulo interval).
-        const dayOfYear = Math.floor(Date.parse(targetDate + "T00:00:00Z") / 86400000);
-        const interval = tierHConfig.conservativeIntervalDays ?? 2;
-        if (dayOfYear % interval === 0) {
-          hCount = 1; // Conservative publishes 1 H post on interval days.
-        }
-      }
-
-      // User spec: "Every generated week MUST contain at least one Tier H slot
-      // every day." So if H count is 0 for non-conservative modes, force 1.
-      // (minimal mode is the only exception — it's explicitly low-activity.)
-      if (hCount === 0 && strategyConfig.mode !== "minimal" && strategyConfig.mode !== "conservative") {
-        hCount = 1;
-      }
-
-      // Generate H slots with random times within posting windows.
-      // v13.0.12: H slots now respect minGap — they check existing A/B/C scheduledTimes
-      // and pick a time that doesn't conflict. Previously H could land at the same
-      // minute as an A/B/C post.
-      for (let h = 0; h < hCount; h++) {
-        const windows = schedulerConfig.postingWindows;
-        if (windows.length === 0) break;
-
-        // v13.0.12: Collect all already-used minutes (from A/B/C + previous H slots).
-        const usedMinutes: number[] = [];
-        for (const p of posts) {
-          if (p.scheduledTime) {
-            const [h2, m2] = p.scheduledTime.split(":").map(Number);
-            usedMinutes.push((h2 ?? 0) * 60 + (m2 ?? 0));
-          }
-        }
-
-        // Try windows in random order to find one that fits minGap.
-        const shuffledWinIdx = [...Array(windows.length).keys()];
-        for (let i = shuffledWinIdx.length - 1; i > 0; i--) {
-          const j = randomInt(0, i);
-          [shuffledWinIdx[i], shuffledWinIdx[j]] = [shuffledWinIdx[j]!, shuffledWinIdx[i]!];
-        }
-
-        let scheduledTime: string | null = null;
-        let win: { start: string; end: string } | null = null;
-        for (const wIdx of shuffledWinIdx) {
-          const w = windows[wIdx]!;
-          const [wsH, wsM] = w.start.split(":").map(Number);
-          const [weH, weM] = w.end.split(":").map(Number);
-          const startMin = (wsH ?? 0) * 60 + (wsM ?? 0);
-          const endMin = (weH ?? 23) * 60 + (weM ?? 59);
-          // Try to find a time in this window that respects minGap.
-          const minGap = schedulerConfig.minGapMinutes ?? 90;
-          // v13.0.12: Dynamic gap — if window is too small, relax.
-          const effectiveGap = Math.min(minGap, Math.floor((endMin - startMin) / 2));
-          for (let attempt = 0; attempt < 50; attempt++) {
-            const t = startMin + randomInt(0, Math.max(0, endMin - startMin - 1));
-            const tooClose = usedMinutes.some((um) => Math.abs(um - t) < effectiveGap);
-            if (!tooClose) {
-              scheduledTime = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
-              win = w;
-              break;
-            }
-          }
-          if (scheduledTime) break;
-        }
-
-        // Fallback: if no window fit minGap, just pick a random time in a random window.
-        if (!scheduledTime) {
-          const winIdx = randomInt(0, windows.length - 1);
-          win = windows[winIdx]!;
-          scheduledTime = this.randomTimeInWindow(win.start, win.end, schedulerConfig.jitterMinutes ?? 0);
-        }
-
-        const hProvider = this.selectHProvider(tierHConfig, usedProviders, theme);
-
-        if (hProvider) {
-          usedProviders.set(hProvider, (usedProviders.get(hProvider) ?? 0) + 1);
-        }
-
-        const hIndex = posts.length;
-        posts.push({
-          id: `plan-${targetDate}-H${h}`,
-          index: hIndex,
-          date: targetDate,
-          time: win!.start,
-          windowEnd: win!.end,
-          scheduledTime,
-          epochMs: Date.parse(`${targetDate}T${scheduledTime}:00`) || Date.now(),
-          category: "H" as Category,
-          provider: hProvider,
-          strategy: strategy.mode,
-          language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,
-          priority: this.assignPriority("H", strategy.mode),
-          queueTarget: this.getQueueTarget("H"),
-          status: hProvider ? ("pending" as PlannedPostStatus) : ("skipped" as PlannedPostStatus),
-          windowIndex: hIndex,
-        });
-
-        this.deps.logger.info("pipeline.start", {
-          step: "strategy.generateHSlot",
-          date: targetDate,
-          hSlotIndex: h,
-          provider: hProvider,
-          scheduledTime,
-          message: `[TIER_H] Generated H slot #${h} — provider=${hProvider ?? "null (skipped)"}`,
-        });
-      }
+      const hSlotsCount = posts.filter((p) => p.category === "H").length;
+      this.deps.logger.info("pipeline.start", {
+        step: "strategy.generatePlan",
+        date: targetDate,
+        hSlotsCount,
+        message: `[TIER_H] ${hSlotsCount} H slot(s) interleaved with A/B/C in equal-segment algorithm`,
+      });
     }
 
     // 6. Validate.
@@ -615,8 +563,11 @@ export class StrategyEngine {
         .filter((id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT);
 
       if (preferred.length > 0) {
-        // Pick a random preferred provider that hasn't been used too many times.
-        return preferred[randomInt(0, preferred.length - 1)]!;
+        // v13.1.3: Use WEIGHTED random selection (was uniform-random before).
+        // Higher-weight preferred providers (e.g. weight=95) are picked more often
+        // than lower-weight ones (e.g. weight=80). Falls back to uniform-random if
+        // selectProviderWeighted returns null (shouldn't happen with non-empty list).
+        return selectProviderWeighted(preferred) ?? preferred[randomInt(0, preferred.length - 1)]!;
       }
 
       // v12.3.1: THEME-SLOT SKIP — if the theme has preferredProviders but NONE
@@ -642,12 +593,17 @@ export class StrategyEngine {
       });
 
       if (matchedProviders.length > 0) {
-        return matchedProviders[randomInt(0, matchedProviders.length - 1)]!;
+        // v13.1.3: WEIGHTED selection among topic-matched providers.
+        return selectProviderWeighted(matchedProviders) ?? matchedProviders[randomInt(0, matchedProviders.length - 1)]!;
       }
     }
 
-    // No theme, no preferred, no topic match — pick random.
-    return providers[randomInt(0, providers.length - 1)]!;
+    // No theme, no preferred, no topic match — pick WEIGHTED random.
+    // v13.1.3: Uses selectProviderWeighted() from providers.config.ts which
+    // reads the `weight` field from each provider's config entry. E.g.
+    // github-releases (weight=100) appears more often than stackexchange
+    // (weight=80). Falls back to uniform-random if null (defensive).
+    return selectProviderWeighted(providers) ?? providers[randomInt(0, providers.length - 1)]!;
   }
 
   // ────────────────────────────────────────────────────────
@@ -689,24 +645,10 @@ export class StrategyEngine {
     return map[mode] ?? 0;
   }
 
-  /**
-   * v13.0.0: Generate a random time within a posting window.
-   * @param windowStart "HH:MM"
-   * @param windowEnd "HH:MM"
-   * @param jitterMinutes unused for H (H uses pure random within window)
-   * @returns "HH:MM" — a random minute within the window.
-   */
-  private randomTimeInWindow(windowStart: string, windowEnd: string, _jitterMinutes: number): string {
-    const [sH, sM] = windowStart.split(":").map(Number);
-    const [eH, eM] = windowEnd.split(":").map(Number);
-    const startMin = (sH ?? 0) * 60 + (sM ?? 0);
-    const endMin = (eH ?? 23) * 60 + (eM ?? 59);
-    if (endMin <= startMin) return windowStart;
-    const randomMin = startMin + randomInt(0, Math.max(0, endMin - startMin - 1));
-    const hh = String(Math.floor(randomMin / 60)).padStart(2, "0");
-    const mm = String(randomMin % 60).padStart(2, "0");
-    return `${hh}:${mm}`;
-  }
+  // v13.1.3: randomTimeInWindow() REMOVED — Tier H slots are now generated by
+  // the time-generator's equal-segment algorithm. This helper was only used by
+  // the old separate H-generation block, which is deleted (see v13.1.3 fix).
+  // Removing it keeps the code surface clean — no callers, no dead code.
 
   /**
    * v13.0.0: Select a Tier H provider with rotation, cooldown, weighted balancing,
@@ -741,11 +683,15 @@ export class StrategyEngine {
       if (filtered.length > 0) candidates = filtered;
     }
 
-    // Weighted balancing: prefer higher-weight providers.
-    // Weights come from providers.config.ts (getProviderWeight).
-    // For simplicity, use random pick among candidates (weighted if weights differ).
-    // TODO: full weighted pick using getProviderWeight — for now, random is fine.
-    const picked = candidates[randomInt(0, candidates.length - 1)] ?? null;
+    // v13.1.3: WEIGHTED balancing — uses selectProviderWeighted() from
+    // providers.config.ts which reads the `weight` field from each provider's
+    // config entry. E.g. ars-technica (weight=90) is picked slightly more often
+    // than toms-hardware (weight=88) and techpowerup (weight=88).
+    // Falls back to uniform-random if selectProviderWeighted returns null
+    // (defensive — shouldn't happen with non-empty candidates).
+    const picked = selectProviderWeighted(candidates)
+      ?? candidates[randomInt(0, candidates.length - 1)]!
+      ?? null;
     if (picked) {
       this.lastHProvider = picked;
     }
