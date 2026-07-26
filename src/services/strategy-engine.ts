@@ -149,18 +149,15 @@ export class StrategyEngine {
     let hCount = 0;
     if (tierHConfig?.enabled) {
       hCount = this.getHPostCountForMode(strategyConfig.mode, tierHConfig);
-      // Conservative mode: publish H every N days (not daily).
-      if (strategyConfig.mode === "conservative" && hCount === 0) {
-        const dayOfYear = Math.floor(Date.parse(targetDate + "T00:00:00Z") / 86400000);
-        const interval = tierHConfig.conservativeIntervalDays ?? 2;
-        if (dayOfYear % interval === 0) {
-          hCount = 1; // Conservative publishes 1 H post on interval days.
-        }
-      }
+      // v13.1.4: Conservative mode now has H=1 in extraHPostsPerMode config.
+      // The old conservativeIntervalDays logic was removed because it caused
+      // inconsistency between the config (H=1) and the actual H count (0 on
+      // non-interval days). Now Conservative always gets H=1 per day.
+      //
       // User spec: "Every generated week MUST contain at least one Tier H slot
-      // every day." So if H count is 0 for non-conservative modes, force 1.
-      // (minimal mode is the only exception — it's explicitly low-activity.)
-      if (hCount === 0 && strategyConfig.mode !== "minimal" && strategyConfig.mode !== "conservative") {
+      // every day." So if H count is 0 for non-minimal modes, force 1.
+      // (minimal mode is the only exception — it's explicitly low-activity, no H.)
+      if (hCount === 0 && strategyConfig.mode !== "minimal") {
         hCount = 1;
       }
     }
@@ -329,12 +326,48 @@ export class StrategyEngine {
     // 6. Validate.
     const validation = this.validatePlan(posts, schedulerConfig);
 
+    // v13.1.4: CRITICAL FIX — mark past slots as "skipped" BEFORE saving to KV.
+    // Previously this was done in the /strategy/regenerate endpoint AFTER saving.
+    // That created a race condition: between save and mark-skip, a cron tick
+    // could fire and see the new plan with pending slots whose scheduledTime
+    // was in the past (but within the 6-hour window) — causing burst publishing.
+    // Now: mark past slots atomically, then save the final plan to KV.
+    const tz = schedulerConfig.timezone || "UTC";
+    const nowInTz = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date());
+    const [nowH, nowM] = nowInTz.split(":").map(Number);
+    const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
+
+    let pastSkippedCount = 0;
+    const finalPosts = posts.map((post) => {
+      // Use window END time for the past-check — a slot whose entire window
+      // has passed should be skipped (not just if scheduledTime is past).
+      const [endH, endM] = (post.windowEnd ?? post.time).split(":").map(Number);
+      const endMin = (endH ?? 0) * 60 + (endM ?? 0);
+      if (endMin < nowMinutes && post.status === "pending") {
+        pastSkippedCount++;
+        return { ...post, status: "skipped" as PlannedPostStatus };
+      }
+      return post;
+    });
+
+    if (pastSkippedCount > 0) {
+      this.deps.logger.info("pipeline.start", {
+        step: "strategy.generatePlan",
+        date: targetDate,
+        pastSkippedCount,
+        nowTime: nowInTz,
+        message: `Marked ${pastSkippedCount} past slot(s) as "skipped" to prevent burst publishing`,
+      });
+    }
+
     // 7. Build plan.
     const plan: DailyPublishPlan = {
       date: targetDate,
       strategy: strategy.mode,
       theme,
-      posts,
+      posts: finalPosts,
       generatedAt: Date.now(),
       timezone: schedulerConfig.timezone,
       language: strategyConfig.language === "auto" ? "fa" : strategyConfig.language,

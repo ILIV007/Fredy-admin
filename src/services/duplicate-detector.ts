@@ -118,7 +118,14 @@ export class DuplicateDetector {
   }
 
   /** v9.3.1: Record a ReadyContent after successful publish.
-   *  v12.1.6: Accept optional raw SourceItem for canonical ID extraction. */
+   *  v12.1.6: Accept optional raw SourceItem for canonical ID extraction.
+   *  v13.1.5: CRITICAL FIX — use ORIGINAL source title (from raw), not AI headline.
+   *    Previously, recordPublished() used content.headline (AI-generated) as the
+   *    title for content hash computation. But check() at pipeline Stage 6 uses
+   *    the ORIGINAL source title. This mismatch meant the content hash layer
+   *    (Layer 3) NEVER matched — record stored hash(AI headline) but check
+   *    looked for hash(original title). Now we extract the original title from
+   *    the raw SourceItem and use that for both record and check. */
   async recordPublished(content: {
     readonly id: string;
     readonly pluginId: string;
@@ -127,14 +134,19 @@ export class DuplicateDetector {
     readonly sourceUrl: string;
     readonly raw?: unknown;
   }): Promise<void> {
+    // v13.1.5: Extract ORIGINAL title from raw SourceItem for content hash.
+    // This ensures the hash matches what check() computes at pipeline Stage 6.
+    const rawItem = content.raw as SourceItem | null;
+    const originalTitle = rawItem?.title ?? content.headline ?? content.id;
+
     await this.recordInternal({
       id: content.id,
       pluginId: content.pluginId,
       url: content.sourceUrl,
-      title: content.headline ?? content.id,
+      title: originalTitle, // v13.1.5: Use ORIGINAL title, not AI headline
       body: "",
       source: content.pluginId,
-      raw: (content.raw as SourceItem | null) ?? null,
+      raw: rawItem,
     });
   }
 

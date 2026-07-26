@@ -839,6 +839,9 @@ export async function managerHandler(
     // mid-day, already-published slots must be preserved as "published" in
     // the new plan. Previously, clearing fired markers caused the scheduler
     // to re-fire ALL past slots (burst publishing + "window expired" errors).
+    // v13.1.4: The past-slot marking is now done INSIDE generatePlan()
+    // atomically (before saving to KV), eliminating the race condition where
+    // a cron tick between save and mark-skip could burst-publish past slots.
     try {
       const { formatDateInZone } = await import("../primitives/time");
       const { slotsKey } = await import("../core/storage/keys");
@@ -850,29 +853,8 @@ export async function managerHandler(
       await container.kv.delete(`fredy:strategy:plan:${today}`);
       // v12.1.1: DO NOT clear fired markers — they're needed to prevent re-firing.
     } catch {}
+    // generatePlan() now atomically marks past slots as "skipped" before saving.
     const plan = await container.strategyEngine.generatePlan();
-
-    // v12.1.1: Mark past slots as "skipped" so the scheduler doesn't re-fire them.
-    // Only FUTURE slots remain "pending". This prevents the burst-publish bug.
-    try {
-      const settings = await container.config.getSettings(Number(env.ADMIN_ID ?? "0"));
-      const tz = settings.scheduler.timezone || "UTC";
-      const nowInTz = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
-      }).format(new Date());
-      const [nowH, nowM] = nowInTz.split(":").map(Number);
-      const nowMinutes = (nowH ?? 0) * 60 + (nowM ?? 0);
-
-      for (const post of plan.posts) {
-        const schedTime = post.scheduledTime ?? post.time;
-        const [sH, sM] = schedTime.split(":").map(Number);
-        const schedMin = (sH ?? 0) * 60 + (sM ?? 0);
-        if (schedMin < nowMinutes) {
-          // Past slot — mark as "skipped" so scheduler doesn't fire it.
-          await container.strategyEngine.markPostSkipped(plan.date, post.index).catch(() => {});
-        }
-      }
-    } catch { /* non-fatal */ }
 
     return json({ ok: true, plan });
   }
@@ -2032,6 +2014,62 @@ async function loadDashboard(){
   }
   html+='</div>';
 
+  // ── v13.1.4: TODAY'S PLAN PREVIEW (additive, non-destructive) ──
+  // Shows a compact summary of today's scheduled posts so the admin can
+  // see at a glance what's coming up without navigating to the Scheduler page.
+  try {
+    const planResp = await api("strategy");
+    if (planResp.ok && planResp.plan && planResp.plan.posts) {
+      const plan = planResp.plan;
+      const pending = plan.posts.filter(p => p.status === "pending");
+      const published = plan.posts.filter(p => p.status === "published");
+      const skipped = plan.posts.filter(p => p.status === "skipped");
+      const failed = plan.posts.filter(p => p.status === "failed");
+
+      html += '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+        '<h3 style="margin:0">📅 Today\'s Plan Preview</h3>'+
+        '<span style="font-size:11px;color:var(--text2)">'+escapeHtml(plan.date)+' · '+escapeHtml(plan.strategy||"—")+'</span>'+
+      '</div>';
+
+      // Summary row
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+        '<span class="badge badge-blue">📋 Total: '+plan.posts.length+'</span>'+
+        '<span class="badge badge-green">⏳ Pending: '+pending.length+'</span>'+
+        '<span class="badge" style="background:var(--green);color:white">✅ Published: '+published.length+'</span>'+
+        (skipped.length > 0 ? '<span class="badge" style="background:var(--yellow);color:white">⏭️ Skipped: '+skipped.length+'</span>' : '')+
+        (failed.length > 0 ? '<span class="badge badge-red">❌ Failed: '+failed.length+'</span>' : '')+
+      '</div>';
+
+      // Next 3 upcoming posts
+      if (pending.length > 0) {
+        const upcoming = pending.slice(0, 3);
+        html += '<div style="font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:4px">Next Upcoming</div>';
+        html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+        for (const p of upcoming) {
+          const catColor = p.category === 'A' ? 'var(--green)' : p.category === 'B' ? 'var(--blue)' : p.category === 'H' ? 'var(--yellow)' : 'var(--violet)';
+          html += '<div style="border:1px solid var(--border);border-radius:8px;padding:6px 10px;min-width:120px">'+
+            '<div style="display:flex;align-items:center;gap:6px">'+
+              '<span style="width:8px;height:8px;border-radius:50%;background:'+catColor+'"></span>'+
+              '<span style="font-weight:600;font-size:12px">'+escapeHtml(p.scheduledTime || p.time)+'</span>'+
+              '<span style="font-size:10px;color:var(--text2)">Cat '+escapeHtml(String(p.category))+'</span>'+
+            '</div>'+
+            '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+
+              '<code>'+(p.provider || 'auto')+'</code>'+
+            '</div>'+
+          '</div>';
+        }
+        html += '</div>';
+      } else {
+        html += '<p style="color:var(--text2);font-size:12px;padding:8px">No pending posts. Plan will be regenerated at midnight UTC.</p>';
+      }
+
+      html += '<div style="margin-top:8px;font-size:10px;color:var(--text2)">'+
+        'Full details: <a href="#" onclick="loadPage(\'scheduler\');return false" style="color:var(--blue)">Open Scheduler →</a>'+
+      '</div>';
+      html += '</div>';
+    }
+  } catch { /* non-fatal — plan preview is optional */ }
+
   // ── GLOBAL STATS ──
   html+='<div class="card"><h3 style="margin-bottom:8px">📊 Global Stats</h3><div class="card-grid">'+
     card("Processed",d.stats?.processed??0)+
@@ -2846,8 +2884,8 @@ async function loadStrategy(){
   const s=d.strategy||{};const plan=d.plan||{};
   window._lastPlan=plan;
   const modes=[
-    {id:"minimal",name:"Minimal",desc:"3 ABC + 1H = 4 posts"},
-    {id:"conservative",name:"Conservative",desc:"4 ABC + 0H* = 4 posts"},
+    {id:"minimal",name:"Minimal",desc:"3 ABC + 0H = 3 posts (no H)"},
+    {id:"conservative",name:"Conservative",desc:"4 ABC + 1H = 5 posts"},
     {id:"balanced",name:"Balanced",desc:"5 ABC + 1H = 6 posts (default)"},
     {id:"active",name:"Active",desc:"7 ABC + 2H = 9 posts"},
     {id:"aggressive",name:"Aggressive",desc:"9 ABC + 3H = 12 posts"},

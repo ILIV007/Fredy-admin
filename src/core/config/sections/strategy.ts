@@ -77,8 +77,8 @@ export const strategyDefaults: StrategyConfig = {
   tierH: {
     enabled: true,
     extraHPostsPerMode: {
-      minimal: 1,
-      conservative: 0,
+      minimal: 0,
+      conservative: 1,
       balanced: 1,
       active: 2,
       ai_priority: 1,
@@ -119,14 +119,14 @@ export const BUILTIN_STRATEGIES: Readonly<Record<string, StrategyDefinition>> = 
   minimal: {
     mode: "minimal",
     name: "Minimal",
-    description: "3 A/B/C posts + 1 Tier H = 4 total (1 wildcard from A/B/C)",
-    distribution: { A: 2, B: 1, C: 0, total: 3, H: 1 },
+    description: "3 A/B/C posts total (1 wildcard from A/B/C) — no Tier H on minimal",
+    distribution: { A: 2, B: 1, C: 0, total: 3, H: 0 },
   },
   conservative: {
     mode: "conservative",
     name: "Conservative",
-    description: "4 A/B/C + 1 Tier H every 2 days = 5 total (1 wildcard)",
-    distribution: { A: 2, B: 1, C: 1, total: 4, H: 0 },
+    description: "4 A/B/C + 1 Tier H every day = 5 total (1 wildcard)",
+    distribution: { A: 2, B: 1, C: 1, total: 4, H: 1 },
   },
   balanced: {
     mode: "balanced",

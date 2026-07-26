@@ -272,7 +272,7 @@ await describe("Built-in strategies — correct distributions (v13.0.11)", () =>
   const minimal = BUILTIN_STRATEGIES.minimal!;
   assert(minimal.distribution.total === 3, `Minimal total = 3 (got: ${minimal.distribution.total})`);
   assert(minimal.distribution.A === 2, "Minimal A = 2");
-  assert(minimal.distribution.H === 1, "Minimal H = 1");
+  assert(minimal.distribution.H === 0, "Minimal H = 0 (v13.1.4: minimal has no Tier H)");
 
   const balanced = BUILTIN_STRATEGIES.balanced!;
   assert(balanced.distribution.total === 5, `Balanced total = 5 (got: ${balanced.distribution.total})`);
@@ -352,16 +352,17 @@ await describe("v12.3.1: xkcd DOES appear on Friday (Fun day)", async () => {
   // 2026-07-17 is a Friday (day=5) — theme: Community, Fun, Space.
   // preferredProviders: xkcd, github, reddit-v2, github-trending.
   // xkcd IS in preferredProviders, so Cat C slots should get xkcd.
-  const fridayPlan = await engine.generatePlan("2026-07-17");
-  assert(fridayPlan.theme !== null, "Friday has a theme");
-  assert(fridayPlan.theme!.dayName === "Friday", "Theme is Friday");
-  assert(fridayPlan.theme!.preferredProviders.includes("xkcd"), "Friday preferredProviders includes xkcd");
-
-  // At least one Cat C slot should have xkcd as the provider
-  // (unless all Cat C slots happened to be the wildcard slot, which is unlikely
-  // but possible — so we just assert that the plan has at least one non-skipped slot)
-  const nonSkippedPosts = fridayPlan.posts.filter((p) => p.status !== "skipped");
-  assert(nonSkippedPosts.length > 0, "Friday plan has at least one non-skipped post");
+  // Run the test 5 times — the wildcard slot has a 1/5 chance of picking
+  // the Cat C slot and replacing xkcd. We need at least ONE run where xkcd
+  // survives. This makes the test deterministic (not flaky).
+  let xkcdFound = false;
+  for (let trial = 0; trial < 5; trial++) {
+    const fridayPlan = await engine.generatePlan("2026-07-17");
+    if (fridayPlan.theme?.dayName !== "Friday") continue;
+    const xkcdPosts = fridayPlan.posts.filter((p) => p.provider === "xkcd");
+    if (xkcdPosts.length > 0) { xkcdFound = true; break; }
+  }
+  assert(xkcdFound, "Friday plan has xkcd provider assigned in at least 1 of 5 trials (wildcard may replace it)");
 });
 
 // v12.3.2: Weekly coverage test — verifies ALL 14 daily APIs are covered

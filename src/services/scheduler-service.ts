@@ -551,11 +551,42 @@ export class SchedulerService {
     }
 
     // 1. Try to dequeue ready content for this category.
+    // v13.1.5: CRITICAL FIX — dedup check on dequeue.
+    // Content sitting in the queue can become stale (duplicate of something
+    // published between enqueue and dequeue). Without this check, the
+    // dequeued content would be published WITHOUT dedup verification,
+    // causing duplicate posts.
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
       if (!queued) break;
       const queuedLang = queued.content.language;
       if (queuedLang === expectedLang || queuedLang === settings.language.default) {
+        // v13.1.5: Dedup check BEFORE returning queued content.
+        // The content passed dedup at enqueue time, but the dedup landscape
+        // may have changed (another publish happened between enqueue and dequeue).
+        if (this.deps.duplicateDetector) {
+          const fallback = { isDuplicate: false, reason: null, existingId: null };
+          const dupCheck = await this.deps.duplicateDetector.check({
+            id: queued.content.id,
+            source: queued.content.pluginId,
+            url: queued.content.sourceUrl,
+            title: queued.content.headline ?? queued.content.id,
+            body: queued.content.text,
+            raw: queued.content.raw,
+            language: queuedLang,
+            fetchedAt: Date.now(),
+          } as unknown as import("../types/api").SourceItem).catch(() => fallback);
+          if (dupCheck.isDuplicate) {
+            this.deps.logger.warn("scheduler.skip", {
+              slotIndex: slot.index,
+              contentId: queued.content.id,
+              reason: "duplicate_dequeued",
+              duplicateOf: dupCheck.existingId ?? "unknown",
+              message: `Queued content is now a duplicate (of ${dupCheck.existingId ?? "unknown"}) — skipping, trying next`,
+            });
+            continue; // Skip this queued item, try the next one.
+          }
+        }
         return queued.content;
       }
       this.deps.logger.warn("scheduler.stale_language", {
