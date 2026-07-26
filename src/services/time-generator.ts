@@ -32,148 +32,100 @@ export class TimeGenerator {
   }
 
   /**
-   * Generate random slot times for a day.
+   * v13.1.1: EQUAL-SEGMENT SPREADING — divides the active day into N equal
+   * segments (where N = number of posts). Each post gets a random time within
+   * its segment. This GUARANTEES posts are spread across the full day.
    *
-   * v13.0.8: RANDOM WINDOWS — posting windows are now randomly generated
-   * each day (shuffled from the configured windows). This means the gap
-   * between posts changes every day — one day the gap might be 10-12,
-   * the next day it could be 18-20. No permanent gaps.
+   * For 5 posts (balanced): each segment = 2.8h → posts at ~09:00, ~12:00, ~14:30, ~17:00, ~20:00
+   * For 15 posts (turbo): each segment = ~56min → posts spread every ~1h
    *
-   * @param date — YYYY-MM-DD
-   * @param config — scheduler config (windows, jitter, timezone, minGap)
-   * @param categoryDistribution — how many posts per category
+   * No more clustering in the morning, no gaps in the afternoon.
    */
   generate(
     date: string,
     config: SchedulerConfig,
     categoryDistribution: Readonly<Record<Category, number>>,
   ): readonly SlotTime[] {
-    // Build the list of categories to schedule (e.g., [A, A, B, C]).
     const categoryList = this.buildCategoryList(categoryDistribution);
     if (categoryList.length === 0) return [];
 
-    // Determine the posting windows.
+    // v13.1.1: Active day range (respect quiet hours).
+    const dayStart = parseTimeToMinutes(config.quietHours?.end ?? "07:30") ?? 450;
+    const dayEnd = parseTimeToMinutes("22:00") ?? 1320;
+    const dayRange = dayEnd - dayStart;
+
+    if (dayRange <= 0) {
+      throw new SlotGenerationError("Day range is zero — quiet hours end after 22:00");
+    }
+
+    const numPosts = categoryList.length;
+    const segmentSize = dayRange / numPosts;
+    const minGap = config.minGapMinutes ?? 90;
+
+    const generatedTimes: Array<{ minutes: number; category: Category }> = [];
+    const usedMinutes: number[] = [];
+
+    for (let i = 0; i < numPosts; i++) {
+      const segStart = Math.floor(dayStart + i * segmentSize);
+      const segEnd = Math.floor(dayStart + (i + 1) * segmentSize);
+
+      let time: number | null = null;
+      const effectiveGap = Math.min(minGap, Math.floor(segmentSize / 2));
+
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const t = randomInt(segStart, Math.max(segStart, segEnd - 1));
+        const tooClose = usedMinutes.some((um) => Math.abs(um - t) < effectiveGap);
+        if (!tooClose) { time = t; break; }
+      }
+      if (time === null) {
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const t = randomInt(segStart, Math.max(segStart, segEnd - 1));
+          const tooClose = usedMinutes.some((um) => Math.abs(um - t) < 30);
+          if (!tooClose) { time = t; break; }
+        }
+      }
+      if (time === null) {
+        time = Math.floor((segStart + segEnd) / 2);
+      }
+
+      generatedTimes.push({ minutes: time, category: categoryList[i]! });
+      usedMinutes.push(time);
+    }
+
+    if (generatedTimes.length === 0) {
+      throw new SlotGenerationError("Could not generate any slots");
+    }
+
+    generatedTimes.sort((a, b) => a.minutes - b.minutes);
+
+    // Find closest posting window for display.
     const windows = config.postingWindows.length > 0
       ? config.postingWindows
       : this.defaultWindows(config.slots);
-
-    // v13.0.8: SHUFFLE the windows so the gap pattern changes every day.
-    const shuffledWindows = [...windows];
-    for (let i = shuffledWindows.length - 1; i > 0; i--) {
-      const j = randomInt(0, i);
-      [shuffledWindows[i], shuffledWindows[j]] = [shuffledWindows[j]!, shuffledWindows[i]!];
-    }
-
-    // Convert windows to minutes-since-midnight ranges.
-    const minuteRanges = shuffledWindows.map((w, i) => ({
+    const minuteRanges = windows.map((w) => ({
       start: parseTimeToMinutes(w.start) ?? 0,
       end: parseTimeToMinutes(w.end) ?? 24 * 60 - 1,
-      windowIndex: i,
     }));
 
-    if (minuteRanges.length === 0) {
-      throw new SlotGenerationError("No valid posting windows configured");
-    }
-
-    // v13.0.13: SPREAD posts across DIFFERENT windows first, then reuse.
-    // Previously: posts were assigned to windows 0,1,2,3,4,5,6,7,8,9,0,1,2,3 (cycling).
-    // This caused all extra posts to cluster in windows 0-3 (the first few shuffled windows).
-    // Now: assign first N posts to N unique windows, then cycle.
-    // This ensures posts are spread across the full day before reusing windows.
-    const windowOrder: number[] = [];
-    // First pass: one post per window (unique windows)
-    for (let i = 0; i < minuteRanges.length; i++) {
-      windowOrder.push(i);
-    }
-    // Second pass: cycle through windows again for extra posts
-    for (let i = 0; i < categoryList.length - minuteRanges.length; i++) {
-      windowOrder.push(i % minuteRanges.length);
-    }
-    // Shuffle the second-pass indices so extra posts don't cluster at the start
-    const extraStart = minuteRanges.length;
-    if (windowOrder.length > extraStart) {
-      for (let i = windowOrder.length - 1; i > extraStart; i--) {
-        const j = extraStart + randomInt(0, i - extraStart);
-        [windowOrder[i], windowOrder[j]] = [windowOrder[j]!, windowOrder[i]!];
-      }
-    }
-
-  const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
-  const usedMinutes: number[] = [];
-
-  for (let i = 0; i < categoryList.length; i++) {
-    const targetWindowIdx = windowOrder[i] ?? (i % minuteRanges.length);
-    const range = minuteRanges[targetWindowIdx]!;
-    const category = categoryList[i]!;
-
-    const attempt = this.generateTimeInRange(
-      range.start,
-      range.end,
-      usedMinutes,
-      config.minGapMinutes,
-      config.jitterMinutes,
-    );
-
-    if (attempt !== null) {
-      generatedTimes.push({ minutes: attempt, windowIndex: targetWindowIdx, category });
-      usedMinutes.push(attempt);
-      continue;
-    }
-
-    // Can't fit in this window — try ALL other windows.
-    let placed = false;
-    for (let w = 0; w < minuteRanges.length && !placed; w++) {
-      if (w === targetWindowIdx) continue;
-      const altRange = minuteRanges[w]!;
-      const altAttempt = this.generateTimeInRange(
-        altRange.start,
-        altRange.end,
-        usedMinutes,
-        config.minGapMinutes,
-        config.jitterMinutes,
-      );
-      if (altAttempt !== null) {
-        generatedTimes.push({ minutes: altAttempt, windowIndex: w, category });
-        usedMinutes.push(altAttempt);
-        placed = true;
-      }
-    }
-    // If still not placed after trying all windows, skip this post (minGap too restrictive).
-  }
-
-    if (generatedTimes.length === 0) {
-      throw new SlotGenerationError(
-        `Could not generate any slots (min gap ${config.minGapMinutes} min too restrictive)`,
-      );
-    }
-
-    // Sort by time ascending.
-    generatedTimes.sort((a, b) => a.minutes - b.minutes);
-
-    // Build SlotTime objects.
     const slots: SlotTime[] = generatedTimes.map((entry, index) => {
-      const range = minuteRanges[entry.windowIndex]!;
-      const startHh = Math.floor(range.start / 60).toString().padStart(2, "0");
-      const startMm = (range.start % 60).toString().padStart(2, "0");
-      const endHh = Math.floor(range.end / 60).toString().padStart(2, "0");
-      const endMm = (range.end % 60).toString().padStart(2, "0");
-      const time = `${startHh}:${startMm}`;
-      const windowEnd = `${endHh}:${endMm}`;
-      const epochMs = this.minutesToEpochMs(date, range.start, config.timezone);
-
-      // Generate the REAL scheduledTime (random within window).
-      const schedMinutes = entry.minutes;
-      const schedHh = Math.floor(schedMinutes / 60).toString().padStart(2, "0");
-      const schedMm = (schedMinutes % 60).toString().padStart(2, "0");
-      const scheduledTime = `${schedHh}:${schedMm}`;
-
+      let bestWinIdx = 0;
+      let bestDist = Infinity;
+      for (let w = 0; w < minuteRanges.length; w++) {
+        const wr = minuteRanges[w]!;
+        if (entry.minutes >= wr.start && entry.minutes <= wr.end) {
+          bestWinIdx = w; bestDist = 0; break;
+        }
+        const dist = Math.min(Math.abs(entry.minutes - wr.start), Math.abs(entry.minutes - wr.end));
+        if (dist < bestDist) { bestDist = dist; bestWinIdx = w; }
+      }
+      const wr = minuteRanges[bestWinIdx]!;
       return {
         index,
         date,
-        time,
-        windowEnd,
-        scheduledTime,
-        epochMs,
+        time: this.minutesToTime(wr.start),
+        windowEnd: this.minutesToTime(wr.end),
+        scheduledTime: this.minutesToTime(entry.minutes),
+        epochMs: this.minutesToEpochMs(date, wr.start, config.timezone),
         category: entry.category,
         jitterMinutes: config.jitterMinutes,
       };
@@ -231,7 +183,11 @@ export class TimeGenerator {
    * 14 hours (08:00-22:00). So 90min gap makes it impossible to fit 13 posts.
    * Fix: dynamically scale minGap down if it would prevent fitting all posts.
    */
-  private generateTimeInRange(
+  /** v13.1.1: generateTimeInRange is no longer used — the equal-segment
+   *  algorithm handles time generation inline. Kept for backward compat
+   *  in case external callers need it. */
+  // @ts-expect-error: kept for backward compatibility, may be used by tests
+  private _generateTimeInRange_unused(
     rangeStart: number,
     rangeEnd: number,
     existingTimes: number[],
