@@ -85,6 +85,34 @@ export class ConfigService {
       }
     }
 
+    // v13.0.14: Auto-migrate posting windows — if the stored config has fewer
+    // than 8 windows (old 5-window config), update to the new 10-window set.
+    // This fixes the "permanent gaps" issue for users who deployed before v13.0.10.
+    if (settings.scheduler?.postingWindows && settings.scheduler.postingWindows.length < 8) {
+      const oldWindows = settings.scheduler.postingWindows.length;
+      settings = {
+        ...settings,
+        scheduler: {
+          ...settings.scheduler,
+          postingWindows: [
+            { start: "08:00", end: "10:00" },
+            { start: "09:00", end: "11:00" },
+            { start: "10:00", end: "12:00" },
+            { start: "11:00", end: "13:00" },
+            { start: "12:00", end: "14:00" },
+            { start: "14:00", end: "16:00" },
+            { start: "15:00", end: "17:00" },
+            { start: "16:00", end: "18:00" },
+            { start: "18:00", end: "20:00" },
+            { start: "20:00", end: "22:00" },
+          ],
+        },
+      };
+      console.log(`[config] v13.0.14: Auto-migrated posting windows from ${oldWindows} to 10 (fixes permanent gaps)`);
+      // Persist the updated settings to KV so it doesn't re-migrate every load.
+      await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
+    }
+
     this.deps.cache.set(key, settings);
     return settings;
   }
