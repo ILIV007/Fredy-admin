@@ -151,7 +151,9 @@ describe("TimeGenerator — generates slots within posting windows", () => {
   const slots = gen.generate("2026-07-16", defaultConfig, dist);
 
   assert(slots.length > 0, "Generated at least 1 slot");
-  assert(slots.length <= 5, "Generated at most 5 slots (one per window)");
+  // v13.0.9: With 8 windows and 4 posts (2A+1B+1C), all 4 should get slots.
+  // No longer limited to "one per window" — multiple posts can share a window.
+  assert(slots.length <= 8, `Generated at most 8 slots (was 5, now 8 windows available) (got: ${slots.length})`);
 
   // Each slot time should be within one of the posting windows
   for (const slot of slots) {
@@ -166,14 +168,15 @@ describe("TimeGenerator — generates slots within posting windows", () => {
   }
 });
 
-describe("TimeGenerator — one slot per window", () => {
+describe("TimeGenerator — slots fit within available windows", () => {
   const gen = new TimeGenerator();
   const dist: Record<Category, number> = { A: 5, B: 0, C: 0 };
 
   const slots = gen.generate("2026-07-16", defaultConfig, dist);
 
-  // With 5 windows and 5 posts requested, should get at most 5 slots
-  assert(slots.length <= 5, "At most 5 slots (one per window)");
+  // v13.0.9: With 8 windows and 5 posts, all 5 should get slots.
+  // Multiple posts can share a window if needed.
+  assert(slots.length <= 8, `At most 8 slots (8 windows available) (got: ${slots.length})`);
 
   // Each slot should be in a different window
   // v12.0.0: slot.time is always the window START, so match exactly.
@@ -224,7 +227,9 @@ describe("TimeGenerator — handles more categories than windows", () => {
   const dist: Record<Category, number> = { A: 10, B: 0, C: 0 };
 
   const slots = gen.generate("2026-07-16", defaultConfig, dist);
-  assert(slots.length <= 5, "At most 5 slots even with 10 posts requested (limited by windows)");
+  // v13.0.9: With 8 windows and 10 posts, all 10 should get slots (multiple per window allowed).
+  assert(slots.length > 0, `Generated slots even with 10 posts (got: ${slots.length})`);
+  assert(slots.length <= 10, `At most 10 slots (10 posts requested) (got: ${slots.length})`);
 });
 
 describe("TickLogBuilder — builds correct TickLog", () => {

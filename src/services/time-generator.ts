@@ -78,15 +78,15 @@ export class TimeGenerator {
       throw new SlotGenerationError("No valid posting windows configured");
     }
 
-    // Assign categories to windows (one category per window).
-    const numSlots = Math.min(categoryList.length, minuteRanges.length);
-
-    // Generate one random time per window, respecting min gap.
+    // v13.0.9: When posts > windows, allow multiple posts per window.
+    // Previously: numSlots = min(posts, windows) — posts beyond window count were DROPPED.
+    // Now: if posts > windows, cycle through windows again (each window can have 2+ posts,
+    // as long as minGap is respected).
     const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
     const usedMinutes: number[] = [];
 
-    for (let i = 0; i < numSlots; i++) {
-      const range = minuteRanges[i]!;
+    for (let i = 0; i < categoryList.length; i++) {
+      const range = minuteRanges[i % minuteRanges.length]!;
       const category = categoryList[i]!;
 
       const attempt = this.generateTimeInRange(
@@ -98,10 +98,26 @@ export class TimeGenerator {
       );
 
       if (attempt === null) {
+        // Can't fit in this window — try the NEXT window (v13.0.9: don't skip silently).
+        for (let w = 1; w < minuteRanges.length; w++) {
+          const altRange = minuteRanges[(i + w) % minuteRanges.length]!;
+          const altAttempt = this.generateTimeInRange(
+            altRange.start,
+            altRange.end,
+            usedMinutes,
+            config.minGapMinutes,
+            config.jitterMinutes,
+          );
+          if (altAttempt !== null) {
+            generatedTimes.push({ minutes: altAttempt, windowIndex: (i + w) % minuteRanges.length, category });
+            usedMinutes.push(altAttempt);
+            break;
+          }
+        }
         continue;
       }
 
-      generatedTimes.push({ minutes: attempt, windowIndex: i, category });
+      generatedTimes.push({ minutes: attempt, windowIndex: i % minuteRanges.length, category });
       usedMinutes.push(attempt);
     }
 
