@@ -32,14 +32,15 @@ export class TimeGenerator {
   }
 
   /**
-   * v13.1.1: EQUAL-SEGMENT SPREADING — divides the active day into N equal
-   * segments (where N = number of posts). Each post gets a random time within
-   * its segment. This GUARANTEES posts are spread across the full day.
+   * v13.1.2: EQUAL-SEGMENT SPREADING with CENTER BIAS.
    *
-   * For 5 posts (balanced): each segment = 2.8h → posts at ~09:00, ~12:00, ~14:30, ~17:00, ~20:00
-   * For 15 posts (turbo): each segment = ~56min → posts spread every ~1h
+   * Divides the active day into N equal segments. Each post gets a random time
+   * within its segment, but biased toward the CENTER of the segment (not the edges).
+   * This prevents two adjacent-segment posts from being too close to each other
+   * (e.g., end of segment 1 at 10:59 and start of segment 2 at 11:01).
    *
-   * No more clustering in the morning, no gaps in the afternoon.
+   * Also: the segment boundaries are offset by a random jitter each day so the
+   * exact post times change every day even with the same strategy mode.
    */
   generate(
     date: string,
@@ -49,7 +50,7 @@ export class TimeGenerator {
     const categoryList = this.buildCategoryList(categoryDistribution);
     if (categoryList.length === 0) return [];
 
-    // v13.1.1: Active day range (respect quiet hours).
+    // Active day range (respect quiet hours).
     const dayStart = parseTimeToMinutes(config.quietHours?.end ?? "07:30") ?? 450;
     const dayEnd = parseTimeToMinutes("22:00") ?? 1320;
     const dayRange = dayEnd - dayStart;
@@ -62,18 +63,27 @@ export class TimeGenerator {
     const segmentSize = dayRange / numPosts;
     const minGap = config.minGapMinutes ?? 90;
 
+    // v13.1.2: Random day offset (0-30 min) so segment boundaries shift each day.
+    const dayOffset = randomInt(0, 30);
+
     const generatedTimes: Array<{ minutes: number; category: Category }> = [];
     const usedMinutes: number[] = [];
 
     for (let i = 0; i < numPosts; i++) {
-      const segStart = Math.floor(dayStart + i * segmentSize);
-      const segEnd = Math.floor(dayStart + (i + 1) * segmentSize);
+      const segStart = Math.floor(dayStart + dayOffset + i * segmentSize);
+      const segEnd = Math.floor(dayStart + dayOffset + (i + 1) * segmentSize);
+
+      // v13.1.2: Use the MIDDLE 60% of the segment for random time generation.
+      // This avoids edge clustering (posts too close to segment boundaries).
+      const margin = Math.floor(segmentSize * 0.2); // 20% margin on each side
+      const innerStart = segStart + margin;
+      const innerEnd = segEnd - margin;
 
       let time: number | null = null;
       const effectiveGap = Math.min(minGap, Math.floor(segmentSize / 2));
 
       for (let attempt = 0; attempt < 50; attempt++) {
-        const t = randomInt(segStart, Math.max(segStart, segEnd - 1));
+        const t = randomInt(innerStart, Math.max(innerStart, innerEnd - 1));
         const tooClose = usedMinutes.some((um) => Math.abs(um - t) < effectiveGap);
         if (!tooClose) { time = t; break; }
       }
