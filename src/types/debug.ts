@@ -63,7 +63,11 @@ export type DebugEventName =
   // v12.2.2: Preferred provider events
   | "scheduler.preferred_provider"
   | "scheduler.preferred_failed"
-  | "scheduler.preferred_error";
+  | "scheduler.preferred_error"
+  // v13.0.3: Tier H Quality Filter events
+  | "tier_h_filter"
+  | "tier_h_accepted"
+  | "tier_h_rejected";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

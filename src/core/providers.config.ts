@@ -462,7 +462,7 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
     popularityExempt: true,
     canBreak: true, // deep-dive analysis
     homepage: "https://www.anandtech.com",
-    docsUrl: "https://www.anandtech.com/rss/",
+    docsUrl: "https://feeds.feedburner.com/anandtech",
   },
 
   // ════════════════════════════════════════════════════════════

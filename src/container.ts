@@ -30,6 +30,7 @@ import { PluginLoader } from "./services/plugin-loader";
 import { ProviderEngine } from "./services/provider-engine";
 import { ProviderRotation } from "./services/provider-rotation";
 import { BreakingContentService } from "./services/breaking-content";
+import { TierHFilter } from "./services/tier-h-filter";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
 import { LanguageManager } from "./services/language-manager";
@@ -169,6 +170,20 @@ export function buildContainer(env: Env): Container {
   // v11.1.0: Provider Rotation (anti-repeat) + Breaking Content
   const providerRotation = new ProviderRotation({ kv, logger });
   const breakingContent = new BreakingContentService({ kv, logger });
+  // v13.0.3: Tier H Quality Filter (scores articles 0-100, threshold 70)
+  const tierHFilter = new TierHFilter({
+    logger,
+    config: async () => ({
+      threshold: 70,
+      positiveWeight: 15,
+      negativeWeight: 15,
+      recentBonus: 10,
+      trendBonus: 20,
+      clickbaitPenalty: 25,
+      maxScore: 100,
+      minScore: 0,
+    }),
+  });
 
   // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
@@ -347,6 +362,7 @@ export function buildContainer(env: Env): Container {
     providerEngine,
     providerRotation,
     breakingContent,
+    tierHFilter,
     categories,
     scheduler,
     lang,

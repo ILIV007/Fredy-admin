@@ -17,7 +17,7 @@ import type { PluginLogger } from "../../../services/plugin-logger";
 import { anandtechManifest } from "./manifest";
 export { anandtechManifest } from "./manifest";
 
-const RSS_URL = "https://www.anandtech.com/rss/";
+const RSS_URL = "https://feeds.feedburner.com/anandtech"; // v13.0.3: fixed — old /rss/ returned HTML
 const CACHE_KEY = "fredy:source:anandtech:latest";
 const CACHE_TTL_SECONDS = 4 * 3600; // 4 hours (Tier H)
 

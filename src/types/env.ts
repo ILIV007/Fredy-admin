@@ -49,6 +49,8 @@ export interface Container {
   readonly providerRotation: import("../services/provider-rotation").ProviderRotation;
   /** v11.1.0: Breaking Content service (1 extra slot/day for exceptional content). */
   readonly breakingContent: import("../services/breaking-content").BreakingContentService;
+  /** v13.0.3: Tier H Quality Filter (scores Tier H articles 0-100, threshold 70). */
+  readonly tierHFilter: import("../services/tier-h-filter").TierHFilter;
   readonly categories: import("../services/category-manager").CategoryManager;
   readonly scheduler: import("../services/scheduler-service").SchedulerService;
   readonly lang: import("../services/language-manager").LanguageManager;

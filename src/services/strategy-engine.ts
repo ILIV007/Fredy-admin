@@ -206,24 +206,19 @@ export class StrategyEngine {
       let slotStatus: PlannedPostStatus = "pending";
 
       if (index === wildcardSlotIndex) {
-        // v12.3.4: Wildcard picks from ALL enabled providers across all
-        // categories, BUT excludes providers already used 2× today
-        // (MAX_PROVIDER_REPEAT). This enforces the 2/day-per-API limit.
+        // v13.0.3: WILDCARD IS TRULY RANDOM — NO category, tier, or theme filter.
+        // Picks from ALL enabled providers (A + B + C + H), NOT limited to any
+        // strategy category, tier, or day-of-week theme. No MAX_PROVIDER_REPEAT
+        // filter either — the wildcard bypasses the 2/day cap to ensure maximum
+        // variety. Only ONE wildcard per day.
         const allProviders: string[] = [
           ...(CATEGORY_PROVIDERS["A"] ?? []),
           ...(CATEGORY_PROVIDERS["B"] ?? []),
           ...(CATEGORY_PROVIDERS["C"] ?? []),
+          ...(CATEGORY_PROVIDERS["H"] ?? []), // v13.0.3: include Tier H
         ].filter((id) => this.deps.pluginManager.isEnabled(id));
-        // v12.3.4: Filter out providers that have already been used 2× today.
-        const available = allProviders.filter(
-          (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
-        );
-        // If all providers are exhausted (all used 2×), fall back to all providers.
-        // This is rare (needs >28 slots/day) but prevents the wildcard from
-        // being null when the plan has many slots.
-        const pool = available.length > 0 ? available : allProviders;
-        provider = pool.length > 0
-          ? pool[randomInt(0, pool.length - 1)]!
+        provider = allProviders.length > 0
+          ? allProviders[randomInt(0, allProviders.length - 1)]!
           : null;
         // v12.3.2: When wildcard picks a provider from a DIFFERENT category
         // than the slot's original category, update slotCategory to match
@@ -241,14 +236,31 @@ export class StrategyEngine {
         provider = this.selectProvider(slot.category, theme, usedProviders);
       }
 
-      // v12.3.1: If selectProvider returned null AND the theme is enabled with
-      // preferredProviders, mark the slot as "skipped" (no matching provider
-      // for the day's theme). The slot stays in the plan with status=skipped
-      // so the dashboard shows a clear ⏭️ badge and the scheduler skips it.
-      // v12.3.4: Also mark as "skipped" when selectProvider returns null due
-      // to the 2/day cap being hit (all providers in the category at MAX_PROVIDER_REPEAT).
-      // This can happen on Friday when the wildcard already used xkcd once,
-      // and 2 Cat C slots bring xkcd to 2× — the 3rd Cat C slot gets skipped.
+      // v13.0.3: If selectProvider returned null (theme mismatch OR cap exhausted),
+      // DON'T skip the slot — instead, fall back to wildcard-style random selection
+      // from ALL providers (any category, any tier). This ensures no slot is ever
+      // wasted. The slot's category is updated to match the picked provider.
+      if (!provider) {
+        const allProviders: string[] = [
+          ...(CATEGORY_PROVIDERS["A"] ?? []),
+          ...(CATEGORY_PROVIDERS["B"] ?? []),
+          ...(CATEGORY_PROVIDERS["C"] ?? []),
+          ...(CATEGORY_PROVIDERS["H"] ?? []),
+        ].filter((id) => this.deps.pluginManager.isEnabled(id));
+        const available = allProviders.filter(
+          (id) => (usedProviders.get(id) ?? 0) < StrategyEngine.MAX_PROVIDER_REPEAT,
+        );
+        const pool = available.length > 0 ? available : allProviders;
+        provider = pool.length > 0 ? pool[randomInt(0, pool.length - 1)]! : null;
+        if (provider) {
+          const providerCat = this.getProviderCategory(provider);
+          if (providerCat && providerCat !== slotCategory) {
+            slotCategory = providerCat;
+          }
+        }
+      }
+
+      // v13.0.3: Only mark as "skipped" if even the fallback failed (extremely rare).
       if (!provider) {
         slotStatus = "skipped" as PlannedPostStatus;
       }

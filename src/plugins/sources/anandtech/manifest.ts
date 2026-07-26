@@ -16,7 +16,7 @@ export const anandtechManifest: PluginManifest = {
   supportsImages: true,
   description: "AnandTech — in-depth hardware analysis and reviews (RSS).",
   author: "Fredy",
-  docsUrl: "https://www.anandtech.com/rss/",
+  docsUrl: "https://feeds.feedburner.com/anandtech",
   homepage: "https://www.anandtech.com",
   supportsMarkdown: true,
   supportsLanguage: ["en"],

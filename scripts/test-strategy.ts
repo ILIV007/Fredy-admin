@@ -401,18 +401,20 @@ await describe("v12.3.4: Wildcard picks from ALL 14 providers (with 2/day cap)",
     }
   }
   // Every active provider should have been picked at least once across 1000 plans.
+  // v13.0.3: Added Tier H providers.
   const expectedProviders = [
     "github", "github-trending", "github-releases", "github-events",
     "github-security", "devto", "stackexchange", "huggingface-blog",
     "reddit-v2", "hackernews-algolia", "cloudflare-blog", "producthunt",
     "openai-news", "xkcd",
+    "ars-technica", "toms-hardware", "anandtech",
   ];
   for (const id of expectedProviders) {
     const count = pickCounts.get(id) ?? 0;
     assert(count > 0, `${id} was picked at least once in 1000 plan generations (got: ${count})`);
   }
-  // v12.3.4: The critical assertion — NO provider appears more than 2× per day.
-  assert(maxPerPlan <= 2, `MAX_PROVIDER_REPEAT=2 enforced (max was ${maxPerPlan}× for ${maxPerPlanProvider} on ${maxPerPlanDate})`);
+  // v13.0.3: Wildcard now bypasses the 2/day cap — max per plan can be 3 (2 regular + 1 wildcard).
+  assert(maxPerPlan <= 3, `Max 3× per provider per day (2 regular + 1 wildcard) (max was ${maxPerPlan}× for ${maxPerPlanProvider} on ${maxPerPlanDate})`);
 });
 
 // v12.3.2: Exactly ONE wildcard slot per day.

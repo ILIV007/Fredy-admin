@@ -39,12 +39,16 @@ export const manualScreen: Screen = {
   keyboard(s: FredySettings): InlineKeyboard {
     void s;
     // v11.4.0: All 20 providers organized by tier.
+    // v13.0.3: Added Tier H (Hardware & Technology Headlines).
     return buildKeyboardWithBack([
       [labelButton("─── By Category ───")],
       [
         navButton("🟢 Cat A", "action:manual:category:A"),
         navButton("🟡 Cat B", "action:manual:category:B"),
         navButton("🟣 Cat C", "action:manual:category:C"),
+      ],
+      [
+        navButton("🔧 Cat H", "action:manual:category:H"),
       ],
       [labelButton("─── Tier S (Core) ───")],
       [
@@ -77,6 +81,13 @@ export const manualScreen: Screen = {
         navButton("🤖 OpenAI News", "action:manual:source:openai-news"),
         navButton("👾 Reddit", "action:manual:source:reddit-v2"),
       ],
+      // v13.0.3: Tier H — Hardware & Technology Headlines (3 RSS providers)
+      [labelButton("─── Tier H (Hardware · v13) ───")],
+      [
+        navButton("🔬 Ars Technica", "action:manual:source:ars-technica"),
+        navButton("🖥️ Tom's HW", "action:manual:source:toms-hardware"),
+      ],
+      [navButton("🔧 AnandTech", "action:manual:source:anandtech")],
       [labelButton("─── Tier V (Scheduled) ───")],
       [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
       [labelButton("─── Legacy ───")],

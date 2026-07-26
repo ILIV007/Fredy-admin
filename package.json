@@ -1,6 +1,6 @@
 {
   "name": "fredy-admin",
-  "version": "13.0.2",
+  "version": "13.0.3",
   "description": "Fredy v12.3.0 — Precision Scheduler + Zero-KV Quiet Hours + Provider Smart Sleep. Cloudflare Workers Free, serverless.",
   "type": "module",
   "main": "src/index.ts",
@@ -9,12 +9,12 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx scripts/test-scheduler.ts && npx tsx scripts/test-strategy.ts && npx tsx scripts/test-pipeline.ts && npx tsx scripts/test-dedup.ts && npx tsx scripts/test-plugin-registry.ts",
+    "test": "npx tsx scripts/test-scheduler.ts && npx tsx scripts/test-strategy.ts && npx tsx scripts/test-pipeline.ts && npx tsx scripts/test-dedup.ts && npx tsx scripts/test-plugin-registry.ts && npx tsx scripts/test-tier-h-filter.ts",
     "test:scheduler": "npx tsx scripts/test-scheduler.ts",
     "test:strategy": "npx tsx scripts/test-strategy.ts",
     "test:pipeline": "npx tsx scripts/test-pipeline.ts",
     "test:dedup": "npx tsx scripts/test-dedup.ts",
-    "test:registry": "npx tsx scripts/test-plugin-registry.ts"
+    "test:registry": "npx tsx scripts/test-plugin-registry.ts && npx tsx scripts/test-tier-h-filter.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
