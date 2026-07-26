@@ -111,7 +111,12 @@ export class NasaPlugin implements Plugin {
   normalize(raw: unknown): SourceItem {
     const apod = raw as APODResponse;
     const mediaType = apod.media_type ?? "image";
-    const imageUrl = mediaType === "image" ? (apod.url ?? apod.hdurl) : apod.url;
+    // v13.1.7: When APOD is a video, there's no direct image URL — leave
+    // imageUrl/media undefined so the pipeline falls back to OpenGraph
+    // resolution (which fetches the YouTube thumbnail from the APOD page).
+    // Previously, for videos we set imageUrl = apod.url (a YouTube watch URL),
+    // which failed isUsableImageUrl() validation and left no image at all.
+    const imageUrl = mediaType === "image" ? (apod.url ?? apod.hdurl) : undefined;
 
     // v8.1.2: Keep the body concise — just the explanation, trimmed.
     // The AI pipeline will still process it, but the content is simple
@@ -124,7 +129,11 @@ export class NasaPlugin implements Plugin {
       category: this.metadata.category,
       title: String(apod.title ?? "NASA APOD"),
       body: explanation,
-      url: String(apod.url ?? "https://apod.nasa.gov/"),
+      // v13.1.7: For videos, use the APOD page URL (not the YouTube URL) so
+      // the ImageResolver can fetch the OG thumbnail from apod.nasa.gov.
+      url: mediaType === "video"
+        ? `https://apod.nasa.gov/apod/ap${(apod.date ?? "").replace(/-/g, "").slice(2)}.html`
+        : String(apod.url ?? "https://apod.nasa.gov/"),
       imageUrl: imageUrl ?? undefined,
       language: "en", // v8.1.2: Always English
       publishedAt: apod.date ? Date.parse(apod.date) || undefined : undefined,

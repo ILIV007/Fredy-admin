@@ -187,6 +187,24 @@ export class ProductHuntPlugin implements Plugin {
       const description = this.stripHtml(this.extractTag(block, "description"));
       const pubDate = this.extractTag(block, "pubDate");
 
+      // v13.1.7: Extract image from <enclosure>, <media:content>, or <media:thumbnail> tags.
+      // Product Hunt RSS includes enclosure tags with product screenshots.
+      let imageUrl: string | undefined;
+      const enclosureMatch = /<enclosure[^>]+url=["']([^"']+)["']/i.exec(block);
+      if (enclosureMatch?.[1]) {
+        imageUrl = enclosureMatch[1];
+      } else {
+        const mediaContentMatch = /<media:content[^>]+url=["']([^"']+)["']/i.exec(block);
+        if (mediaContentMatch?.[1]) {
+          imageUrl = mediaContentMatch[1];
+        } else {
+          const mediaThumbMatch = /<media:thumbnail[^>]+url=["']([^"']+)["']/i.exec(block);
+          if (mediaThumbMatch?.[1]) {
+            imageUrl = mediaThumbMatch[1];
+          }
+        }
+      }
+
       if (title && link) {
         items.push({
           id: `ph-${title.slice(0, 30).replace(/\s+/g, "-")}`,
@@ -195,6 +213,7 @@ export class ProductHuntPlugin implements Plugin {
           title,
           body: description.slice(0, 500),
           url: link,
+          imageUrl,
           language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
           metadata: { source: "rss" },

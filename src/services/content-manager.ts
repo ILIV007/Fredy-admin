@@ -178,7 +178,12 @@ export class ContentManager {
       try {
         const enrichedPost = await this.deps.normalizer.normalize(enrichedItem, lang);
         // Preserve tags from the original post.
-        post = { ...enrichedPost, tags: post.tags, score: post.score };
+        // v13.1.7: CRITICAL FIX — preserve media from the ORIGINAL source item.
+        // Enrichment (GitHub API fetch) returns a new raw object WITHOUT the
+        // media/imageUrl fields that the plugin's normalize() set. Previously,
+        // enrichment was silently dropping the media, causing posts (especially
+        // NASA) to be published without images.
+        post = { ...enrichedPost, tags: post.tags, score: post.score, media: post.media ?? enrichedPost.media };
       } catch { /* non-fatal */
         // If re-normalization fails, keep the original post.
       }
