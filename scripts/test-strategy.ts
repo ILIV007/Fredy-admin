@@ -92,7 +92,7 @@ const ENABLED_PROVIDERS = new Set([
   "reddit-v2", "hackernews-algolia", "cloudflare-blog", "producthunt",
   "openai-news", "xkcd", "nasa",
   // v13.0.0: Tier H providers
-  "ars-technica", "toms-hardware", "anandtech",
+  "ars-technica", "toms-hardware", "techpowerup",
 ]);
 const mockPluginManager = {
   isEnabled(id: string): boolean { return ENABLED_PROVIDERS.has(id); },
@@ -407,7 +407,7 @@ await describe("v12.3.4: Wildcard picks from ALL 14 providers (with 2/day cap)",
     "github-security", "devto", "stackexchange", "huggingface-blog",
     "reddit-v2", "hackernews-algolia", "cloudflare-blog", "producthunt",
     "openai-news", "xkcd",
-    "ars-technica", "toms-hardware", "anandtech",
+    "ars-technica", "toms-hardware", "techpowerup",
   ];
   for (const id of expectedProviders) {
     const count = pickCounts.get(id) ?? 0;
@@ -430,10 +430,10 @@ await describe("v13.0.0: Tier H is additive — balanced plan has H slots", asyn
   const hPosts = plan.posts.filter((p) => p.category === "H");
   // Balanced mode = 1 H post/day by default.
   assert(hPosts.length >= 1, `Balanced plan has at least 1 Tier H post (got: ${hPosts.length})`);
-  // H posts must have a provider (ars-technica, toms-hardware, or anandtech).
+  // H posts must have a provider (ars-technica, toms-hardware, or techpowerup).
   for (const h of hPosts) {
     if (h.provider) {
-      assert(["ars-technica", "toms-hardware", "anandtech"].includes(h.provider),
+      assert(["ars-technica", "toms-hardware", "techpowerup"].includes(h.provider),
         `H post #${h.index} provider is a Tier H source (got: ${h.provider})`);
     }
   }
@@ -445,7 +445,7 @@ await describe("v13.0.0: Tier H providers are covered in CATEGORY_PROVIDERS", ()
   assert(hProviders!.length === 3, `Exactly 3 Tier H providers (got: ${hProviders!.length})`);
   assert(hProviders!.includes("ars-technica"), "H includes ars-technica");
   assert(hProviders!.includes("toms-hardware"), "H includes toms-hardware");
-  assert(hProviders!.includes("anandtech"), "H includes anandtech");
+  assert(hProviders!.includes("techpowerup"), "H includes techpowerup");
 });
 
 await describe("v13.0.0: Every non-minimal day has at least 1 Tier H slot", async () => {
@@ -485,7 +485,7 @@ await describe("v13.0.0: Tier H provider rotation avoids immediate repetition", 
   assert(hProviderSequence.length > 0, "Collected at least 1 H provider across 10 plans");
   // Verify all collected providers are valid H sources.
   for (const p of hProviderSequence) {
-    assert(["ars-technica", "toms-hardware", "anandtech"].includes(p), `${p} is a valid H provider`);
+    assert(["ars-technica", "toms-hardware", "techpowerup"].includes(p), `${p} is a valid H provider`);
   }
 });
 } // end main()

@@ -56,6 +56,7 @@ import { createRedditV2Plugin } from "../plugins/sources/reddit-v2/index";
 // v13.0.0: Tier H — Hardware & Technology Headlines (RSS, refresh every 4h)
 import { createArsTechnicaPlugin } from "../plugins/sources/ars-technica/index";
 import { createTomsHardwarePlugin } from "../plugins/sources/toms-hardware/index";
+import { createTechPowerUpPlugin } from "../plugins/sources/techpowerup/index";
 import { createAnandtechPlugin } from "../plugins/sources/anandtech/index";
 
 // AI providers
@@ -119,6 +120,8 @@ export class PluginLoader {
       // ─── v13.0.0 Tier H — Hardware & Technology Headlines (RSS, refresh every 4h) ───
       { id: "ars-technica", factory: createArsTechnicaPlugin },
       { id: "toms-hardware", factory: createTomsHardwarePlugin },
+      { id: "techpowerup", factory: createTechPowerUpPlugin },
+      // v13.0.4: AnandTech moved to legacy (disabled — RSS returns forum spam)
       { id: "anandtech", factory: createAnandtechPlugin },
     ];
 

@@ -78,7 +78,8 @@ const SOURCE_TAGS: Readonly<Record<string, readonly string[]>> = {
   // v13.0.0: Tier H — Hardware & Technology Headlines
   "ars-technica": ["ars-technica", "hardware"],
   "toms-hardware": ["toms-hardware", "hardware"],
-  anandtech: ["anandtech", "hardware"],
+  techpowerup: ["techpowerup", "hardware"],
+  anandtech: ["anandtech", "hardware", "legacy"],
 };
 
 /** Maximum tags per post. */

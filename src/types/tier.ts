@@ -19,7 +19,7 @@
  * - A     : Important providers. Refreshed every 6 hours. Enabled by default.
  * - B     : Supporting providers. Refreshed every 12 hours. Enabled by default.
  * - H     : v13.0.0 Hardware & Technology Headlines. RSS-only providers
- *           (Ars Technica, Tom's Hardware, AnandTech). Refreshed every 4 hours.
+ *           (Ars Technica, Tom's Hardware, TechPowerUp). Refreshed every 4 hours.
  *           These back Category H — the new additive Strategy Category.
  * - Legacy: Old providers. Refreshed every 24 hours. Disabled by default.
  * - V     : v12.0.9 Scheduled/manual content. Fixed schedule, no jitter, no

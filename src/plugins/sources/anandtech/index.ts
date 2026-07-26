@@ -1,13 +1,9 @@
 /**
  * src/plugins/sources/anandtech/index.ts
- * v13.0.0: AnandTech RSS plugin — Tier H.
- *
- * One RSS item = one Strategy candidate. Only the latest article is published
- * per fetch. No daily summaries.
- *
- * RSS: https://www.anandtech.com/rss/
+ * v13.0.4: DISABLED (legacy) — AnandTech RSS only returns forum marketplace spam.
+ * Kept for potential future re-enablement if AnandTech restores article RSS.
  */
-import type { Plugin, PluginStatus, ProviderQualityResult } from "../../../types/plugin";
+import type { Plugin, PluginStatus } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
 import type { Category } from "../../../types/category";
 import type { Tier } from "../../../types/tier";
@@ -17,9 +13,9 @@ import type { PluginLogger } from "../../../services/plugin-logger";
 import { anandtechManifest } from "./manifest";
 export { anandtechManifest } from "./manifest";
 
-const RSS_URL = "https://feeds.feedburner.com/anandtech"; // v13.0.3: fixed — old /rss/ returned HTML
+const RSS_URL = "https://feeds.feedburner.com/anandtech";
 const CACHE_KEY = "fredy:source:anandtech:latest";
-const CACHE_TTL_SECONDS = 4 * 3600; // 4 hours (Tier H)
+const CACHE_TTL_SECONDS = 4 * 3600;
 
 export interface AnandtechPluginDeps {
   readonly env: Env;
@@ -47,24 +43,14 @@ export class AnandtechPlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "anandtech" });
-
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) return cached;
-
     const headers = { "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)" };
     const res = await fetch(RSS_URL, { headers });
-    if (!res.ok) {
-      this.deps.logger.warn("source.fetch_error", { plugin: "anandtech", status: res.status });
-      return [];
-    }
-
+    if (!res.ok) { this.deps.logger.warn("source.fetch_error", { plugin: "anandtech", status: res.status }); return []; }
     const xml = await res.text();
     const items = this.parseRSS(xml);
-
-    if (items.length > 0) {
-      await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
-    }
-
+    if (items.length > 0) { await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {}); }
     this.deps.logger.info("source.fetch_success", { plugin: "anandtech", returned: items.length });
     return items;
   }
@@ -73,7 +59,6 @@ export class AnandtechPlugin implements Plugin {
     const items: SourceItem[] = [];
     const itemRegex = /<item>([\s\S]*?)<\/item>/g;
     let match: RegExpExecArray | null;
-
     while ((match = itemRegex.exec(xml)) !== null && items.length < 10) {
       const block = match[1] ?? "";
       const title = this.extractTag(block, "title");
@@ -81,16 +66,15 @@ export class AnandtechPlugin implements Plugin {
       const description = this.stripHtml(this.extractTag(block, "description"));
       const pubDate = this.extractTag(block, "pubDate");
       const categories = this.extractAllTags(block, "category");
-
+      let imageUrl: string | undefined;
+      const enclosureMatch = /<enclosure[^>]+url=["']([^"']+)["']/i.exec(block);
+      if (enclosureMatch?.[1]) imageUrl = enclosureMatch[1];
+      const mediaContentMatch = /<media:content[^>]+url=["']([^"']+)["']/i.exec(block);
+      if (!imageUrl && mediaContentMatch?.[1]) imageUrl = mediaContentMatch[1];
       if (title && link) {
         items.push({
-          id: `at-${link.slice(-60)}`,
-          source: this.metadata.id,
-          category: this.metadata.category,
-          title,
-          body: description.slice(0, 1000),
-          url: link,
-          language: "en",
+          id: `at-${link.slice(-60)}`, source: this.metadata.id, category: this.metadata.category,
+          title, body: description.slice(0, 1000), url: link, imageUrl, language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
           metadata: { categories, pubDate },
           displayIcon: this.metadata.displayIcon ?? "🔧",
@@ -112,9 +96,7 @@ export class AnandtechPlugin implements Plugin {
     const results: string[] = [];
     const regex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>|<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "gi");
     let match: RegExpExecArray | null;
-    while ((match = regex.exec(xml)) !== null) {
-      results.push((match[1] ?? match[2] ?? "").trim());
-    }
+    while ((match = regex.exec(xml)) !== null) { results.push((match[1] ?? match[2] ?? "").trim()); }
     return results;
   }
 
@@ -125,14 +107,9 @@ export class AnandtechPlugin implements Plugin {
   normalize(raw: unknown): SourceItem {
     const item = raw as RSSItem;
     return {
-      id: `at-${item.link.slice(-60)}`,
-      source: this.metadata.id,
-      category: this.metadata.category,
-      title: item.title,
-      body: this.stripHtml(item.description).slice(0, 1000),
-      url: item.link,
-      language: "en",
-      publishedAt: item.pubDate ? Date.parse(item.pubDate) || undefined : undefined,
+      id: `at-${item.link.slice(-60)}`, source: this.metadata.id, category: this.metadata.category,
+      title: item.title, body: this.stripHtml(item.description).slice(0, 1000), url: item.link,
+      language: "en", publishedAt: item.pubDate ? Date.parse(item.pubDate) || undefined : undefined,
       metadata: { categories: item.categories },
       displayIcon: this.metadata.displayIcon ?? "🔧",
       displaySource: this.metadata.displaySource ?? "AnandTech",
@@ -144,23 +121,9 @@ export class AnandtechPlugin implements Plugin {
     return !!item.title && !!item.url && (item.url.includes("anandtech.com"));
   }
 
-  /** v13.0.0: Quality filter — boost deep-dive analysis/reviews. */
-  async qualityFilter(item: SourceItem): Promise<ProviderQualityResult | null> {
-    const categories = ((item.metadata as { categories?: readonly string[] })?.categories ?? []) as readonly string[];
-    const titleLower = item.title.toLowerCase();
-    const bodyLower = item.body.toLowerCase();
-    const PREFERRED = ["review", "analysis", "deep", "dive", "benchmark", "architecture", "test"];
-    const matched = PREFERRED.filter((t) =>
-      titleLower.includes(t) || bodyLower.includes(t) || categories.some((c) => c.toLowerCase().includes(t)),
-    );
-    if (matched.length === 0) return null;
-    const score = matched.length >= 3 ? 92 : matched.length >= 2 ? 85 : 78;
-    return { item, score, reason: `topics=${matched.join(",")}`, boost: matched.includes("analysis") || matched.includes("benchmark") };
-  }
-
   async health(): Promise<PluginStatus> {
     return {
-      pluginId: this.metadata.id, healthy: true, enabled: this.metadata.enabled,
+      pluginId: this.metadata.id, healthy: false, enabled: this.metadata.enabled,
       lastFetchAt: null, lastSuccessAt: null, lastErrorAt: null, lastErrorMessage: null,
       consecutiveFailures: 0, totalFetches: 0, totalSuccesses: 0, totalFailures: 0,
       rateLimitRemaining: null, rateLimitResetAt: null, lastItemCount: null,

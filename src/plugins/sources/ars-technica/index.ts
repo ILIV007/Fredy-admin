@@ -83,6 +83,23 @@ export class ArsTechnicaPlugin implements Plugin {
       const categories = this.extractAllTags(block, "category");
 
       if (title && link) {
+        // v13.0.4: Extract image from <media:content>, <media:thumbnail>, or <enclosure> tags.
+        // Ars Technica uses media:content and media:thumbnail.
+        let imageUrl: string | undefined;
+        const mediaContentMatch = /<media:content[^>]+url=["']([^"']+)["']/i.exec(block);
+        if (mediaContentMatch?.[1]) {
+          imageUrl = mediaContentMatch[1];
+        } else {
+          const mediaThumbMatch = /<media:thumbnail[^>]+url=["']([^"']+)["']/i.exec(block);
+          if (mediaThumbMatch?.[1]) {
+            imageUrl = mediaThumbMatch[1];
+          } else {
+            const enclosureMatch = /<enclosure[^>]+url=["']([^"']+)["']/i.exec(block);
+            if (enclosureMatch?.[1]) {
+              imageUrl = enclosureMatch[1];
+            }
+          }
+        }
         items.push({
           id: `ars-${link.slice(-60)}`,
           source: this.metadata.id,
@@ -90,6 +107,7 @@ export class ArsTechnicaPlugin implements Plugin {
           title,
           body: description.slice(0, 1000),
           url: link,
+          imageUrl,
           language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
           metadata: { categories, pubDate },

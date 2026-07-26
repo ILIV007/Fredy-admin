@@ -87,7 +87,7 @@ export const manualScreen: Screen = {
         navButton("🔬 Ars Technica", "action:manual:source:ars-technica"),
         navButton("🖥️ Tom's HW", "action:manual:source:toms-hardware"),
       ],
-      [navButton("🔧 AnandTech", "action:manual:source:anandtech")],
+      [navButton("⚡ TechPowerUp", "action:manual:source:techpowerup")],
       [labelButton("─── Tier V (Scheduled) ───")],
       [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
       [labelButton("─── Legacy ───")],

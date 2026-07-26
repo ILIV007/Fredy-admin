@@ -61,8 +61,8 @@ for (const id of REGISTERED_PLUGIN_IDS) {
 console.log("\nTest 4: Every provider has a reputation score (not default 60)");
 for (const id of REGISTERED_PLUGIN_IDS) {
   const reputation = getReputationScore(id);
-  // Legacy providers (news, joke, wikimedia, hackernews, reddit) are allowed to have reputation=60
-  const isLegacy = ["news", "joke", "wikimedia", "hackernews", "reddit"].includes(id);
+  // Legacy providers (news, joke, wikimedia, hackernews, reddit, anandtech) are allowed to have reputation=60
+  const isLegacy = ["news", "joke", "wikimedia", "hackernews", "reddit", "anandtech"].includes(id);
   assert(reputation !== 60 || isLegacy, `${id}: reputation=${reputation}`);
 }
 

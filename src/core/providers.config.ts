@@ -445,14 +445,14 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
     docsUrl: "https://www.tomshardware.com/feeds",
   },
   {
-    id: "anandtech",
-    name: "AnandTech",
+    id: "techpowerup",
+    name: "TechPowerUp",
     tier: "H",
     category: "H",
-    weight: 86,
+    weight: 88,
     refreshIntervalHours: 4,
     cacheTtlSeconds: 4 * 3600,
-    credibility: 93,
+    credibility: 92,
     reputation: 90,
     rateLimit: 0,
     enabledByDefault: true,
@@ -460,14 +460,36 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
     minStars: 0,
     minScore: 0,
     popularityExempt: true,
-    canBreak: true, // deep-dive analysis
-    homepage: "https://www.anandtech.com",
-    docsUrl: "https://feeds.feedburner.com/anandtech",
+    canBreak: true, // major hardware launches
+    homepage: "https://www.techpowerup.com",
+    docsUrl: "https://www.techpowerup.com/rss/news",
   },
 
   // ════════════════════════════════════════════════════════════
   // Legacy providers (disabled by default, kept for compatibility)
   // ════════════════════════════════════════════════════════════
+  {
+    // v13.0.4: AnandTech moved to legacy — RSS only returns forum marketplace spam.
+    // Re-enable if AnandTech restores their article RSS feed.
+    id: "anandtech",
+    name: "AnandTech (legacy)",
+    tier: "legacy",
+    category: "H",
+    weight: 50,
+    refreshIntervalHours: 24,
+    cacheTtlSeconds: 4 * 3600,
+    credibility: 70,
+    reputation: 60,
+    rateLimit: 0,
+    enabledByDefault: false,
+    supportsImages: false,
+    minStars: 0,
+    minScore: 0,
+    popularityExempt: false,
+    canBreak: false,
+    homepage: "https://www.anandtech.com",
+    docsUrl: "https://feeds.feedburner.com/anandtech",
+  },
   {
     id: "hackernews",
     name: "Hacker News (Firebase, legacy)",

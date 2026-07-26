@@ -257,6 +257,6 @@ export const CATEGORY_PROVIDERS: Readonly<Record<string, readonly string[]>> = {
   H: [
     "ars-technica",
     "toms-hardware",
-    "anandtech",
+    "techpowerup",
   ],
 };

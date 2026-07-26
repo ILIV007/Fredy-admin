@@ -49,6 +49,8 @@ export { RedditV2Plugin, createRedditV2Plugin, redditV2Manifest } from "./reddit
 // ─── v13.0.0: Tier H — Hardware & Technology Headlines (RSS, refresh every 4h) ───
 export { ArsTechnicaPlugin, createArsTechnicaPlugin, arsTechnicaManifest } from "./ars-technica";
 export { TomsHardwarePlugin, createTomsHardwarePlugin, tomsHardwareManifest } from "./toms-hardware";
+export { TechPowerUpPlugin, createTechPowerUpPlugin, techpowerupManifest } from "./techpowerup";
+// v13.0.4: AnandTech moved to legacy (RSS returns forum spam)
 export { AnandtechPlugin, createAnandtechPlugin, anandtechManifest } from "./anandtech";
 
 // Re-export the Plugin interface for convenience.

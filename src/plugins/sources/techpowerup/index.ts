@@ -1,11 +1,12 @@
 /**
- * src/plugins/sources/toms-hardware/index.ts
- * v13.0.0: Tom's Hardware RSS plugin — Tier H.
+ * src/plugins/sources/techpowerup/index.ts
+ * v13.0.4: TechPowerUp RSS plugin — Tier H.
  *
- * One RSS item = one Strategy candidate. Only the latest article is published
- * per fetch. No daily summaries.
+ * Replaces AnandTech (whose RSS only returned forum marketplace spam).
+ * TechPowerUp has 111 RSS items with <enclosure> images — real hardware news.
  *
- * RSS: https://www.tomshardware.com/feeds/all
+ * RSS: https://www.techpowerup.com/rss/news
+ * Image extraction: <enclosure url="..."> tag (every item has one).
  */
 import type { Plugin, PluginStatus, ProviderQualityResult } from "../../../types/plugin";
 import type { SourceItem } from "../../../types/api";
@@ -14,14 +15,14 @@ import type { Tier } from "../../../types/tier";
 import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
-import { tomsHardwareManifest } from "./manifest";
-export { tomsHardwareManifest } from "./manifest";
+import { techpowerupManifest } from "./manifest";
+export { techpowerupManifest } from "./manifest";
 
-const RSS_URL = "https://www.tomshardware.com/feeds/all";
-const CACHE_KEY = "fredy:source:toms-hardware:latest";
+const RSS_URL = "https://www.techpowerup.com/rss/news";
+const CACHE_KEY = "fredy:source:techpowerup:latest";
 const CACHE_TTL_SECONDS = 4 * 3600; // 4 hours (Tier H)
 
-export interface TomsHardwarePluginDeps {
+export interface TechPowerUpPluginDeps {
   readonly env: Env;
   readonly kv: KVStore;
   readonly logger: PluginLogger;
@@ -32,13 +33,14 @@ interface RSSItem {
   link: string;
   description: string;
   pubDate: string;
+  enclosure?: string;
   categories: readonly string[];
 }
 
-export class TomsHardwarePlugin implements Plugin {
-  readonly metadata = tomsHardwareManifest;
+export class TechPowerUpPlugin implements Plugin {
+  readonly metadata = techpowerupManifest;
 
-  constructor(private readonly deps: TomsHardwarePluginDeps) {}
+  constructor(private readonly deps: TechPowerUpPluginDeps) {}
 
   getSource(): string { return this.metadata.id; }
   getCategory(): Category { return this.metadata.category; }
@@ -46,7 +48,7 @@ export class TomsHardwarePlugin implements Plugin {
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
   async fetch(): Promise<readonly SourceItem[]> {
-    this.deps.logger.info("source.fetch_start", { plugin: "toms-hardware" });
+    this.deps.logger.info("source.fetch_start", { plugin: "techpowerup" });
 
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) return cached;
@@ -54,7 +56,7 @@ export class TomsHardwarePlugin implements Plugin {
     const headers = { "User-Agent": "FredyBot/1.0 (https://github.com/ilivir3/fredy; Cloudflare Workers)" };
     const res = await fetch(RSS_URL, { headers });
     if (!res.ok) {
-      this.deps.logger.warn("source.fetch_error", { plugin: "toms-hardware", status: res.status });
+      this.deps.logger.warn("source.fetch_error", { plugin: "techpowerup", status: res.status });
       return [];
     }
 
@@ -65,7 +67,7 @@ export class TomsHardwarePlugin implements Plugin {
       await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
     }
 
-    this.deps.logger.info("source.fetch_success", { plugin: "toms-hardware", returned: items.length });
+    this.deps.logger.info("source.fetch_success", { plugin: "techpowerup", returned: items.length });
     return items;
   }
 
@@ -82,26 +84,17 @@ export class TomsHardwarePlugin implements Plugin {
       const pubDate = this.extractTag(block, "pubDate");
       const categories = this.extractAllTags(block, "category");
 
+      // v13.0.4: Extract image from <enclosure url="..."> tag.
+      // TechPowerUp includes an enclosure image on EVERY item.
+      let imageUrl: string | undefined;
+      const enclosureMatch = /<enclosure[^>]+url=["']([^"']+)["']/i.exec(block);
+      if (enclosureMatch?.[1]) {
+        imageUrl = enclosureMatch[1];
+      }
+
       if (title && link) {
-        // v13.0.4: Extract image from <enclosure>, <media:content>, or <media:thumbnail> tags.
-        // Tom's Hardware uses all three formats.
-        let imageUrl: string | undefined;
-        const enclosureMatch = /<enclosure[^>]+url=["']([^"']+)["']/i.exec(block);
-        if (enclosureMatch?.[1]) {
-          imageUrl = enclosureMatch[1];
-        } else {
-          const mediaContentMatch = /<media:content[^>]+url=["']([^"']+)["']/i.exec(block);
-          if (mediaContentMatch?.[1]) {
-            imageUrl = mediaContentMatch[1];
-          } else {
-            const mediaThumbMatch = /<media:thumbnail[^>]+url=["']([^"']+)["']/i.exec(block);
-            if (mediaThumbMatch?.[1]) {
-              imageUrl = mediaThumbMatch[1];
-            }
-          }
-        }
         items.push({
-          id: `th-${link.slice(-60)}`,
+          id: `tpu-${link.slice(-60)}`,
           source: this.metadata.id,
           category: this.metadata.category,
           title,
@@ -110,9 +103,9 @@ export class TomsHardwarePlugin implements Plugin {
           imageUrl,
           language: "en",
           publishedAt: pubDate ? Date.parse(pubDate) || undefined : undefined,
-          metadata: { categories, pubDate },
-          displayIcon: this.metadata.displayIcon ?? "🖥️",
-          displaySource: this.metadata.displaySource ?? "Tom's Hardware",
+          metadata: { categories, pubDate, enclosure: imageUrl },
+          displayIcon: this.metadata.displayIcon ?? "⚡",
+          displaySource: this.metadata.displaySource ?? "TechPowerUp",
           fetchedAt: Date.now(),
         });
       }
@@ -143,37 +136,68 @@ export class TomsHardwarePlugin implements Plugin {
   normalize(raw: unknown): SourceItem {
     const item = raw as RSSItem;
     return {
-      id: `th-${item.link.slice(-60)}`,
+      id: `tpu-${item.link.slice(-60)}`,
       source: this.metadata.id,
       category: this.metadata.category,
       title: item.title,
       body: this.stripHtml(item.description).slice(0, 1000),
       url: item.link,
+      imageUrl: item.enclosure,
       language: "en",
       publishedAt: item.pubDate ? Date.parse(item.pubDate) || undefined : undefined,
-      metadata: { categories: item.categories },
-      displayIcon: this.metadata.displayIcon ?? "🖥️",
-      displaySource: this.metadata.displaySource ?? "Tom's Hardware",
+      metadata: { categories: item.categories, enclosure: item.enclosure },
+      displayIcon: this.metadata.displayIcon ?? "⚡",
+      displaySource: this.metadata.displaySource ?? "TechPowerUp",
       fetchedAt: Date.now(),
     };
   }
 
   validate(item: SourceItem): boolean {
-    return !!item.title && !!item.url && (item.url.includes("tomshardware.com"));
+    return !!item.title && !!item.url && (item.url.includes("techpowerup.com"));
   }
 
-  /** v13.0.0: Quality filter — boost hardware components/GPU/CPU. */
+  /** v13.0.4: Enhanced quality filter — only high-value hardware news passes.
+   *  Rejects: marketplace listings, deals, minor updates, non-hardware content. */
   async qualityFilter(item: SourceItem): Promise<ProviderQualityResult | null> {
     const categories = ((item.metadata as { categories?: readonly string[] })?.categories ?? []) as readonly string[];
     const titleLower = item.title.toLowerCase();
     const bodyLower = item.body.toLowerCase();
-    const PREFERRED = ["gpu", "cpu", "ram", "ssd", "motherboard", "review", "benchmark", "amd", "nvidia", "intel"];
-    const matched = PREFERRED.filter((t) =>
+    const text = `${titleLower} ${bodyLower}`;
+
+    // POSITIVE: High-value hardware topics
+    const POSITIVE = [
+      "gpu", "cpu", "ram", "ssd", "review", "benchmark", "amd", "nvidia", "intel",
+      "launch", "release", "performance", "rtx", "radeon", "ryzen", "core ultra",
+      "motherboard", "psu", "cooler", "case", "display", "monitor", "vr",
+      "ai chip", "ai accelerator", "datacenter", "server", "tsmc", "3nm", "2nm",
+      "ddr5", "ddr6", "pcie gen5", "usb4", "thunderbolt",
+    ];
+    const matched = POSITIVE.filter((t) =>
       titleLower.includes(t) || bodyLower.includes(t) || categories.some((c) => c.toLowerCase().includes(t)),
     );
-    if (matched.length === 0) return null;
-    const score = matched.length >= 3 ? 92 : matched.length >= 2 ? 85 : 78;
-    return { item, score, reason: `topics=${matched.join(",")}`, boost: matched.includes("gpu") || matched.includes("cpu") };
+    if (matched.length === 0) return null; // Not hardware-related
+
+    // NEGATIVE: Low-value content to reject
+    const NEGATIVE = [
+      "deal", "discount", "sale", "price drop", "coupon", "giveaway",
+      "$", "shipped", "for sale", "buying", "selling",
+      "wallpaper", "contest", "sweepstakes",
+    ];
+    const negativeMatched = NEGATIVE.filter((t) => text.includes(t));
+    if (negativeMatched.length > 0) return null; // Marketplace/deal spam
+
+    // Score based on number of positive matches
+    let score = 70;
+    if (matched.length >= 3) score = 92;
+    else if (matched.length >= 2) score = 85;
+    else score = 78;
+
+    return {
+      item,
+      score,
+      reason: `topics=${matched.join(",")}`,
+      boost: matched.includes("gpu") || matched.includes("cpu") || matched.includes("rtx"),
+    };
   }
 
   async health(): Promise<PluginStatus> {
@@ -188,6 +212,6 @@ export class TomsHardwarePlugin implements Plugin {
   }
 }
 
-export function createTomsHardwarePlugin(deps: TomsHardwarePluginDeps): TomsHardwarePlugin {
-  return new TomsHardwarePlugin(deps);
+export function createTechPowerUpPlugin(deps: TechPowerUpPluginDeps): TechPowerUpPlugin {
+  return new TechPowerUpPlugin(deps);
 }
