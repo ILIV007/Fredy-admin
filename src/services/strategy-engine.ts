@@ -125,50 +125,17 @@ export class StrategyEngine {
     const theme = this.getThemeForDate(targetDate, strategyConfig.weeklyThemesEnabled);
 
     // 4. Generate slot times.
-    // v12.2.2: Scale distribution to fit actual posting windows count.
-    // Previously: if strategy says 9 posts (A:4,B:2,C:3) but only 5 windows
-    // are configured, buildCategoryList produced [A,B,A,B,A,C,C,C,C] and
-    // time-generator truncated to first 5 → [A,B,A,B,A] → C:0, A:3 (violates dailyLimit).
-    // Now: scale proportionally to window count BEFORE generating.
-    // v13.0.0: Category H is ADDITIVE — it does NOT participate in window scaling.
-    // H slots are added AFTER the A/B/C slots, using extra time slots (if available)
-    // or by extending the schedule. H count comes from strategy.tierH config.
-    const windowCount = schedulerConfig.postingWindows.length;
-    const totalPosts = distribution.A + distribution.B + distribution.C;
-    let scaledDist: Record<Category, number>;
-    if (windowCount > 0 && totalPosts > windowCount) {
-      // Scale down proportionally, then round.
-      const scale = windowCount / totalPosts;
-      const scaledA = Math.max(1, Math.round(distribution.A * scale));
-      const scaledB = Math.max(1, Math.round(distribution.B * scale));
-      let scaledC = Math.max(0, Math.round(distribution.C * scale));
-      // Adjust to exactly match windowCount.
-      const scaledTotal = scaledA + scaledB + scaledC;
-      if (scaledTotal > windowCount) {
-        // Remove from the largest category.
-        if (scaledA >= scaledB && scaledA >= scaledC) {
-          scaledDist = { A: scaledA - (scaledTotal - windowCount), B: scaledB, C: scaledC, H: 0 };
-        } else if (scaledB >= scaledC) {
-          scaledDist = { A: scaledA, B: scaledB - (scaledTotal - windowCount), C: scaledC, H: 0 };
-        } else {
-          scaledDist = { A: scaledA, B: scaledB, C: scaledC - (scaledTotal - windowCount), H: 0 };
-        }
-      } else if (scaledTotal < windowCount) {
-        // Add to A (primary content).
-        scaledDist = { A: scaledA + (windowCount - scaledTotal), B: scaledB, C: scaledC, H: 0 };
-      } else {
-        scaledDist = { A: scaledA, B: scaledB, C: scaledC, H: 0 };
-      }
-      this.deps.logger.info("pipeline.start", {
-        step: "strategy.scaleDistribution",
-        originalDistribution: distribution,
-        windowCount,
-        scaledDistribution: scaledDist,
-        message: `Scaled distribution from ${totalPosts} to ${windowCount} posts to fit posting windows`,
-      });
-    } else {
-      scaledDist = { A: distribution.A, B: distribution.B, C: distribution.C, H: 0 };
-    }
+    // v13.0.10: REMOVED the window-scaling logic that was capping posts.
+    // Previously: if strategy said 9 posts but only 8 windows, it scaled DOWN to 8.
+    // Now: time-generator supports multiple posts per window (v13.0.9 fix).
+    // So we pass the FULL distribution to time-generator — no scaling needed.
+    // Category H is additive and added AFTER A/B/C slots.
+    const scaledDist: Record<Category, number> = {
+      A: distribution.A,
+      B: distribution.B,
+      C: distribution.C,
+      H: 0, // H is added separately below
+    };
     const categoryDist: Record<Category, number> = scaledDist;
     const slots = this.deps.timeGenerator.generate(
       targetDate,

@@ -78,48 +78,52 @@ export class TimeGenerator {
       throw new SlotGenerationError("No valid posting windows configured");
     }
 
-    // v13.0.9: When posts > windows, allow multiple posts per window.
-    // Previously: numSlots = min(posts, windows) — posts beyond window count were DROPPED.
-    // Now: if posts > windows, cycle through windows again (each window can have 2+ posts,
-    // as long as minGap is respected).
-    const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
-    const usedMinutes: number[] = [];
+  // v13.0.9: When posts > windows, allow multiple posts per window.
+  // v13.0.10: Also try ALL windows when current window fails — don't just try next N.
+  // Previously: only tried `w = 1..length` — but with 10 windows and 13 posts,
+  // the 9th post at window index 8 would only try windows 9..0 (wrapping),
+  // missing windows 0..7 that might have space. Now tries ALL windows.
+  const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
+  const usedMinutes: number[] = [];
 
-    for (let i = 0; i < categoryList.length; i++) {
-      const range = minuteRanges[i % minuteRanges.length]!;
-      const category = categoryList[i]!;
+  for (let i = 0; i < categoryList.length; i++) {
+    const range = minuteRanges[i % minuteRanges.length]!;
+    const category = categoryList[i]!;
 
-      const attempt = this.generateTimeInRange(
-        range.start,
-        range.end,
+    const attempt = this.generateTimeInRange(
+      range.start,
+      range.end,
+      usedMinutes,
+      config.minGapMinutes,
+      config.jitterMinutes,
+    );
+
+    if (attempt !== null) {
+      generatedTimes.push({ minutes: attempt, windowIndex: i % minuteRanges.length, category });
+      usedMinutes.push(attempt);
+      continue;
+    }
+
+    // Can't fit in this window — try ALL other windows.
+    let placed = false;
+    for (let w = 0; w < minuteRanges.length && !placed; w++) {
+      if (w === i % minuteRanges.length) continue; // already tried
+      const altRange = minuteRanges[w]!;
+      const altAttempt = this.generateTimeInRange(
+        altRange.start,
+        altRange.end,
         usedMinutes,
         config.minGapMinutes,
         config.jitterMinutes,
       );
-
-      if (attempt === null) {
-        // Can't fit in this window — try the NEXT window (v13.0.9: don't skip silently).
-        for (let w = 1; w < minuteRanges.length; w++) {
-          const altRange = minuteRanges[(i + w) % minuteRanges.length]!;
-          const altAttempt = this.generateTimeInRange(
-            altRange.start,
-            altRange.end,
-            usedMinutes,
-            config.minGapMinutes,
-            config.jitterMinutes,
-          );
-          if (altAttempt !== null) {
-            generatedTimes.push({ minutes: altAttempt, windowIndex: (i + w) % minuteRanges.length, category });
-            usedMinutes.push(altAttempt);
-            break;
-          }
-        }
-        continue;
+      if (altAttempt !== null) {
+        generatedTimes.push({ minutes: altAttempt, windowIndex: w, category });
+        usedMinutes.push(altAttempt);
+        placed = true;
       }
-
-      generatedTimes.push({ minutes: attempt, windowIndex: i % minuteRanges.length, category });
-      usedMinutes.push(attempt);
     }
+    // If still not placed after trying all windows, skip this post (minGap too restrictive).
+  }
 
     if (generatedTimes.length === 0) {
       throw new SlotGenerationError(
@@ -206,8 +210,10 @@ export class TimeGenerator {
 
   /**
    * Generate a random time within a single range, avoiding existing times by minGap.
-   * v11.11.0: REVERTED v11.10.0 bias — fully random within the window (original behavior).
-   * The scheduler now uses window-based processing so random times work correctly.
+   * v13.0.10: Reduced minGap enforcement when there are many posts — with 13 posts
+   * and 90min gap, you need 13×90=1170 min = 19.5 hours, but windows only span
+   * 14 hours (08:00-22:00). So 90min gap makes it impossible to fit 13 posts.
+   * Fix: dynamically scale minGap down if it would prevent fitting all posts.
    */
   private generateTimeInRange(
     rangeStart: number,
@@ -216,16 +222,28 @@ export class TimeGenerator {
     minGapMinutes: number,
     jitterMinutes: number,
   ): number | null {
+    // v13.0.10: If the window is too small for the minGap, relax it.
+    const windowSize = rangeEnd - rangeStart;
+    const effectiveGap = Math.min(minGapMinutes, Math.floor(windowSize / 2));
+
     const maxAttempts = 100;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const time = randomInt(rangeStart, rangeEnd);
       const tooClose = existingTimes.some(
-        (t) => Math.abs(t - time) < minGapMinutes,
+        (t) => Math.abs(t - time) < effectiveGap,
       );
       if (!tooClose) {
         const jitter = randomInt(-jitterMinutes, jitterMinutes);
         return Math.max(rangeStart, Math.min(rangeEnd, time + jitter));
       }
+    }
+    // v13.0.10: Last resort — try with no gap enforcement.
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const time = randomInt(rangeStart, rangeEnd);
+      const tooClose = existingTimes.some(
+        (t) => Math.abs(t - time) < 30, // absolute minimum 30 min gap
+      );
+      if (!tooClose) return time;
     }
     return null;
   }

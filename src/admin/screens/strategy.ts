@@ -39,15 +39,34 @@ export const strategyScreen: Screen = {
 
   keyboard(s: FredySettings): InlineKeyboard {
     const cur = s.strategy.mode;
+    // v13.0.11: Added conservative, aggressive, turbo modes.
     const modes: StrategyMode[] = [
       "minimal",
+      "conservative",
       "balanced",
       "active",
+      "aggressive",
+      "turbo",
       "ai_priority",
       "news_priority",
       "custom",
     ];
-    const mk = (m: StrategyMode): string => cur === m ? `✓ ${m}` : m;
+    // v13.0.11: Show post count in button label.
+    const modeDescs: Record<string, string> = {
+      minimal: "3+1H=4",
+      conservative: "4+0H=4",
+      balanced: "5+1H=6",
+      active: "7+2H=9",
+      aggressive: "9+3H=12",
+      turbo: "11+4H=15",
+      ai_priority: "5+1H=6 (≥80)",
+      news_priority: "7+2H=9 (B)",
+      custom: "admin",
+    };
+    const mk = (m: StrategyMode): string => {
+      const desc = modeDescs[m] ?? "";
+      return cur === m ? `✓ ${m} (${desc})` : `${m} (${desc})`;
+    };
     const rows: { text: string; callback_data: string }[][] = [
       [{ text: "─── Strategy mode ───", callback_data: "ignore" }],
       ...modes.map((m) => [
@@ -66,8 +85,8 @@ export const strategyScreen: Screen = {
 
     if (field === "mode") {
       const validModes: StrategyMode[] = [
-        "minimal", "balanced", "active",
-        "ai_priority", "news_priority", "custom",
+        "minimal", "conservative", "balanced", "active",
+        "aggressive", "turbo", "ai_priority", "news_priority", "custom",
       ];
       if (!validModes.includes(value as StrategyMode)) {
         return { alert: `❌ Invalid strategy mode: ${value}` };

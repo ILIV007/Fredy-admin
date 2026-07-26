@@ -28,7 +28,7 @@ export const strategyConfigSchema = z.object({
     B: z.number().int().min(0).max(20),
     C: z.number().int().min(0).max(20),
     H: z.number().int().min(0).max(20).default(1),
-  }).default({ A: 4, B: 2, C: 3, H: 1 }),
+  }).default({ A: 3, B: 1, C: 1, H: 1 }),
   /** Whether weekly themes are enabled. */
   weeklyThemesEnabled: z.boolean().default(true),
   /** Language for planned posts. */
@@ -70,14 +70,14 @@ export type StrategyConfig = z.infer<typeof strategyConfigSchema>;
 export const strategyDefaults: StrategyConfig = {
   _version: 1,
   mode: "balanced",
-  customDistribution: { A: 4, B: 2, C: 3, H: 1 },
+  customDistribution: { A: 3, B: 1, C: 1, H: 1 },
   weeklyThemesEnabled: true,
   language: "auto",
   qualityThreshold: 80,
   tierH: {
     enabled: true,
     extraHPostsPerMode: {
-      minimal: 0,
+      minimal: 1,
       conservative: 0,
       balanced: 1,
       active: 2,
@@ -111,60 +111,65 @@ export const strategySection = {
 import type { StrategyDefinition } from "../../../types/strategy";
 
 export const BUILTIN_STRATEGIES: Readonly<Record<string, StrategyDefinition>> = {
+  // v13.0.11: Redesigned distributions.
+  // Wildcard is NOT additive — it picks ONE of the existing A/B/C posts as "random".
+  // So total posts = A + B + C + H (wildcard is included in A/B/C count).
+  // The wildcard slot just means ONE of the A/B/C slots uses a random provider
+  // instead of the theme-assigned one.
   minimal: {
     mode: "minimal",
     name: "Minimal",
-    description: "Low activity — 4 posts/day",
-    distribution: { A: 2, B: 1, C: 1, total: 4, H: 0 },
+    description: "3 A/B/C posts + 1 Tier H = 4 total (1 wildcard from A/B/C)",
+    distribution: { A: 2, B: 1, C: 0, total: 3, H: 1 },
   },
   conservative: {
     mode: "conservative",
     name: "Conservative",
-    description: "v13.0.0: 9 posts/day + 1 Tier H every 2 days (configurable)",
-    distribution: { A: 4, B: 2, C: 3, total: 9, H: 0 }, // H=0 base; interval logic adds H every N days
+    description: "4 A/B/C + 1 Tier H every 2 days = 5 total (1 wildcard)",
+    distribution: { A: 2, B: 1, C: 1, total: 4, H: 0 },
   },
   balanced: {
     mode: "balanced",
     name: "Balanced",
-    description: "Normal operation — 9 posts/day + 1 Tier H (v13.0.0)",
-    distribution: { A: 4, B: 2, C: 3, total: 9, H: 1 },
+    description: "5 A/B/C posts + 1 Tier H = 6 total (1 wildcard from A/B/C)",
+    distribution: { A: 3, B: 1, C: 1, total: 5, H: 1 },
   },
   active: {
     mode: "active",
     name: "Active",
-    description: "High activity — 13 posts/day + 2 Tier H (v13.0.0)",
-    distribution: { A: 6, B: 3, C: 4, total: 13, H: 2 },
+    description: "7 A/B/C posts + 2 Tier H = 9 total (1 wildcard from A/B/C)",
+    distribution: { A: 4, B: 2, C: 1, total: 7, H: 2 },
   },
   aggressive: {
     mode: "aggressive",
     name: "Aggressive",
-    description: "v13.0.0: 13 posts/day + 3 Tier H",
-    distribution: { A: 6, B: 3, C: 4, total: 13, H: 3 },
+    description: "9 A/B/C posts + 3 Tier H = 12 total (1 wildcard from A/B/C)",
+    distribution: { A: 5, B: 3, C: 1, total: 9, H: 3 },
   },
   turbo: {
     mode: "turbo",
     name: "Turbo",
-    description: "v13.0.0: 13 posts/day + 4 Tier H (max hardware coverage)",
-    distribution: { A: 6, B: 3, C: 4, total: 13, H: 4 },
+    description: "11 A/B/C posts + 4 Tier H = 15 total (1 wildcard from A/B/C)",
+    distribution: { A: 6, B: 4, C: 1, total: 11, H: 4 },
   },
   ai_priority: {
     mode: "ai_priority",
     name: "AI Priority",
-    description: "Maximum quality — 8 posts/day, threshold 80",
-    distribution: { A: 5, B: 1, C: 2, total: 8, H: 1 },
+    description: "5 A/B/C + 1 Tier H = 6 total — only quality score ≥ 80 published (1 wildcard)",
+    distribution: { A: 3, B: 1, C: 1, total: 5, H: 1 },
     qualityOverride: { qualityThreshold: 80 },
   },
   news_priority: {
     mode: "news_priority",
     name: "News Priority",
-    description: "Fast technology updates — 10 posts/day",
-    distribution: { A: 3, B: 5, C: 2, total: 10, H: 2 },
+    description: "7 A/B/C (B-heavy) + 2 Tier H = 9 total (1 wildcard)",
+    distribution: { A: 2, B: 4, C: 1, total: 7, H: 2 },
   },
   custom: {
     mode: "custom",
     name: "Custom",
     description: "Administrator-defined distribution",
-    distribution: { A: 4, B: 2, C: 3, total: 9, H: 1 }, // overridden at runtime
+    distribution: { A: 3, B: 1, C: 1, total: 5, H: 1 },
   },
 };
 

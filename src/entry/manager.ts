@@ -2267,9 +2267,27 @@ async function loadPlugins(){
   try{
     const d=await api("plugins");
     if(!d.ok||!d.plugins){c.innerHTML='<div class="card">Error: '+(d.error||"Unknown")+'</div>';return;}
+    // v13.0.10: Sort plugins — enabled first by tier (S/A/B/H/V), then disabled at bottom.
+    const tierOrder={"S":0,"A":1,"B":2,"H":3,"V":4,"legacy":5};
+    const sortedPlugins=[...d.plugins].sort((a,b)=>{
+      // Enabled first, disabled last
+      if(a.enabled&&!b.enabled)return -1;
+      if(!a.enabled&&b.enabled)return 1;
+      // Within same enabled state, sort by tier
+      const ta=tierOrder[a.tier]??99;
+      const tb=tierOrder[b.tier]??99;
+      if(ta!==tb)return ta-tb;
+      // Within same tier, sort by priority
+      return (a.priority||99)-(b.priority||99);
+    });
+    const tierEmojis={"S":"🥇","A":"🥈","B":"🥉","H":"🔧","V":"🟣","legacy":"🗄️"};
     c.innerHTML='<div style="margin-bottom:12px;display:flex;gap:8px"><button class="btn" onclick="testAllPlugins()">🧪 Test All Plugins</button></div>'+
-    '<table><thead><tr><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Rate Limit</th><th>Actions</th></tr></thead><tbody>'+
-    d.plugins.map(p=>'<tr><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td>'+p.rateLimit+'/hr</td><td><button class="btn btn-sm" onclick="testPlugin('+ "'" +p.id+ "'" +')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin('+ "'" +p.id+ "'" +')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>').join("")+'</tbody></table>'+
+    '<table style="font-size:12px"><thead><tr><th>Tier</th><th>ID</th><th>Name</th><th>Cat</th><th>Enabled</th><th>Priority</th><th>Actions</th></tr></thead><tbody>'+
+    sortedPlugins.map(p=>{
+      const te=tierEmojis[p.tier]||"🔌";
+      const tierColor=p.tier==="S"?"var(--accent)":p.tier==="A"?"var(--blue)":p.tier==="H"?"#14b8a6":p.tier==="V"?"#a855f7":p.tier==="legacy"?"var(--text2)":"var(--text2)";
+      return '<tr style="'+(p.enabled?'':'opacity:0.5;')+'"><td style="font-size:14px">'+te+' <span style="color:'+tierColor+';font-size:10px">'+p.tier+'</span></td><td><code>'+p.id+'</code></td><td>'+p.name+'</td><td>'+p.category+'</td><td>'+badge(p.enabled)+'</td><td>'+p.priority+'</td><td><button class="btn btn-sm" onclick="testPlugin('+ "'" +p.id+ "'" +')">Test</button> <button class="btn btn-sm '+(p.enabled?'btn-danger':'')+'" onclick="togglePlugin('+ "'" +p.id+ "'" +')">'+(p.enabled?'Disable':'Enable')+'</button></td></tr>';
+    }).join("")+'</tbody></table>'+
     '<div id="test-all-results"></div>';
   }catch(e){c.innerHTML='<div class="card">Failed to load plugins: '+e+'</div>';}
 }
@@ -2827,7 +2845,17 @@ async function loadStrategy(){
   if(!d.ok){c.innerHTML='<div class="card">Error</div>';return;}
   const s=d.strategy||{};const plan=d.plan||{};
   window._lastPlan=plan;
-  const modes=[{id:"minimal",name:"Minimal",desc:"4 posts/day"},{id:"balanced",name:"Balanced",desc:"9 posts/day (default)"},{id:"active",name:"Active",desc:"13 posts/day"},{id:"ai_priority",name:"AI Priority",desc:"8 posts/day, threshold 80"},{id:"news_priority",name:"News Priority",desc:"10 posts/day, B-heavy"},{id:"custom",name:"Custom",desc:"Admin-defined"}];
+  const modes=[
+    {id:"minimal",name:"Minimal",desc:"3 ABC + 1H = 4 posts"},
+    {id:"conservative",name:"Conservative",desc:"4 ABC + 0H* = 4 posts"},
+    {id:"balanced",name:"Balanced",desc:"5 ABC + 1H = 6 posts (default)"},
+    {id:"active",name:"Active",desc:"7 ABC + 2H = 9 posts"},
+    {id:"aggressive",name:"Aggressive",desc:"9 ABC + 3H = 12 posts"},
+    {id:"turbo",name:"Turbo",desc:"11 ABC + 4H = 15 posts"},
+    {id:"ai_priority",name:"AI Priority",desc:"5 ABC + 1H = 6 (score≥80)"},
+    {id:"news_priority",name:"News Priority",desc:"7 ABC + 2H = 9 (B-heavy)"},
+    {id:"custom",name:"Custom",desc:"Admin-defined"}
+  ];
 
   let html='<div class="fade-in">';
 
@@ -2844,7 +2872,7 @@ async function loadStrategy(){
 
   // ── CUSTOM DISTRIBUTION ──
   if(s.mode==="custom"){
-    html+='<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??4)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??2)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div></div>';
+    html+='<div class="card"><h3 style="margin-bottom:8px">Custom Distribution</h3><div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><label>A: <input type="number" id="cust-A" value="'+(s.customDistribution?.A??3)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>B: <input type="number" id="cust-B" value="'+(s.customDistribution?.B??1)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>C: <input type="number" id="cust-C" value="'+(s.customDistribution?.C??1)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><label>H: <input type="number" id="cust-H" value="'+(s.customDistribution?.H??1)+'" style="width:60px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></label><button class="btn" onclick="saveCustomDist()">Save</button></div><p style="color:var(--text2);font-size:11px">Wildcard is 1 of the A/B/C posts (not additive). H is additive.</p></div>';
   }
 
   // ── v12.3.0: WEEKLY SCHEDULE OVERVIEW (with preferred providers) ──

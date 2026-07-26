@@ -33,15 +33,17 @@ export const schedulerSchema = z.object({
   slots: z.array(z.string().regex(/^\d{2}:\d{2}$/)).min(0).max(12),
   jitterMinutes: z.number().int().min(0).max(120),
   timezone: z.string().min(1),
-  // v7: Posting windows — each window generates ONE random publish time
-  // per day. v13.0.8: Added more windows (8 total) to cover the full day.
+  // v7: Posting windows — v13.0.10: 10 overlapping windows covering full day.
   // Windows are SHUFFLED each day so gaps change randomly.
+  // With multiple posts per window allowed, 10 windows can handle up to ~15 posts.
   postingWindows: z.array(timeWindowSchema).default([
     { start: "08:00", end: "10:00" },
     { start: "09:00", end: "11:00" },
     { start: "10:00", end: "12:00" },
+    { start: "11:00", end: "13:00" },
     { start: "12:00", end: "14:00" },
     { start: "14:00", end: "16:00" },
+    { start: "15:00", end: "17:00" },
     { start: "16:00", end: "18:00" },
     { start: "18:00", end: "20:00" },
     { start: "20:00", end: "22:00" },
@@ -71,8 +73,10 @@ export const schedulerDefaults: SchedulerConfig = {
     { start: "08:00", end: "10:00" },
     { start: "09:00", end: "11:00" },
     { start: "10:00", end: "12:00" },
+    { start: "11:00", end: "13:00" },
     { start: "12:00", end: "14:00" },
     { start: "14:00", end: "16:00" },
+    { start: "15:00", end: "17:00" },
     { start: "16:00", end: "18:00" },
     { start: "18:00", end: "20:00" },
     { start: "20:00", end: "22:00" },
