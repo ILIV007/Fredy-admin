@@ -67,7 +67,11 @@ export type DebugEventName =
   // v13.0.3: Tier H Quality Filter events
   | "tier_h_filter"
   | "tier_h_accepted"
-  | "tier_h_rejected";
+  | "tier_h_rejected"
+  // v13.0.6: Novelty Score events
+  | "novelty_score"
+  | "novelty_accepted"
+  | "novelty_rejected";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

@@ -41,6 +41,8 @@ export interface FinalPublisherDeps {
   readonly imageResolver?: import("./image-resolver").ImageResolver;
   /** v11.9.0: Dedup detector — EVERY publish records dedup automatically. */
   readonly duplicateDetector?: import("./duplicate-detector").DuplicateDetector;
+  /** v13.0.6: Novelty Score — records published trend keys for Category H. */
+  readonly noveltyScore?: import("./novelty-score").NoveltyScore;
 }
 
 /** Max retries (0 = no retries, just 1 attempt). */
@@ -277,6 +279,26 @@ export class FinalPublisher {
         this.deps.logger.warn("pipeline.error", {
           error: e instanceof Error ? e.message : String(e),
           message: "recordPublished failed (non-fatal)",
+        });
+      });
+    }
+
+    // v13.0.6: Record novelty score for Category H articles.
+    // This tracks published hardware news so the same NEWS from a different
+    // provider is rejected by NoveltyScore in the next 48h.
+    if (content.category === "H" && this.deps.noveltyScore) {
+      // Use finalPost.hook (the actual headline sent to Telegram) for the trend key.
+      const titleForNovelty = finalPost.hook || "";
+      const providerId = finalPost.internalMetadata?.pluginId ?? "";
+      const qualityScore = finalPost.internalMetadata?.qualityScore ?? 50;
+      await this.deps.noveltyScore.recordPublished(
+        titleForNovelty,
+        providerId,
+        qualityScore,
+      ).catch((e: unknown) => {
+        this.deps.logger.warn("novelty_score", {
+          error: e instanceof Error ? e.message : String(e),
+          message: "NoveltyScore recordPublished failed (non-fatal)",
         });
       });
     }

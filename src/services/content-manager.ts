@@ -36,6 +36,8 @@ import type { FreshnessFilter } from "./freshness-filter";
 import type { ContentEnricher } from "./content-enricher";
 import type { CandidateRanker } from "./candidate-ranker";
 import type { PipelineLogger } from "./pipeline-logger";
+import type { TierHFilter } from "./tier-h-filter";
+import type { NoveltyScore } from "./novelty-score";
 
 export interface ContentManagerDeps {
   readonly pluginManager: PluginManager;
@@ -56,6 +58,10 @@ export interface ContentManagerDeps {
   readonly soul: SoulLoader;
   readonly logger: Logger;
   readonly settings: () => Promise<FredySettings>;
+  /** v13.0.6: Tier H Quality Filter — scores Category H articles before AI. */
+  readonly tierHFilter?: TierHFilter;
+  /** v13.0.6: Novelty Score — prevents same news from different providers. */
+  readonly noveltyScore?: NoveltyScore;
 }
 
 export class ContentManager {
@@ -175,6 +181,48 @@ export class ContentManager {
         post = { ...enrichedPost, tags: post.tags, score: post.score };
       } catch { /* non-fatal */
         // If re-normalization fails, keep the original post.
+      }
+    }
+
+    // ── Stage 7b: Tier H Quality Filter (v13.0.6) ──────────
+    // For Category H items, run the Tier H Quality Filter BEFORE AI.
+    // This prevents low-quality hardware news from wasting AI tokens.
+    // Also runs NoveltyScore check — prevents same news from different providers.
+    if (item.category === "H" && this.deps.tierHFilter) {
+      const tierHResult = await this.deps.tierHFilter.score(enrichedItem);
+      if (!tierHResult.accepted) {
+        this.deps.logger.info("tier_h_rejected", {
+          plugin: enrichedItem.source,
+          title: enrichedItem.title?.slice(0, 100),
+          score: tierHResult.score,
+          reasons: tierHResult.reasons,
+          message: `Tier H rejected: score ${tierHResult.score} below threshold`,
+        });
+        return this.reject("validate", "quality_below_threshold",
+          `Tier H quality score ${tierHResult.score} below threshold. Reasons: ${tierHResult.reasons.join("; ")}`,
+          item);
+      }
+
+      // v13.0.6: Novelty Score check — prevents same news from different providers.
+      if (this.deps.noveltyScore) {
+        const noveltyResult = await this.deps.noveltyScore.check(
+          enrichedItem.title ?? "",
+          enrichedItem.source,
+          tierHResult.score,
+        );
+        if (!noveltyResult.accepted) {
+          this.deps.logger.info("novelty_rejected", {
+            plugin: enrichedItem.source,
+            title: enrichedItem.title?.slice(0, 100),
+            noveltyScore: noveltyResult.noveltyScore,
+            trendKey: noveltyResult.trendKey,
+            reason: noveltyResult.reason,
+            message: `Novelty rejected: ${noveltyResult.reason}`,
+          });
+          return this.reject("validate", "duplicate_news",
+            `Novelty score ${noveltyResult.noveltyScore}: ${noveltyResult.reason}`,
+            item);
+        }
       }
     }
 

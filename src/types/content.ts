@@ -178,6 +178,7 @@ export type RejectionReason =
   | "duplicate_url"
   | "duplicate_hash"
   | "duplicate_title"
+  | "duplicate_news"
   | "unsupported_language"
   | "invalid_media"
   | "invalid_source"

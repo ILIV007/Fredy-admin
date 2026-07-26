@@ -31,6 +31,7 @@ import { ProviderEngine } from "./services/provider-engine";
 import { ProviderRotation } from "./services/provider-rotation";
 import { BreakingContentService } from "./services/breaking-content";
 import { TierHFilter } from "./services/tier-h-filter";
+import { NoveltyScore } from "./services/novelty-score";
 import { CategoryManager } from "./services/category-manager";
 import { SchedulerService } from "./services/scheduler-service";
 import { LanguageManager } from "./services/language-manager";
@@ -184,6 +185,16 @@ export function buildContainer(env: Env): Container {
       minScore: 0,
     }),
   });
+  // v13.0.6: Novelty Score (prevents same news from different providers)
+  const noveltyScore = new NoveltyScore({
+    kv,
+    logger,
+    config: async () => ({
+      noveltyWindowHours: 48,
+      qualityAdvantageThreshold: 15,
+      noveltyThreshold: 30,
+    }),
+  });
 
   // Layer 5: AI layer
   const languageInjector = new LanguageInjector({
@@ -273,6 +284,9 @@ export function buildContainer(env: Env): Container {
     soul,
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
+    // v13.0.6: Wire Tier H Filter + Novelty Score into the pipeline.
+    tierHFilter,
+    noveltyScore,
   });
 
   // Layer 8: Scheduler & Publishing Engine
@@ -326,6 +340,7 @@ export function buildContainer(env: Env): Container {
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
     imageResolver,
     duplicateDetector,  // v11.9.0: Auto-record dedup on every publish
+    noveltyScore,       // v13.0.6: Record novelty for Category H articles
   });
   const scheduler = new SchedulerService({
     logger,
@@ -363,6 +378,7 @@ export function buildContainer(env: Env): Container {
     providerRotation,
     breakingContent,
     tierHFilter,
+    noveltyScore,
     categories,
     scheduler,
     lang,
