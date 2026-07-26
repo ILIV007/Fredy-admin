@@ -2867,8 +2867,22 @@ async function loadStrategy(){
     '<div class="stat-pod"><span class="sp-icon">⭐</span><div class="sp-label">Quality Threshold</div><div class="sp-val">'+(s.qualityThreshold??"80")+'</div><div class="sp-sub">min score</div></div>'+
   '</div></div>';
 
-  // ── SWITCH STRATEGY ──
-  html+='<div class="card"><h3 style="margin-bottom:8px">Switch Strategy</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">'+modes.map(m=>'<button class="btn '+(s.mode===m.id?"btn-accent":"")+'" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="text-align:left;padding:10px"><div style="font-weight:600">'+m.name+'</div><div style="font-size:11px;color:var(--text2)">'+m.desc+'</div></button>').join("")+'</div></div>';
+  // ── SWITCH STRATEGY (v13.0.13: Redesigned) ──
+  html+='<div class="card"><h3 style="margin-bottom:8px">🎯 Switch Strategy</h3>'+
+    '<p style="color:var(--text2);font-size:11px;margin-bottom:10px">Wildcards: 1 post/day from existing A/B/C. Tier H: additive. Switching auto-regenerates the plan.</p>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
+    modes.map(m=>{
+      const isActive=s.mode===m.id;
+      const bg=isActive?'border:2px solid var(--accent);background:rgba(99,102,241,.1)':'border:1px solid var(--border);background:var(--surface)';
+      return '<button class="btn" onclick="switchStrategy('+ "'" +m.id+ "'" +')" style="'+bg+';text-align:left;padding:12px;border-radius:8px;cursor:pointer">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center">'+
+          '<span style="font-weight:700;font-size:13px">'+(isActive?"✓ ":"")+m.name+'</span>'+
+          (isActive?'<span class="badge badge-blue" style="font-size:9px">ACTIVE</span>':'')+
+        '</div>'+
+        '<div style="font-size:11px;color:var(--text2);margin-top:4px">'+m.desc+'</div>'+
+      '</button>';
+    }).join("")+
+    '</div></div>';
 
   // ── CUSTOM DISTRIBUTION ──
   if(s.mode==="custom"){
@@ -2981,8 +2995,8 @@ function showPostError(idx){
   if(!p.error&&!p.failedStage){lines.push("");lines.push("(No error details recorded. This can happen if the failure occurred before v9.2.3 or if the slot was marked failed without an error message.)");}
   alert(title+"\\n\\n"+lines.join("\\n"));
 }
-async function switchStrategy(mode){const d=await api("strategy","POST",{mode});toast(d.ok?"✅ Strategy: "+mode:"❌ Failed");loadStrategy();}
-async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C}});toast(d.ok?"✅ Custom distribution saved":"❌ Failed");loadStrategy();}
+async function switchStrategy(mode){toast("🔄 Switching to "+mode+"...");const d=await api("strategy","POST",{mode});if(d.ok){toast("✅ Strategy: "+mode+" — Regenerating plan...");const r=await api("strategy/regenerate","POST");toast(r.ok?"✅ Plan regenerated for "+mode:"⚠️ Plan regen failed");}else{toast("❌ Failed");}loadStrategy();}
+async function saveCustomDist(){const A=parseInt(document.getElementById("cust-A").value)||0;const B=parseInt(document.getElementById("cust-B").value)||0;const C=parseInt(document.getElementById("cust-C").value)||0;const H=parseInt(document.getElementById("cust-H").value)||0;const d=await api("strategy","POST",{customDistribution:{A,B,C,H}});if(d.ok){toast("✅ Custom distribution saved — Regenerating...");await api("strategy/regenerate","POST");}else{toast("❌ Failed");}loadStrategy();}
 async function regeneratePlan(){toast("🔄 Regenerating plan...");const d=await api("strategy/regenerate","POST");toast(d.ok?"✅ Plan regenerated":"❌ Failed");loadStrategy();}
 async function fireNextSlot(){if(!confirm("Force-fire the next due slot NOW? This will run the full pipeline and publish to the channel."))return;toast("⚡ Firing next slot...");const d=await api("scheduler/force-publish","POST");toast(d.ok?(d.fired?"✅ "+(d.message||"Published!"):"⚠️ "+(d.message||"No due slots")):"❌ "+(d.error||"Failed"));loadStrategy();}
 

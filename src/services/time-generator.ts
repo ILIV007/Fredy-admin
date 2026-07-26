@@ -58,9 +58,6 @@ export class TimeGenerator {
       : this.defaultWindows(config.slots);
 
     // v13.0.8: SHUFFLE the windows so the gap pattern changes every day.
-    // Previously, windows were always in fixed order (08-10, 12-14, 16-18, 18-20, 20-22),
-    // causing permanent gaps (e.g., 10-12 never had posts).
-    // Now we pick N random windows from the available ones, shuffled.
     const shuffledWindows = [...windows];
     for (let i = shuffledWindows.length - 1; i > 0; i--) {
       const j = randomInt(0, i);
@@ -78,16 +75,35 @@ export class TimeGenerator {
       throw new SlotGenerationError("No valid posting windows configured");
     }
 
-  // v13.0.9: When posts > windows, allow multiple posts per window.
-  // v13.0.10: Also try ALL windows when current window fails — don't just try next N.
-  // Previously: only tried `w = 1..length` — but with 10 windows and 13 posts,
-  // the 9th post at window index 8 would only try windows 9..0 (wrapping),
-  // missing windows 0..7 that might have space. Now tries ALL windows.
+    // v13.0.13: SPREAD posts across DIFFERENT windows first, then reuse.
+    // Previously: posts were assigned to windows 0,1,2,3,4,5,6,7,8,9,0,1,2,3 (cycling).
+    // This caused all extra posts to cluster in windows 0-3 (the first few shuffled windows).
+    // Now: assign first N posts to N unique windows, then cycle.
+    // This ensures posts are spread across the full day before reusing windows.
+    const windowOrder: number[] = [];
+    // First pass: one post per window (unique windows)
+    for (let i = 0; i < minuteRanges.length; i++) {
+      windowOrder.push(i);
+    }
+    // Second pass: cycle through windows again for extra posts
+    for (let i = 0; i < categoryList.length - minuteRanges.length; i++) {
+      windowOrder.push(i % minuteRanges.length);
+    }
+    // Shuffle the second-pass indices so extra posts don't cluster at the start
+    const extraStart = minuteRanges.length;
+    if (windowOrder.length > extraStart) {
+      for (let i = windowOrder.length - 1; i > extraStart; i--) {
+        const j = extraStart + randomInt(0, i - extraStart);
+        [windowOrder[i], windowOrder[j]] = [windowOrder[j]!, windowOrder[i]!];
+      }
+    }
+
   const generatedTimes: Array<{ minutes: number; windowIndex: number; category: Category }> = [];
   const usedMinutes: number[] = [];
 
   for (let i = 0; i < categoryList.length; i++) {
-    const range = minuteRanges[i % minuteRanges.length]!;
+    const targetWindowIdx = windowOrder[i] ?? (i % minuteRanges.length);
+    const range = minuteRanges[targetWindowIdx]!;
     const category = categoryList[i]!;
 
     const attempt = this.generateTimeInRange(
@@ -99,7 +115,7 @@ export class TimeGenerator {
     );
 
     if (attempt !== null) {
-      generatedTimes.push({ minutes: attempt, windowIndex: i % minuteRanges.length, category });
+      generatedTimes.push({ minutes: attempt, windowIndex: targetWindowIdx, category });
       usedMinutes.push(attempt);
       continue;
     }
@@ -107,7 +123,7 @@ export class TimeGenerator {
     // Can't fit in this window — try ALL other windows.
     let placed = false;
     for (let w = 0; w < minuteRanges.length && !placed; w++) {
-      if (w === i % minuteRanges.length) continue; // already tried
+      if (w === targetWindowIdx) continue;
       const altRange = minuteRanges[w]!;
       const altAttempt = this.generateTimeInRange(
         altRange.start,
