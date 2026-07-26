@@ -288,22 +288,62 @@ export class StrategyEngine {
       }
 
       // Generate H slots with random times within posting windows.
-      // H slots use a SEPARATE random time (not overlapping A/B/C scheduledTimes).
-      // They reuse existing posting windows but pick different random offsets.
+      // v13.0.12: H slots now respect minGap — they check existing A/B/C scheduledTimes
+      // and pick a time that doesn't conflict. Previously H could land at the same
+      // minute as an A/B/C post.
       for (let h = 0; h < hCount; h++) {
-        // Pick a random posting window for this H slot.
         const windows = schedulerConfig.postingWindows;
         if (windows.length === 0) break;
-        const winIdx = randomInt(0, windows.length - 1);
-        const win = windows[winIdx]!;
-        // Generate a random time within the window.
-        const scheduledTime = this.randomTimeInWindow(win.start, win.end, schedulerConfig.jitterMinutes ?? 0);
 
-        // Select H provider with rotation (cooldown, avoid immediate repetition,
-        // weighted). v13.0.0: H providers use the same MAX_PROVIDER_REPEAT cap.
+        // v13.0.12: Collect all already-used minutes (from A/B/C + previous H slots).
+        const usedMinutes: number[] = [];
+        for (const p of posts) {
+          if (p.scheduledTime) {
+            const [h2, m2] = p.scheduledTime.split(":").map(Number);
+            usedMinutes.push((h2 ?? 0) * 60 + (m2 ?? 0));
+          }
+        }
+
+        // Try windows in random order to find one that fits minGap.
+        const shuffledWinIdx = [...Array(windows.length).keys()];
+        for (let i = shuffledWinIdx.length - 1; i > 0; i--) {
+          const j = randomInt(0, i);
+          [shuffledWinIdx[i], shuffledWinIdx[j]] = [shuffledWinIdx[j]!, shuffledWinIdx[i]!];
+        }
+
+        let scheduledTime: string | null = null;
+        let win: { start: string; end: string } | null = null;
+        for (const wIdx of shuffledWinIdx) {
+          const w = windows[wIdx]!;
+          const [wsH, wsM] = w.start.split(":").map(Number);
+          const [weH, weM] = w.end.split(":").map(Number);
+          const startMin = (wsH ?? 0) * 60 + (wsM ?? 0);
+          const endMin = (weH ?? 23) * 60 + (weM ?? 59);
+          // Try to find a time in this window that respects minGap.
+          const minGap = schedulerConfig.minGapMinutes ?? 90;
+          // v13.0.12: Dynamic gap — if window is too small, relax.
+          const effectiveGap = Math.min(minGap, Math.floor((endMin - startMin) / 2));
+          for (let attempt = 0; attempt < 50; attempt++) {
+            const t = startMin + randomInt(0, Math.max(0, endMin - startMin - 1));
+            const tooClose = usedMinutes.some((um) => Math.abs(um - t) < effectiveGap);
+            if (!tooClose) {
+              scheduledTime = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+              win = w;
+              break;
+            }
+          }
+          if (scheduledTime) break;
+        }
+
+        // Fallback: if no window fit minGap, just pick a random time in a random window.
+        if (!scheduledTime) {
+          const winIdx = randomInt(0, windows.length - 1);
+          win = windows[winIdx]!;
+          scheduledTime = this.randomTimeInWindow(win.start, win.end, schedulerConfig.jitterMinutes ?? 0);
+        }
+
         const hProvider = this.selectHProvider(tierHConfig, usedProviders, theme);
 
-        // Track usage.
         if (hProvider) {
           usedProviders.set(hProvider, (usedProviders.get(hProvider) ?? 0) + 1);
         }
@@ -313,8 +353,8 @@ export class StrategyEngine {
           id: `plan-${targetDate}-H${h}`,
           index: hIndex,
           date: targetDate,
-          time: win.start,
-          windowEnd: win.end,
+          time: win!.start,
+          windowEnd: win!.end,
           scheduledTime,
           epochMs: Date.parse(`${targetDate}T${scheduledTime}:00`) || Date.now(),
           category: "H" as Category,

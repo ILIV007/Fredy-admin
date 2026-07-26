@@ -29,9 +29,13 @@ export type CategoriesConfig = z.infer<typeof categoriesSchema>;
 
 export const categoriesDefaults: CategoriesConfig = {
   _version: 1,
-  A: { enabled: true, dailyLimit: 2, priority: 1, weight: 50, fallback: "skip" },
-  B: { enabled: true, dailyLimit: 1, priority: 2, weight: 25, fallback: "skip" },
-  C: { enabled: true, dailyLimit: 1, priority: 3, weight: 25, fallback: "skip" },
+  // v13.0.12: Updated daily limits to match strategy distributions.
+  // Previously A:2, B:1, C:1 — but balanced strategy says A:3, B:1, C:1.
+  // The strategy engine uses distribution, not dailyLimit, but CategoryManager
+  // uses dailyLimit for fallback selection. Set limits high enough to not conflict.
+  A: { enabled: true, dailyLimit: 6, priority: 1, weight: 50, fallback: "retry" },
+  B: { enabled: true, dailyLimit: 4, priority: 2, weight: 30, fallback: "retry" },
+  C: { enabled: true, dailyLimit: 2, priority: 3, weight: 20, fallback: "skip" },
   // v13.0.0: Category H — additive, higher daily limit (up to 4 in turbo mode).
   H: { enabled: true, dailyLimit: 4, priority: 2, weight: 30, fallback: "retry" },
   rotationOrder: ["A", "B", "A", "C"],
