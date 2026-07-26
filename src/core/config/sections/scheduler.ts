@@ -34,13 +34,17 @@ export const schedulerSchema = z.object({
   jitterMinutes: z.number().int().min(0).max(120),
   timezone: z.string().min(1),
   // v7: Posting windows — each window generates ONE random publish time
-  // per day. Replaces the fixed slots approach.
+  // per day. v13.0.8: Added more windows (8 total) to cover the full day.
+  // Windows are SHUFFLED each day so gaps change randomly.
   postingWindows: z.array(timeWindowSchema).default([
-    { start: "08:00", end: "10:00" },  // Morning
-    { start: "12:00", end: "14:00" },  // Noon
-    { start: "16:00", end: "18:00" },  // Afternoon
-    { start: "18:00", end: "20:00" },  // Evening
-    { start: "20:00", end: "22:00" },  // Night
+    { start: "08:00", end: "10:00" },
+    { start: "09:00", end: "11:00" },
+    { start: "10:00", end: "12:00" },
+    { start: "12:00", end: "14:00" },
+    { start: "14:00", end: "16:00" },
+    { start: "16:00", end: "18:00" },
+    { start: "18:00", end: "20:00" },
+    { start: "20:00", end: "22:00" },
   ]),
   // v7: Quiet hours — no posts during this period.
   quietHours: quietHoursSchema.default({ start: "00:00", end: "07:30" }),
@@ -64,11 +68,14 @@ export const schedulerDefaults: SchedulerConfig = {
   jitterMinutes: 30,
   timezone: "Asia/Tehran",
   postingWindows: [
-    { start: "08:00", end: "10:00" },  // Morning
-    { start: "12:00", end: "14:00" },  // Noon
-    { start: "16:00", end: "18:00" },  // Afternoon
-    { start: "18:00", end: "20:00" },  // Evening
-    { start: "20:00", end: "22:00" },  // Night
+    { start: "08:00", end: "10:00" },
+    { start: "09:00", end: "11:00" },
+    { start: "10:00", end: "12:00" },
+    { start: "12:00", end: "14:00" },
+    { start: "14:00", end: "16:00" },
+    { start: "16:00", end: "18:00" },
+    { start: "18:00", end: "20:00" },
+    { start: "20:00", end: "22:00" },
   ],
   quietHours: { start: "00:00", end: "07:30" },
   lockTimeoutSec: 90,

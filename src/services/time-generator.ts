@@ -34,11 +34,10 @@ export class TimeGenerator {
   /**
    * Generate random slot times for a day.
    *
-   * v7: Each posting window generates at most ONE random time.
-   * v11.11.0: REVERTED v11.10.0 bias — random slot generation is a CORE FEATURE.
-   * The scheduler has been refactored to window-based processing (see
-   * scheduler-service.ts findDueSlots) so random times work correctly without
-   * alignment to cron tick boundaries.
+   * v13.0.8: RANDOM WINDOWS — posting windows are now randomly generated
+   * each day (shuffled from the configured windows). This means the gap
+   * between posts changes every day — one day the gap might be 10-12,
+   * the next day it could be 18-20. No permanent gaps.
    *
    * @param date — YYYY-MM-DD
    * @param config — scheduler config (windows, jitter, timezone, minGap)
@@ -58,20 +57,28 @@ export class TimeGenerator {
       ? config.postingWindows
       : this.defaultWindows(config.slots);
 
+    // v13.0.8: SHUFFLE the windows so the gap pattern changes every day.
+    // Previously, windows were always in fixed order (08-10, 12-14, 16-18, 18-20, 20-22),
+    // causing permanent gaps (e.g., 10-12 never had posts).
+    // Now we pick N random windows from the available ones, shuffled.
+    const shuffledWindows = [...windows];
+    for (let i = shuffledWindows.length - 1; i > 0; i--) {
+      const j = randomInt(0, i);
+      [shuffledWindows[i], shuffledWindows[j]] = [shuffledWindows[j]!, shuffledWindows[i]!];
+    }
+
     // Convert windows to minutes-since-midnight ranges.
-    const minuteRanges = windows.map((w) => ({
+    const minuteRanges = shuffledWindows.map((w, i) => ({
       start: parseTimeToMinutes(w.start) ?? 0,
       end: parseTimeToMinutes(w.end) ?? 24 * 60 - 1,
-      windowIndex: windows.indexOf(w),
+      windowIndex: i,
     }));
 
     if (minuteRanges.length === 0) {
       throw new SlotGenerationError("No valid posting windows configured");
     }
 
-    // v7: Assign categories to windows (one category per window).
-    // We take the first N windows (where N = categoryList.length),
-    // capped by the number of available windows.
+    // Assign categories to windows (one category per window).
     const numSlots = Math.min(categoryList.length, minuteRanges.length);
 
     // Generate one random time per window, respecting min gap.
@@ -91,7 +98,6 @@ export class TimeGenerator {
       );
 
       if (attempt === null) {
-        // Skip this window — can't fit a time with the min gap.
         continue;
       }
 
@@ -109,10 +115,6 @@ export class TimeGenerator {
     generatedTimes.sort((a, b) => a.minutes - b.minutes);
 
     // Build SlotTime objects.
-    // v12.2.1: scheduledTime is the REAL publish trigger (since v11.18.0). NOT display-only.
-    // - time/windowEnd: SCHEDULING — when the scheduler should consider this slot due
-    // - scheduledTime: REAL TRIGGER — random time within window, scheduler fires when now >= scheduledTime
-    // - epochMs: window start epoch for ordering only (not used for scheduling)
     const slots: SlotTime[] = generatedTimes.map((entry, index) => {
       const range = minuteRanges[entry.windowIndex]!;
       const startHh = Math.floor(range.start / 60).toString().padStart(2, "0");
@@ -123,9 +125,8 @@ export class TimeGenerator {
       const windowEnd = `${endHh}:${endMm}`;
       const epochMs = this.minutesToEpochMs(date, range.start, config.timezone);
 
-      // v11.17.0: Generate a random scheduledTime within the window for display.
-      // This is NOT used for scheduling — only for UI/analytics.
-      const schedMinutes = randomInt(range.start, range.end);
+      // Generate the REAL scheduledTime (random within window).
+      const schedMinutes = entry.minutes;
       const schedHh = Math.floor(schedMinutes / 60).toString().padStart(2, "0");
       const schedMm = (schedMinutes % 60).toString().padStart(2, "0");
       const scheduledTime = `${schedHh}:${schedMm}`;
@@ -133,10 +134,10 @@ export class TimeGenerator {
       return {
         index,
         date,
-        time,         // Window START — SCHEDULING
-        windowEnd,    // Window END — SCHEDULING
-        scheduledTime, // v12.2.1: REAL TRIGGER — scheduler fires when now >= this
-        epochMs,      // Window start epoch — ordering only
+        time,
+        windowEnd,
+        scheduledTime,
+        epochMs,
         category: entry.category,
         jitterMinutes: config.jitterMinutes,
       };
@@ -147,29 +148,28 @@ export class TimeGenerator {
 
   /** Build the category list from distribution.
    *  v12.0.9: Category C (NASA, XKCD) is placed at the END so it gets the
-   *  LAST posting window (20:00-22:00 = night). Previously C was round-robin
-   *  interleaved, landing it in afternoon windows.
+   *  LAST posting window (20:00-22:00 = night).
+   *  v13.0.8: Category H is interleaved with A/B (not at the end).
    *
-   *  Example: {A:2, B:1, C:1} -> [A, B, A, C] (C is last = night window)
-   *  Before:  {A:2, B:1, C:1} -> [A, B, C, A] (C was 3rd = afternoon) */
+   *  Example: {A:2, B:1, C:1, H:1} -> [A, B, H, A, C] (C is last = night) */
   private buildCategoryList(distribution: Readonly<Record<Category, number>>): Category[] {
     const list: Category[] = [];
-    // v12.0.9: A and B first (round-robin), C last (night window).
-    const dayCategories: Category[] = ["A", "B"];
+    // v13.0.8: A, B, and H are round-robin interleaved.
+    const dayCategories: Category[] = ["A", "B", "H"];
     let dist = { ...distribution };
     let remaining = true;
     while (remaining) {
       remaining = false;
       for (const cat of dayCategories) {
-        if (dist[cat] > 0) {
+        if ((dist[cat] ?? 0) > 0) {
           list.push(cat);
-          dist = { ...dist, [cat]: dist[cat] - 1 };
+          dist = { ...dist, [cat]: (dist[cat] ?? 0) - 1 };
           remaining = true;
         }
       }
     }
     // Append all C slots at the end (night windows).
-    for (let i = 0; i < distribution.C; i++) {
+    for (let i = 0; i < (distribution.C ?? 0); i++) {
       list.push("C");
     }
     return list;

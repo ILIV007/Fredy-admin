@@ -2548,6 +2548,8 @@ async function loadScheduler(){
     scheduleHtml='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>📅 Daily Plan ('+stratPlan.date+') — v13 Window / Scheduled</h3><div style="display:flex;gap:4px"><button class="btn btn-sm btn-accent" onclick="fireNextSlot()">⚡ Fire Next Slot</button><button class="btn btn-sm" onclick="regeneratePlan()">🔄 Regenerate</button><button class="btn btn-sm btn-ghost" onclick="loadSchedulerDebug()">🔬 Debug</button></div></div><table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>'+
     // v13.0.2: Sort posts by scheduledTime so H slots are interleaved with A/B/C
     // (was: H slots appended at end, breaking chronological order).
+    // v13.0.8: Use 1-based sequential numbering (was 0-based p.index).
+    let displayIndex=1;
     [...stratPlan.posts].sort((a,b)=>{const ta=(a.scheduledTime||a.time)||'';const tb=(b.scheduledTime||b.time)||'';return ta.localeCompare(tb);}).map(p=>{
       const status=p.status||'pending';
       const statusBadge=status==='published'?'<span class="badge badge-green">✅ Published</span>'
@@ -2559,7 +2561,7 @@ async function loadScheduler(){
       const win=p.time+'-'+(p.windowEnd||p.time);
       const sched=p.scheduledTime||p.time;
       const schedStyle=status==='pending'?' style="color:var(--accent);font-weight:bold"':'';
-      return '<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+statusBadge+'</td></tr>';
+      return '<tr><td>'+(displayIndex++)+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+statusBadge+'</td></tr>';
     }).join("")+
     '</tbody></table><div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within window (v13 EXACT trigger). 20-min watcher fires on first tick ≥ this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme (e.g. Cat C on AI day) OR 2/day cap reached. <b>Cat H</b> = Tier H hardware posts (additive, v13.0.0). Posts sorted by scheduledTime.</div>'+(stratPlan.theme?'<p style="margin-top:8px;color:var(--text2)">📅 Today Theme: <b>'+stratPlan.theme.dayName+'</b> — '+stratPlan.theme.topics.join(", ")+'</p>':'')+'</div>';
   }else if(st.today&&st.today.slots&&st.today.slots.length>0){
@@ -2878,7 +2880,9 @@ async function loadStrategy(){
   if(plan.posts&&plan.posts.length>0){
     html+='<table style="font-size:12px"><thead><tr><th>#</th><th>Window</th><th>🎯 Scheduled</th><th>Cat</th><th>Provider</th><th>Priority</th><th>Status</th></tr></thead><tbody>';
     // v13.0.2: Sort posts by scheduledTime so H slots are interleaved with A/B/C.
+    // v13.0.8: Use 1-based sequential numbering.
     const sortedPosts=[...plan.posts].sort((a,b)=>{const ta=(a.scheduledTime||a.time)||'';const tb=(b.scheduledTime||b.time)||'';return ta.localeCompare(tb);});
+    let displayIndex=1;
     for(const p of sortedPosts){
       const st=p.status||"pending";
       // v12.3.1: Same badge set as the Scheduler screen — includes "skipped".
@@ -2891,7 +2895,7 @@ async function loadStrategy(){
       const win=p.time+'-'+(p.windowEnd||p.time);
       const sched=p.scheduledTime||p.time;
       const schedStyle=st==='pending'?' style="color:var(--accent);font-weight:bold"':'';
-      html+='<tr><td>#'+p.index+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';
+      html+='<tr><td>'+(displayIndex++)+'</td><td style="color:var(--text2)">'+win+'</td><td'+schedStyle+'>'+sched+'</td><td>'+p.category+'</td><td>'+(p.provider||"—")+'</td><td style="font-size:11px">'+p.priority+'</td><td>'+badge+'</td></tr>';
     }
     html+='</tbody></table>';
     html+='<div style="margin-top:8px;color:var(--text2);font-size:11px">🎯 <b>Scheduled</b> = random time within window (v13 EXACT trigger). 20-min watcher fires on first tick ≥ this time. <b>⏭️ Skipped</b> = no matching provider for today'+ "'" +'s theme OR 2/day cap reached. <b>Cat H</b> = Tier H hardware posts (additive, v13.0.0). Posts sorted by scheduledTime.</div>';

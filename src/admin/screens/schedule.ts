@@ -48,7 +48,28 @@ export const scheduleScreen: Screen = {
           const sched = p.scheduledTime ?? p.time;
           return `${icon} #${p.index} 🪟${win} 🎯${sched} | ${p.category} | ${p.provider || "—"}`;
         });
-        dailyPlanHtml = `\n${header("Daily Plan (v12)", "📋")}\n${statusLines.join("\n")}\n`;
+        dailyPlanHtml = `\n${header("Daily Plan (v13)", "📋")}\n${statusLines.join("\n")}\n`;
+      }
+    } catch { /* non-fatal */ }
+
+    // v13.0.8: Show Tier V (NASA) status.
+    let tierVHtml = "";
+    try {
+      const settings = ctx.settings;
+      const tierVEntries = settings.tierV?.entries ?? [];
+      if (tierVEntries.length > 0) {
+        const today = new Intl.DateTimeFormat("en-US", { timeZone: sched.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("/").reverse().join("-");
+        const tierVLines: string[] = [];
+        for (const entry of tierVEntries) {
+          if (!entry.enabled) continue;
+          const sentKey = `fredy:tierV:sent:${today}:${entry.id}`;
+          const sent = await ctx.container.kv.get(sentKey).catch(() => null);
+          const pubEmoji = sent ? "✅" : "⏳";
+          tierVLines.push(`${pubEmoji} 🟣 ${entry.time} ${entry.providerId} — ${entry.description || entry.id}`);
+        }
+        if (tierVLines.length > 0) {
+          tierVHtml = `\n${header("Tier V (v13)", "🟣")}\n${tierVLines.join("\n")}\n`;
+        }
       }
     } catch { /* non-fatal */ }
 
@@ -71,8 +92,9 @@ export const scheduleScreen: Screen = {
       kv("Queue depth", status.queueDepth),
       kv("Last fired", formatTime(status.lastFiredAt)),
       dailyPlanHtml,
+      tierVHtml,
       divider(),
-      "<i>v12: Window + Random Jitter + Three-Layer Cron. Tap toggles to configure.</i>",
+      "<i>v13: Random Window Shuffling + Tier H + Tier V. Tap toggles to configure.</i>",
     ].join("\n");
   },
 
