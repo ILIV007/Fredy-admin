@@ -42,17 +42,22 @@ const DEDUP_SONG_PREFIX = "fredy:music:song:";
 const ARTIST_TTL = 30 * 24 * 3600; // 30 days
 const SONG_TTL = 180 * 24 * 3600; // 180 days
 
-// Stage 4: Low-quality title patterns
+// Stage 4: Low-quality title patterns — v13.3.4: expanded with karaoke/live/remix/cover/instrumental
 const BAD_TITLE_PATTERNS: readonly RegExp[] = [
   /demo/i, /test/i, /sample/i, /intro/i, /outro/i, /untitled/i,
   /track\s*0?\d/i, /noise/i, /asmr/i, /meditation/i, /podcast/i,
   /audiobook/i, /prom/i, /advertisement/i, /trailer/i, /preview/i,
   /unknown/i, /placeholder/i, /work\s*in\s*progress/i, /wip/i,
+  /karaoke/i, /live\s*(version|at|@|concert|session|acoustic|bootleg)/i,
+  /\blive\b/i, /remix/i, /sped\s*up/i, /slowed/i, /\b8d\b/i,
+  /nightcore/i, /cover\s*version/i, /rehearsal/i, /acapella/i,
+  /bootleg/i, /radio\s*edit/i, /extended\s*mix/i, /club\s*mix/i,
+  /instrumental\s*(version|mix|edit)/i,
 ];
 
 // Stage 3: Duration limits (seconds)
 const MIN_DURATION_SEC = 120; // 2 min
-const MAX_DURATION_SEC = 480; // 8 min
+const MAX_DURATION_SEC = 600; // 10 min (v13.3.4: was 480=8min, raised to 600=10min per spec)
 
 // Stage 8: Quality score threshold
 const MIN_QUALITY_SCORE = 40; // v13.3.2: lowered from 80 — most CC tracks don't have artwork
@@ -364,11 +369,11 @@ export class NightMusicPlugin implements Plugin {
       message: `[NIGHT_MUSIC] AUDIO_FOUND: ${selected.audioUrl}`,
     });
 
-    // Stage 10: Record publication in KV
-    const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(selected.track.artist_name)}`;
-    const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(selected.track.name, selected.track.artist_name)}`;
-    await this.deps.kv.set(artistKey, String(Date.now()), ARTIST_TTL).catch(() => {});
-    await this.deps.kv.set(songKey, String(Date.now()), SONG_TTL).catch(() => {});
+    // v13.3.4: KV recording MOVED to FinalPublisher — only record AFTER
+    // successful download + Telegram upload. Previously, KV was recorded here
+    // (BEFORE publish), which meant a failed song would be marked as "used"
+    // and never retried. Now, the plugin returns the selected track WITHOUT
+    // recording KV. FinalPublisher calls recordPublished() after success.
 
     return selected;
   }
@@ -428,6 +433,14 @@ export class NightMusicPlugin implements Plugin {
   // Helpers
   // ────────────────────────────────────────────────────────────
 
+  /** v13.3.4: Record publication in KV — called by FinalPublisher AFTER successful upload. */
+  async recordPublished(song: string, artist: string): Promise<void> {
+    const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(artist)}`;
+    const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(song, artist)}`;
+    await this.deps.kv.set(artistKey, String(Date.now()), ARTIST_TTL).catch(() => {});
+    await this.deps.kv.set(songKey, String(Date.now()), SONG_TTL).catch(() => {});
+  }
+
   private normalizeStr(s: string): string {
     return s.toLowerCase().replace(/[^a-z0-9]/gi, "").trim();
   }
@@ -446,7 +459,8 @@ export class NightMusicPlugin implements Plugin {
   }
 
   private buildMessage(song: string, artist: string): string {
-    return `<code>${this.escapeHtml(song)}</code>\n<code>${this.escapeHtml(artist)}</code>\n\n🌀 @ILIVIR3`;
+    // v13.3.4: Footer in <blockquote> to match other Fredy posts.
+    return `<code>${this.escapeHtml(song)}</code>\n<code>${this.escapeHtml(artist)}</code>\n\n<blockquote>🌀 @ILIVIR3</blockquote>`;
   }
 
   normalize(raw: unknown): SourceItem {

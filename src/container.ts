@@ -330,6 +330,12 @@ export function buildContainer(env: Env): Container {
   });
   // v11.7.0: Unified Image Resolver
   const imageResolver = new ImageResolver({ kv, logger });
+  // v13.3.4: Get Night Music plugin instance for KV recording after successful publish.
+  const nightMusicPluginInstance = plugins.get("night-music");
+  const nightMusicPlugin = nightMusicPluginInstance && "recordPublished" in nightMusicPluginInstance
+    ? nightMusicPluginInstance as unknown as { recordPublished: (song: string, artist: string) => Promise<void> }
+    : undefined;
+
   const finalPublisher = new FinalPublisher({
     tg,
     uxLayer,
@@ -339,6 +345,7 @@ export function buildContainer(env: Env): Container {
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
     botToken: () => env.BOT_TOKEN, // v13.3.3: For Night Music multipart audio upload
+    nightMusicPlugin, // v13.3.4: For KV recording after successful publish
     imageResolver,
     duplicateDetector,  // v11.9.0: Auto-record dedup on every publish
     noveltyScore,       // v13.0.6: Record novelty for Category H articles
