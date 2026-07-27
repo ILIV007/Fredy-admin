@@ -87,6 +87,10 @@ export class ContentManager {
     const skipEnqueue = options?.skipEnqueue ?? false;
 
     // ── Stage 1: Normalize (SourceItem → StandardPost) ─────
+    // v13.2.6: Save original body BEFORE normalization — the normalizer
+    // collapses whitespace (including newlines), which would destroy the
+    // Night Music message format. The bypass uses the original body.
+    const originalBody = sourceItem.body ?? "";
     let post: StandardPost;
     try {
       post = await this.deps.normalizer.normalize(sourceItem, lang);
@@ -298,12 +302,14 @@ export class ContentManager {
     // v13.2.2: Night Music bypass — the plugin already builds the complete
     // minimal message format (Song/Artist in mono + footer). No AI rewrite
     // needed — the text is already the final post.
+    // v13.2.6: Use originalBody (before normalization) — the normalizer
+    // collapses newlines to spaces, which would destroy the message format.
     if (resolvedItem.pluginId === "night-music") {
       try {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,
           {
-            text: resolvedItem.body, // The pre-formatted message from the plugin
+            text: originalBody, // The ORIGINAL pre-formatted message (with newlines intact)
             aiConfidence: 100,
             generatedLanguage: "en",
             headline: resolvedItem.title,
