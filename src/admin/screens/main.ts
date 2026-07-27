@@ -76,10 +76,19 @@ export const mainScreen: Screen = {
       ],
     ];
 
-    // Manager URL button (only if env var is set).
+    // Manager URL button — include token so admin can access directly.
+    // v13.3.9: Build URL with MANAGER_TOKEN (or DEBUG_TOKEN fallback) as query param.
+    // This way the admin clicks the button and lands directly in the dashboard
+    // without needing to manually enter a token.
     const managerUrl = ctx?.container?.env?.MANAGER_URL;
+    const managerToken = ctx?.container?.env?.MANAGER_TOKEN ?? ctx?.container?.env?.DEBUG_TOKEN;
     if (managerUrl) {
-      rows.push([{ text: "🎛️ Manager", url: managerUrl, callback_data: "ignore" }]);
+      // Append token as query parameter if not already in the URL.
+      const separator = managerUrl.includes("?") ? "&" : "?";
+      const urlWithToken = managerToken
+        ? `${managerUrl}${separator}token=${encodeURIComponent(managerToken)}`
+        : managerUrl;
+      rows.push([{ text: "🎛️ Manager Dashboard", url: urlWithToken, callback_data: "ignore" }]);
     }
 
     return buildKeyboard(rows);
