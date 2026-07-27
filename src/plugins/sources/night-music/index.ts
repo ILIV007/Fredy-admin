@@ -55,7 +55,7 @@ const MIN_DURATION_SEC = 120; // 2 min
 const MAX_DURATION_SEC = 480; // 8 min
 
 // Stage 8: Quality score threshold
-const MIN_QUALITY_SCORE = 80;
+const MIN_QUALITY_SCORE = 40; // v13.3.2: lowered from 80 — most CC tracks don't have artwork
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -229,6 +229,13 @@ export class NightMusicPlugin implements Plugin {
     });
     const url = `${JAMENDO_API}?${params.toString()}`;
 
+    this.deps.logger.info("source.fetch_start", {
+      plugin: "night-music",
+      stage: "RSS_FETCH",
+      url: JAMENDO_API,
+      message: `[NIGHT_MUSIC] RSS_FETCH: calling Jamendo API`,
+    });
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -237,14 +244,52 @@ export class NightMusicPlugin implements Plugin {
         signal: controller.signal,
       });
       clearTimeout(timeout);
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "night-music",
+        stage: "RSS_FETCH",
+        httpStatus: res.status,
+        message: `[NIGHT_MUSIC] RSS_FETCH: HTTP ${res.status}`,
+      });
+
       if (!res.ok) {
-        throw new Error(`Jamendo API returned ${res.status}`);
+        const body = await res.text().catch(() => "");
+        throw new Error(`Jamendo API returned ${res.status}: ${body.slice(0, 200)}`);
       }
       const data = await res.json() as JamendoResponse;
+
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "night-music",
+        stage: "RSS_ITEMS",
+        apiStatus: data.headers.status,
+        resultsCount: data.headers.results_count,
+        resultsLength: data.results?.length ?? 0,
+        errorMessage: data.headers.error_message,
+        message: `[NIGHT_MUSIC] RSS_ITEMS: API status=${data.headers.status}, results=${data.results?.length ?? 0}, count=${data.headers.results_count}`,
+      });
+
       if (data.headers.status !== "success") {
         throw new Error(`Jamendo API error: ${data.headers.error_message ?? "unknown"}`);
       }
-      return [...data.results];
+
+      // Log first track sample for debugging
+      if (data.results && data.results.length > 0) {
+        const sample = data.results[0]!;
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music",
+          stage: "SAMPLE_TRACK",
+          name: sample.name,
+          artist: sample.artist_name,
+          hasAudio: !!sample.audio,
+          hasAudioDownload: !!sample.audiodownload,
+          audiodownloadAllowed: sample.audiodownload_allowed,
+          duration: sample.duration,
+          hasAlbumImage: !!sample.album_image,
+          message: `[NIGHT_MUSIC] SAMPLE: name="${sample.name}" artist="${sample.artist_name}" audio=${!!sample.audio} dl=${!!sample.audiodownload} dlAllowed=${sample.audiodownload_allowed} dur=${sample.duration} img=${!!sample.album_image}`,
+        });
+      }
+
+      return [...(data.results ?? [])];
     } catch (error) {
       clearTimeout(timeout);
       throw error;
@@ -257,57 +302,56 @@ export class NightMusicPlugin implements Plugin {
 
   private async selectTrack(tracks: JamendoTrack[]): Promise<MusicCandidate | null> {
     const candidates: MusicCandidate[] = [];
+    let rejected = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0, stage6: 0, stage8: 0 };
 
     for (const track of tracks) {
       // Stage 1: Required fields
-      if (!track.name || !track.artist_name || (!track.audio && !track.audiodownload)) continue;
+      if (!track.name || !track.artist_name) { rejected.stage1++; continue; }
+      if (!track.audio && !track.audiodownload) { rejected.stage1++; continue; }
 
-      // Stage 2: Must be downloadable
-      if (track.audiodownload_allowed === false) continue;
+      // Stage 2: Must be downloadable (but don't reject if field is missing — assume allowed)
+      if (track.audiodownload_allowed === false) { rejected.stage2++; continue; }
 
       // Determine audio URL: prefer audiodownload, fallback to audio
       const audioUrl = track.audiodownload ?? track.audio;
-      if (!audioUrl) continue;
+      if (!audioUrl) { rejected.stage1++; continue; }
 
       // Stage 3: Duration 2-8 min
       const duration = track.duration ?? 0;
-      if (duration < MIN_DURATION_SEC || duration > MAX_DURATION_SEC) continue;
+      if (duration > 0 && (duration < MIN_DURATION_SEC || duration > MAX_DURATION_SEC)) { rejected.stage3++; continue; }
 
       // Stage 4: Low-quality title filter
-      if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) continue;
+      if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) { rejected.stage4++; continue; }
 
       // Stage 5: Duplicate artist (30-day KV)
       const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(track.artist_name)}`;
       const artistRecent = await this.deps.kv.get(artistKey).catch(() => null);
-      if (artistRecent) {
-        this.deps.logger.debug("source.fetch_success", {
-          plugin: "night-music", stage: "DEDUP_SKIP",
-          artist: track.artist_name, reason: "artist_recently_published",
-        });
-        continue;
-      }
+      if (artistRecent) { rejected.stage5++; continue; }
 
       // Stage 6: Duplicate song (180-day KV, normalized artist+title)
       const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(track.name, track.artist_name)}`;
       const songRecent = await this.deps.kv.get(songKey).catch(() => null);
-      if (songRecent) {
-        this.deps.logger.debug("source.fetch_success", {
-          plugin: "night-music", stage: "DEDUP_SKIP",
-          song: track.name, reason: "song_recently_published",
-        });
-        continue;
-      }
+      if (songRecent) { rejected.stage6++; continue; }
 
       // Stage 7: Prefer tracks with artwork
       const hasArtwork = !!track.album_image;
 
       // Stage 8: Weighted quality score
       const score = this.computeScore(track, audioUrl, hasArtwork);
-      if (score < MIN_QUALITY_SCORE) continue;
+      if (score < MIN_QUALITY_SCORE) { rejected.stage8++; continue; }
 
       candidates.push({ track, audioUrl, score });
       if (candidates.length >= 20) break; // enough candidates for weighted random
     }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music",
+      stage: "QUALITY_FILTER",
+      totalTracks: tracks.length,
+      candidates: candidates.length,
+      rejected: rejected,
+      message: `[NIGHT_MUSIC] QUALITY_FILTER: ${tracks.length} total → ${candidates.length} candidates (rejected: s1=${rejected.stage1} s2=${rejected.stage2} s3=${rejected.stage3} s4=${rejected.stage4} s5=${rejected.stage5} s6=${rejected.stage6} s8=${rejected.stage8})`,
+    });
 
     if (candidates.length === 0) return null;
 
