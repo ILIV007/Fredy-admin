@@ -202,11 +202,33 @@ export class FinalPublisher {
       const nightSentText = content.text;
       const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
 
+      // v13.2.7: Add YouTube link preview so users can LISTEN to the song.
+      // The URL is set via link_preview_options.url (NOT in the visible text).
+      // Telegram fetches the YouTube page and shows a video preview above the text.
+      // Users tap the preview to play the song on YouTube.
+      // This is Zero-API — we just construct a search URL, no API key needed.
+      const songMeta = (content as ReadyContent & { raw?: { metadata?: { song?: string; artist?: string } } }).raw?.metadata;
+      const songName = songMeta?.song ?? "";
+      const artistName = songMeta?.artist ?? "";
+      const ytQuery = encodeURIComponent(`${songName} ${artistName}`.trim());
+      const ytUrl = `https://www.youtube.com/results?search_query=${ytQuery}`;
+
       // Send directly to Telegram — no hook, no footer, no source link.
+      // link_preview_options.url sets the preview URL WITHOUT showing it in text.
       const directResult = await this.deps.tg.sendMessage(channel, nightSentText, {
         parse_mode: "HTML",
-      }).catch((e: unknown) => {
-        return { ok: false, description: e instanceof Error ? e.message : String(e) };
+        link_preview_options: {
+          is_disabled: false,
+          url: ytUrl,
+          show_above_text: true,
+        },
+      } as Record<string, unknown>).catch(() => {
+        // Fallback: send without link preview if it fails.
+        return this.deps.tg.sendMessage(channel, nightSentText, {
+          parse_mode: "HTML",
+        }).catch((e2: unknown) => {
+          return { ok: false, description: e2 instanceof Error ? e2.message : String(e2) };
+        });
       });
 
       const dr = directResult as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
