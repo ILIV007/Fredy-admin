@@ -30,6 +30,7 @@ export interface Env {
   JAMENDO_CLIENT_ID?: string; // v13.3.0: Night Music — Jamendo API
   WEBHOOK_SECRET?: string;
   DEBUG_TOKEN?: string;
+  MANAGER_TOKEN?: string; // v13.3.8: Dedicated Manager dashboard security token
 }
 
 /**

@@ -128,7 +128,8 @@ MANAGER_URL = "https://fredy-admin.iliv007-34b.workers.dev/Manager"
 #
 # RECOMMENDED (secrets):
 #   WEBHOOK_SECRET        — random string for webhook verification
-#   DEBUG_TOKEN           — random string for /Manager protection
+#   DEBUG_TOKEN           — random string for /Manager protection (legacy)
+#   MANAGER_TOKEN         — v13.3.8: dedicated Manager dashboard token (preferred over DEBUG_TOKEN)
 #
 # OPTIONAL (secrets for content sources):
 #   NEWSAPI_KEY           — from https://newsapi.org

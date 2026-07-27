@@ -22,11 +22,23 @@ export async function managerHandler(
 ): Promise<Response> {
   const { env, container } = deps;
 
-  if (env.DEBUG_TOKEN) {
+  // v13.3.8: Dedicated MANAGER_TOKEN for Manager dashboard security.
+  // Falls back to DEBUG_TOKEN for backward compat, then to no-auth if neither set.
+  // MANAGER_TOKEN is the preferred way to secure the Manager.
+  const managerToken = env.MANAGER_TOKEN ?? env.DEBUG_TOKEN;
+  if (managerToken) {
     const auth = request.headers.get("Authorization");
     const queryToken = url.searchParams.get("token");
-    if (auth !== `Bearer ${env.DEBUG_TOKEN}` && queryToken !== env.DEBUG_TOKEN) {
-      return new Response("Forbidden", { status: 403 });
+    const cookieToken = request.headers.get("Cookie")?.match(/manager_token=([^;]+)/)?.[1];
+    if (auth !== `Bearer ${managerToken}` && queryToken !== managerToken && cookieToken !== managerToken) {
+      // Return a 401 with WWW-Authenticate for browser-based access.
+      return new Response("Unauthorized — Manager token required", {
+        status: 401,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "WWW-Authenticate": `Bearer realm="Fredy Manager"`,
+        },
+      });
     }
   }
 
@@ -52,7 +64,7 @@ export async function managerHandler(
     // v9.2.1: lastRefresh removed — refreshSources() was a no-op stub whose
     // KV write was deleted. lastTick still tracks the most recent tick time.
     const lastTick = await container.kv.get("fredy:tick:lastTick").catch(() => null);
-    return json({ ok: true, version: APP_VERSION, bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, jamendo: !!env.JAMENDO_CLIENT_ID, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN } });
+    return json({ ok: true, version: APP_VERSION, bot: { enabled: settings?.general.botEnabled, maintenance: settings?.general.maintenanceMode }, scheduler: { enabled: settings?.scheduler.enabled, nextSlot: schedStatus?.nextSlot, postsToday: schedStatus?.postsPublishedToday }, approveMode: settings?.approveMode, language: settings?.language.default, aiProvider: settings?.ai.primaryProvider, plugins: { enabled: container.plugins.list().filter(p => container.plugins.isEnabled(p.metadata.id)).length, total: container.plugins.list().length }, categories: { A: settings?.categories.A.enabled, B: settings?.categories.B.enabled, C: settings?.categories.C.enabled }, stats, state, queueDepths, lastTick: lastTick ? Number(lastTick) : null, hasSecrets: { botToken: !!env.BOT_TOKEN, gemini: !!env.GEMINI_API_KEY, openrouter: !!env.OPENROUTER_API_KEY, newsapi: !!env.NEWSAPI_KEY, nasa: !!env.NASA_API_KEY, github: !!env.GITHUB_TOKEN, jamendo: !!env.JAMENDO_CLIENT_ID, cronKey: !!env.CRON_KEY, webhookSecret: !!env.WEBHOOK_SECRET, debugToken: !!env.DEBUG_TOKEN, managerToken: !!env.MANAGER_TOKEN } });
   }
 
   // ── Plugins ──
@@ -682,7 +694,7 @@ export async function managerHandler(
             nasa: !!env.NASA_API_KEY,
             github: !!env.GITHUB_TOKEN,
             cronKey: !!env.CRON_KEY,
-            debugToken: !!env.DEBUG_TOKEN,
+            debugToken: !!env.DEBUG_TOKEN, managerToken: !!env.MANAGER_TOKEN,
           },
         },
       };
@@ -1662,7 +1674,7 @@ export async function managerHandler(
           github: !!env.GITHUB_TOKEN,
           cronKey: !!env.CRON_KEY,
           webhookSecret: !!env.WEBHOOK_SECRET,
-          debugToken: !!env.DEBUG_TOKEN,
+          debugToken: !!env.DEBUG_TOKEN, managerToken: !!env.MANAGER_TOKEN,
           adminId: !!env.ADMIN_ID,
         },
       };
@@ -1785,7 +1797,7 @@ function errMsg(e: unknown): string { return e instanceof Error ? e.message : St
 function json(obj: unknown, status = 200): Response { return new Response(JSON.stringify(obj, null, 2), { status, headers: { "Content-Type": "application/json" } }); }
 
 function managerHTML(env: Env): string {
-  const token = env.DEBUG_TOKEN ?? "";
+  const token = env.MANAGER_TOKEN ?? env.DEBUG_TOKEN ?? "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
