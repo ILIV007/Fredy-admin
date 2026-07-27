@@ -338,6 +338,7 @@ export function buildContainer(env: Env): Container {
     history,
     logger,
     settings: () => config.getSettings(Number(env.ADMIN_ID)),
+    botToken: () => env.BOT_TOKEN, // v13.3.3: For Night Music multipart audio upload
     imageResolver,
     duplicateDetector,  // v11.9.0: Auto-record dedup on every publish
     noveltyScore,       // v13.0.6: Record novelty for Category H articles

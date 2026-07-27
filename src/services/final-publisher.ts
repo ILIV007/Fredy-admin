@@ -37,6 +37,8 @@ export interface FinalPublisherDeps {
   readonly history: HistoryService;
   readonly logger: Logger;
   readonly settings: () => Promise<FredySettings>;
+  /** v13.3.3: Bot token — needed for multipart/form-data audio upload (Night Music). */
+  readonly botToken?: () => string;
   /** v11.7.0: Unified image resolver */
   readonly imageResolver?: import("./image-resolver").ImageResolver;
   /** v11.9.0: Dedup detector — EVERY publish records dedup automatically. */
@@ -198,8 +200,8 @@ export class FinalPublisher {
     // post (Song/Artist in mono + footer). Skip the UX layer entirely to avoid
     // adding a hook block and source URL link that would break the minimal format.
     if (content.pluginId === "night-music") {
-      // v13.3.0: Night Music sends AUDIO via sendAudio() — native Telegram playback.
-      // The plugin's text is the caption, and the audio URL is in content.media.url.
+      // v13.3.3: Night Music sends AUDIO via sendAudio() — native Telegram playback.
+      // The plugin's text is the caption, and the audio URL is in content metadata.
       const nightSentText = content.text;
       const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
 
@@ -208,7 +210,6 @@ export class FinalPublisher {
       const audioUrl = songMeta?.audioUrl ?? content.media?.url ?? "";
 
       if (!audioUrl) {
-        // No audio URL — skip this night (per spec: never send text-only).
         this.deps.logger.warn("source.fetch_error", {
           plugin: "night-music", reason: "no_audio_url",
           message: "[NIGHT_MUSIC] No audio URL — skipping (no text-only fallback)",
@@ -227,25 +228,97 @@ export class FinalPublisher {
         };
       }
 
-      // Send audio via sendAudio() — native playback in Telegram.
-      const directResult = await this.deps.tg.sendAudio(channel, audioUrl, nightSentText, {
-        parse_mode: "HTML",
+      // v13.3.3: Download MP3 on the Worker, then send as multipart/form-data.
+      // Telegram's sendAudio() with a URL fails on Jamendo streaming URLs
+      // ("failed to get HTTP URL content") because Jamendo blocks Telegram's
+      // servers or requires specific headers. By downloading on the Worker
+      // (Cloudflare can fetch Jamendo fine), we bypass this limitation.
+      this.deps.logger.info("source.fetch_start", {
+        plugin: "night-music", stage: "AUDIO_DOWNLOAD",
+        audioUrl: audioUrl.slice(0, 100),
+        message: `[NIGHT_MUSIC] AUDIO_DOWNLOAD: fetching MP3 from Jamendo`,
+      });
+
+      let audioBlob: ArrayBuffer | null = null;
+      try {
+        const audioRes = await fetch(audioUrl, {
+          headers: { "User-Agent": "FredyBot/1.0" },
+        });
+        if (!audioRes.ok) {
+          throw new Error(`Audio download failed: HTTP ${audioRes.status}`);
+        }
+        audioBlob = await audioRes.arrayBuffer();
+        const sizeMb = (audioBlob.byteLength / 1024 / 1024).toFixed(2);
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music", stage: "AUDIO_DOWNLOAD",
+          sizeBytes: audioBlob.byteLength,
+          sizeMb: sizeMb,
+          message: `[NIGHT_MUSIC] AUDIO_DOWNLOAD: downloaded ${sizeMb}MB`,
+        });
+      } catch (dlError) {
+        this.deps.logger.error("source.fetch_error", {
+          plugin: "night-music", stage: "AUDIO_DOWNLOAD",
+          error: dlError instanceof Error ? dlError.message : String(dlError),
+          message: `[NIGHT_MUSIC] AUDIO_DOWNLOAD failed — skipping`,
+        });
+        return {
+          ok: false,
+          contentId: content.id,
+          category: content.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: `Night Music: audio download failed: ${dlError instanceof Error ? dlError.message : String(dlError)}`,
+          attempts: 0,
+          sentText: nightSentText,
+          sentMediaUrl: audioUrl,
+        };
+      }
+
+      // Send audio as multipart/form-data (binary upload, not URL).
+      const formData = new FormData();
+      formData.append("chat_id", channel);
+      formData.append("caption", nightSentText);
+      formData.append("parse_mode", "HTML");
+      formData.append("audio", new Blob([audioBlob], { type: "audio/mpeg" }), "night-music.mp3");
+
+      // v13.3.3: Get bot token for direct multipart/form-data upload.
+      const token = this.deps.botToken?.() ?? "";
+      if (!token) {
+        return {
+          ok: false,
+          contentId: content.id,
+          category: content.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: "Night Music: bot token not available for multipart upload",
+          attempts: 0,
+          sentText: nightSentText,
+          sentMediaUrl: audioUrl,
+        };
+      }
+
+      const tgApiUrl = `https://api.telegram.org/bot${token}/sendAudio`;
+
+      const directResult = await fetch(tgApiUrl, {
+        method: "POST",
+        body: formData,
       }).catch((e: unknown) => {
         return { ok: false, description: e instanceof Error ? e.message : String(e) };
       });
 
-      const dr = directResult as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+      const dr = await (directResult as Response).json().catch(() => ({ ok: false, description: "Failed to parse Telegram response" })) as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+
       if (dr?.ok && dr.result) {
-        // Record in history.
         await this.deps.history.recordPublished(content, dr.result.message_id ?? 0, String(dr.result.chat?.id ?? channel)).catch(() => {});
-        // Record dedup.
         if (this.deps.duplicateDetector) {
           await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
         }
         this.deps.logger.info("source.fetch_success", {
           plugin: "night-music", stage: "AUDIO_SENT",
           messageId: dr.result.message_id,
-          message: "[NIGHT_MUSIC] AUDIO_SENT via sendAudio()",
+          message: "[NIGHT_MUSIC] AUDIO_SENT via sendAudio() multipart upload",
         });
         return {
           ok: true,
@@ -266,7 +339,7 @@ export class FinalPublisher {
           telegramMessageId: null,
           telegramChatId: null,
           publishedAt: Date.now(),
-          error: dr?.description ?? "Night Music sendAudio() failed",
+          error: dr?.description ?? "Night Music sendAudio() multipart failed",
           attempts: 0,
           sentText: nightSentText,
           sentMediaUrl: audioUrl,
