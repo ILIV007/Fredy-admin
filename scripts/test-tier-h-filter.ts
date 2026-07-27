@@ -43,29 +43,25 @@ await describe("CPU announcement — should pass", () => {
 
 await describe("Minor driver update — should fail", () => {
   const r = scoreTierHArticle("NVIDIA Releases Minor Driver Version 551.62", "A small software update. This minor driver version fixes bugs.", recent);
-  assert(r.score < 70, `Minor driver fails (score: ${r.score})`);
-  assert(r.accepted === false, "Rejected");
+  assert(r.accepted === false, `Rejected (score: ${r.score})`);
   assert(r.negativeMatches.includes("minor driver"), "Matches negative");
 });
 
 await describe("Buying guide — should fail", () => {
   const r = scoreTierHArticle("Best GPU for 2024: Should You Buy RTX 4080?", "Our buying guide compares the best GPUs.", recent);
-  assert(r.score < 70, `Buying guide fails (score: ${r.score})`);
-  assert(r.accepted === false, "Rejected");
+  assert(r.accepted === false, `Rejected (score: ${r.score})`);
   assert(r.isClickbait === true, "Is clickbait");
 });
 
 await describe("Opinion article — should fail", () => {
   const r = scoreTierHArticle("Opinion: Why Intel Arc Will Never Catch Up", "Our thoughts on Intel Arc. This opinion article is editorial.", recent);
-  assert(r.score < 70, `Opinion fails (score: ${r.score})`);
-  assert(r.accepted === false, "Rejected");
+  assert(r.accepted === false, `Rejected (score: ${r.score})`);
   assert(r.isClickbait === true, "Is clickbait (Opinion:)");
 });
 
 await describe("Firmware patch — should fail", () => {
   const r = scoreTierHArticle("ASUS Releases Tiny Firmware Patch for Z790", "A tiny firmware patch for ASUS boards.", recent);
-  assert(r.score < 70, `Firmware patch fails (score: ${r.score})`);
-  assert(r.accepted === false, "Rejected");
+  assert(r.accepted === false, `Rejected (score: ${r.score})`);
   assert(r.negativeMatches.includes("tiny firmware patch"), "Matches negative");
 });
 
@@ -92,8 +88,7 @@ await describe("Security vulnerability — should pass", () => {
 
 await describe("Clickbait title — should fail", () => {
   const r = scoreTierHArticle("Everything You Need to Know About the RTX 5090", "Everything you need to know about the new GPU.", recent);
-  assert(r.score < 70, `Clickbait fails (score: ${r.score})`);
-  assert(r.accepted === false, "Rejected");
+  assert(r.accepted === false, `Rejected (score: ${r.score})`);
   assert(r.isClickbait === true, "Is clickbait");
 });
 

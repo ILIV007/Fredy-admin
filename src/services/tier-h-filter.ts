@@ -21,12 +21,12 @@ export interface TierHFilterConfig {
 }
 
 export const TIER_H_FILTER_DEFAULTS: TierHFilterConfig = {
-  threshold: 70,
+  threshold: 50, // v13.3.6: lowered from 70 — was rejecting all Ars Technica tech news
   positiveWeight: 15,
   negativeWeight: 15,
   recentBonus: 10,
   trendBonus: 20,
-  clickbaitPenalty: 25,
+  clickbaitPenalty: 100, // v13.3.6: hard reject — clickbait always gets -100
   maxScore: 100,
   minScore: 0,
 } as const;
@@ -50,6 +50,29 @@ const POSITIVE_SIGNALS: readonly string[] = [
   "major pricing announcement", "market-changing product",
   "industry partnership", "technology breakthrough", "record performance",
   "large driver improvement", "major bios update",
+  // v13.3.6: Broader tech news signals — Ars Technica / Tom's Hardware post
+  // legitimate tech news that doesn't always contain hardware keywords.
+  // NOTE: Individual company names (nvidia, intel, apple, etc.) are NOT
+  // included because they match too broadly (even minor driver updates
+  // about NVIDIA would get positive bonus). Instead, we use tech TOPICS.
+  "ai", "artificial intelligence", "machine learning", "llm", "gpt",
+  "openai", "cybersecurity", "vulnerability", "exploit", "ransomware",
+  "data breach", "privacy", "encryption",
+  "self-driving", "autonomous", "ev", "electric vehicle",
+  "spacex", "rocket", "satellite",
+  "quantum computing",
+  "blockchain", "cryptocurrency", "bitcoin",
+  "antitrust", "lawsuit", "patent",
+  "merger", "acquisition", "ipo",
+  "open source",
+  "cloud", "aws", "azure",
+  "5g", "6g", "fiber", "broadband",
+  "battery technology", "solar", "renewable",
+  "robotics", "drone", "automation",
+  "virtual reality", "augmented reality",
+  "game engine", "steam deck",
+  "netflix", "spotify", "youtube",
+  "social media",
 ] as const;
 
 const NEGATIVE_SIGNALS: readonly string[] = [
@@ -63,6 +86,14 @@ const NEGATIVE_SIGNALS: readonly string[] = [
   "merchandise", "cosmetic update",
   "interview without technical",
   "rumor with no evidence", "rumor:", "leaked spec",
+  // v13.3.6: Deal/promo/sale patterns — reject shopping content.
+  "save $", "save usd", "deal:", "deals:", "on sale", "price drop",
+  "discount:", "discounted", "lowest price", "cheapest",
+  "black friday", "cyber monday", "prime day",
+  "coupon", "promo code", "refurbished",
+  "save up to", "off at", "off msrp",
+  "where to buy", "how to buy", "pre-order now",
+  "in stock", "back in stock", "restock",
 ] as const;
 
 const CLICKBAIT_PATTERNS: readonly RegExp[] = [
@@ -73,6 +104,10 @@ const CLICKBAIT_PATTERNS: readonly RegExp[] = [
   /^should you buy/i,
   /^the ultimate guide/i,
   /^\d+ (best|top|must-have)/i,
+  // v13.3.6: Deal clickbait
+  /^save \$\d+/i,
+  /^deal:/i,
+  /^deals:/i,
 ] as const;
 
 const LAUNCH_WORDS: readonly string[] = [
