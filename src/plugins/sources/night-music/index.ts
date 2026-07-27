@@ -35,8 +35,7 @@ import { HALL_OF_FAME, isInHallOfFame, normalizeForMusicMatch, type HallOfFameEn
 // Constants
 // ────────────────────────────────────────────────────────────
 
-const CACHE_KEY = "fredy:source:night-music:feed";
-const CACHE_TTL_SECONDS = 6 * 3600; // 6 hours (RSS doesn't update fast)
+const CACHE_KEY = "fredy:source:night-music:feed"; // v13.2.3: kept for stale cache cleanup only
 
 const DEDUP_ARTIST_PREFIX = "fredy:music:artist:";
 const DEDUP_SONG_PREFIX = "fredy:music:song:";
@@ -149,12 +148,16 @@ export class NightMusicPlugin implements Plugin {
   async fetch(): Promise<readonly SourceItem[]> {
     this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
 
-    // Check cache first
-    const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
-    if (cached && cached.length > 0) {
-      this.deps.logger.info("source.fetch_success", { plugin: "night-music", source: "cache", returned: cached.length });
-      return cached;
-    }
+    // v13.2.3: REMOVED cache entirely.
+    // Night Music is a Tier V provider that runs once per night. Caching
+    // the result for 6 hours meant that if the first fetch produced a bad
+    // item (e.g., url: "" in v13.2.0-v13.2.1), the bad item would persist
+    // in KV for 6 hours — even after deploying a fix. Now: always fetch
+    // fresh. The 10-stage pipeline runs every time, which is fine because
+    // it only runs once per night (Tier V).
+    //
+    // Also: clear any stale cache from previous versions.
+    await this.deps.kv.delete(CACHE_KEY).catch(() => {});
 
     // Try RSS feeds
     let tracks: RSSTrack[] = [];
@@ -221,7 +224,7 @@ export class NightMusicPlugin implements Plugin {
     };
 
     const items = [item];
-    await this.deps.kv.setJson(CACHE_KEY, items, CACHE_TTL_SECONDS).catch(() => {});
+    // v13.2.3: No cache write — always fetch fresh (see comment at top of fetch()).
 
     this.deps.logger.info("source.fetch_success", {
       plugin: "night-music",
