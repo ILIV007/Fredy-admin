@@ -295,6 +295,44 @@ export class ContentManager {
       }
     }
 
+    // v13.2.2: Night Music bypass — the plugin already builds the complete
+    // minimal message format (Song/Artist in mono + footer). No AI rewrite
+    // needed — the text is already the final post.
+    if (resolvedItem.pluginId === "night-music") {
+      try {
+        const readyContent = await this.deps.formatter.buildReadyContent(
+          resolvedItem,
+          {
+            text: resolvedItem.body, // The pre-formatted message from the plugin
+            aiConfidence: 100,
+            generatedLanguage: "en",
+            headline: resolvedItem.title,
+            notes: "night-music-direct (no AI — curated Hall of Fame)",
+          },
+          {
+            passed: true,
+            overallScore: 95, // High score — curated Hall of Fame
+            dimensionScores: [],
+            hardReject: false,
+            minScore: settings.ai.qualityThreshold,
+          } as never,
+          "night-music-direct",
+          "none",
+          0,
+          0,
+        );
+        if (!skipEnqueue) await this.deps.queue.enqueue(readyContent);
+        return { ok: true, content: readyContent, item, stage: "complete", aiDebug: {
+          error: "Night Music direct (no AI needed)",
+          attempts: [],
+          usedFallback: true,
+          fallbackReason: "Night Music direct (no AI needed)",
+        } };
+      } catch (error) {
+        return this.reject("format", "ai_failed", `Night Music format failed: ${this.errMsg(error)}`, item);
+      }
+    }
+
     const soul = await this.deps.soul.load();
     const aiResult = await this.deps.ai.generate({
       category: resolvedItem.category,

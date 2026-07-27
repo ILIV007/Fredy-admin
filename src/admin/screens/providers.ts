@@ -83,6 +83,7 @@ export const providersScreen: Screen = {
       [toggleButton("Dev.to", true, "set:plugins:devto:toggle")],
       [toggleButton("News", true, "set:plugins:news:toggle")],
       [toggleButton("NASA", true, "set:plugins:nasa:toggle")],
+      [toggleButton("Night Music", true, "set:plugins:night-music:toggle")],
       [toggleButton("Joke", true, "set:plugins:joke:toggle")],
       [toggleButton("XKCD", true, "set:plugins:xkcd:toggle")],
       [toggleButton("HackerNews", true, "set:plugins:hackernews:toggle")],

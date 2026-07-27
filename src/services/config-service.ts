@@ -113,6 +113,34 @@ export class ConfigService {
       await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
     }
 
+    // v13.2.2: Auto-migrate Tier V entries — add night-music if missing.
+    // Old configs only have nasa-apod; the new night-music entry needs to be added.
+    if (settings.tierV?.entries) {
+      const hasNightMusic = settings.tierV.entries.some((e: { id: string }) => e.id === "night-music");
+      if (!hasNightMusic) {
+        const oldCount = settings.tierV.entries.length;
+        settings = {
+          ...settings,
+          tierV: {
+            ...settings.tierV,
+            entries: [
+              ...settings.tierV.entries,
+              {
+                id: "night-music",
+                enabled: true,
+                time: "23:02",
+                providerId: "night-music",
+                category: "V",
+                description: "Night Music — legendary song after NASA APOD (Zero-API RSS)",
+              },
+            ],
+          },
+        };
+        console.log(`[config] v13.2.2: Auto-migrated Tier V entries from ${oldCount} to ${settings.tierV.entries.length} (added night-music)`);
+        await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
+      }
+    }
+
     this.deps.cache.set(key, settings);
     return settings;
   }

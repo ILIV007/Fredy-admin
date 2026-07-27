@@ -89,7 +89,10 @@ export const manualScreen: Screen = {
       ],
       [navButton("⚡ TechPowerUp", "action:manual:source:techpowerup")],
       [labelButton("─── Tier V (Scheduled) ───")],
-      [navButton("🪐 NASA APOD", "action:manual:source:nasa")],
+      [
+        navButton("🪐 NASA APOD", "action:manual:source:nasa"),
+        navButton("🎵 Night Music", "action:manual:source:night-music"),
+      ],
       [labelButton("─── Legacy ───")],
       [
         navButton("📰 News", "action:manual:source:news"),

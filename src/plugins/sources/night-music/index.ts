@@ -203,7 +203,9 @@ export class NightMusicPlugin implements Plugin {
       category: this.metadata.category,
       title: `${selected.song} — ${selected.artist}`,
       body: text,
-      url: "", // no external URL — minimal post
+      // v13.2.2: Normalizer requires a non-empty URL. Use Last.fm search URL
+      // for the song (not displayed in the post — post is text-only).
+      url: `https://www.last.fm/music/${encodeURIComponent(selected.artist)}/_/${encodeURIComponent(selected.song)}`,
       language: "en",
       publishedAt: Date.now(),
       metadata: {
