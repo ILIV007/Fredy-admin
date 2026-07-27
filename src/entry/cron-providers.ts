@@ -94,51 +94,37 @@ async function runProviderRefresh(container: Container, env: Env): Promise<void>
   if (settings) {
     const isQuiet = container.quietHoursChecker?.isQuietHours(startTime, settings.scheduler) ?? false;
     if (isQuiet) {
-      // Check if all enabled category queues are at/above minimum.
-      const allDepths = await container.queue.depth().catch(() => []);
-      const depthMap: Record<string, number> = {};
-      for (const d of allDepths) {
-        depthMap[d.category] = d.depth;
-      }
-      const categories: Category[] = ["A", "B", "C"];
-      const minMap: Record<Category, number> = {
-        A: settings.content.queueMinA,
-        B: settings.content.queueMinB,
-        C: settings.content.queueMinC,
-        H: 0, // v13.0.0: H is on-demand
-      };
-      const allQueuesOk = categories.every(cat =>
-        !settings.categories[cat].enabled || (depthMap[cat] ?? 0) >= minMap[cat]
-      );
-
-      if (allQueuesOk) {
-        // Smart sleep: quiet hours + queues full → skip everything.
-        const tz = settings.scheduler.timezone || "UTC";
-        const localTime = new Intl.DateTimeFormat("en-US", {
-          timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
-        }).format(new Date(startTime));
-        console.log(JSON.stringify({
-          layer: "provider-refresh",
-          status: "smart_sleep",
-          reason: "quiet_hours_and_queues_full",
-          timezone: tz,
-          localTime,
-          queueDepths: depthMap,
-        }));
-        // Write a lightweight log entry so the dashboard shows this tick ran.
-        await container.kv.setJson(LAST_LOG_KEY, {
-          time: Date.now(),
-          tickTime: startTime,
-          layer: "provider-refresh",
-          skipped: true,
-          reason: "smart_sleep_quiet_queues_full",
-          localTime,
-          log: [`smart sleep: quiet hours + all queues >= min — skipping refresh`],
-        }, 3600).catch(() => {});
-        return; // No lock, no API calls, no provider refresh.
-      }
-      // Queues are low during quiet hours → continue to refresh
-      // (prepare content for the next active window).
+      // v13.2.1: CRITICAL FIX — during quiet hours, SKIP the entire provider refresh.
+      // Previously, quiet hours only skipped if ALL queues were full ("smart sleep").
+      // If any queue was low, it continued to refresh — fetching from APIs,
+      // running AI pipeline, and writing to KV (enqueue, dedup, cache, etc.).
+      // This caused 50%+ KV usage at 4:30 AM during quiet hours.
+      //
+      // Now: during quiet hours, ALWAYS skip. The queues should have been
+      // refilled during the last active window. If they're low, they'll be
+      // refilled when quiet hours end (07:30). No KV writes during quiet hours.
+      const tz = settings.scheduler.timezone || "UTC";
+      const localTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(new Date(startTime));
+      console.log(JSON.stringify({
+        layer: "provider-refresh",
+        status: "quiet_hours_skip",
+        reason: "quiet_hours_active",
+        timezone: tz,
+        localTime,
+      }));
+      // Write a lightweight log entry so the dashboard shows this tick ran.
+      await container.kv.setJson(LAST_LOG_KEY, {
+        time: Date.now(),
+        tickTime: startTime,
+        layer: "provider-refresh",
+        skipped: true,
+        reason: "quiet_hours_active",
+        localTime,
+        log: [`quiet hours active (${localTime} ${tz}) — skipping provider refresh entirely`],
+      }, 3600).catch(() => {});
+      return; // No lock, no API calls, no KV writes beyond the log entry.
     }
   }
 

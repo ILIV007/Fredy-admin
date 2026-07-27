@@ -53,5 +53,8 @@ export { TechPowerUpPlugin, createTechPowerUpPlugin, techpowerupManifest } from 
 // v13.0.4: AnandTech moved to legacy (RSS returns forum spam)
 export { AnandtechPlugin, createAnandtechPlugin, anandtechManifest } from "./anandtech";
 
+// ─── v13.2.0: Tier V — Night Music (Zero-API RSS, after NASA APOD) ───
+export { NightMusicPlugin, createNightMusicPlugin, nightMusicManifest } from "./night-music";
+
 // Re-export the Plugin interface for convenience.
 export type { Plugin, PluginManifest, PluginStatus, ProviderQualityResult } from "../../types/plugin";

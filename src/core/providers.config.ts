@@ -228,6 +228,30 @@ export const PROVIDERS_CONFIG: readonly ProviderConfigEntry[] = [
     homepage: "https://apod.nasa.gov",
     docsUrl: "https://api.nasa.gov/",
   },
+  {
+    // v13.2.0: Night Music — Tier V, Zero-API RSS, after NASA APOD.
+    // Publishes one legendary song per night from a curated 300+ Hall of Fame.
+    // 10-stage quality pipeline (bad-version filter, Hall of Fame check,
+    // recency protection, mood rotation, weighted random).
+    id: "night-music",
+    name: "Night Music",
+    tier: "V",
+    category: "C", // kept for backward compat — Tier V scheduling overrides
+    weight: 60,
+    refreshIntervalHours: 0, // Tier V: on-demand fetch
+    cacheTtlSeconds: 6 * 3600,
+    credibility: 85,
+    reputation: 75,
+    rateLimit: 0, // RSS — no rate limit
+    enabledByDefault: true,
+    supportsImages: false, // minimal text-only post
+    minStars: 0,
+    minScore: 0,
+    popularityExempt: true, // curated Hall of Fame
+    canBreak: false,
+    homepage: "https://www.last.fm",
+    docsUrl: "https://www.last.fm/music",
+  },
 
   // ════════════════════════════════════════════════════════════
   // Tier A — Important providers (refresh every 6h)

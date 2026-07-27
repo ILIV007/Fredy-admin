@@ -59,6 +59,9 @@ import { createTomsHardwarePlugin } from "../plugins/sources/toms-hardware/index
 import { createTechPowerUpPlugin } from "../plugins/sources/techpowerup/index";
 import { createAnandtechPlugin } from "../plugins/sources/anandtech/index";
 
+// v13.2.0: Tier V — Night Music (Zero-API RSS, after NASA APOD)
+import { createNightMusicPlugin } from "../plugins/sources/night-music/index";
+
 // AI providers
 import { GeminiProvider } from "../plugins/ai/gemini";
 import { OpenRouterProvider } from "../plugins/ai/openrouter";
@@ -123,6 +126,9 @@ export class PluginLoader {
       { id: "techpowerup", factory: createTechPowerUpPlugin },
       // v13.0.4: AnandTech moved to legacy (disabled — RSS returns forum spam)
       { id: "anandtech", factory: createAnandtechPlugin },
+
+      // ─── v13.2.0 Tier V — Night Music (Zero-API RSS, after NASA APOD) ───
+      { id: "night-music", factory: createNightMusicPlugin },
     ];
 
     for (const { id, factory } of sources) {

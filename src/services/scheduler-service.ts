@@ -1256,10 +1256,12 @@ export class SchedulerService {
   private getFallbackPlugins(category: Category): string[] {
     // v12.1.9: Updated fallback list to match CATEGORY_PROVIDERS + remove disabled providers.
     // Old list had "news" and "hackernews" (both legacy/disabled) and "wikimedia"/"joke" (legacy).
+    // v13.2.1: Added Category H fallbacks (was missing — caused "all fallbacks failed" for H slots).
     const providers: Record<string, readonly string[]> = {
       A: ["github", "github-trending", "github-releases", "github-events", "github-security", "devto", "stackexchange", "huggingface-blog", "reddit-v2"],
       B: ["hackernews-algolia", "cloudflare-blog", "producthunt", "openai-news"],
       C: ["xkcd"],
+      H: ["ars-technica", "toms-hardware", "techpowerup"], // v13.2.1: H fallbacks
     };
     return [...(providers[category] ?? [])];
   }
