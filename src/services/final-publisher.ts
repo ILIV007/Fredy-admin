@@ -194,6 +194,56 @@ export class FinalPublisher {
     }
 
     // ── UX Layer: transform to FinalPost ───────────────────
+    // v13.2.4: Night Music bypass — the plugin's text is already the complete
+    // post (Song/Artist in mono + footer). Skip the UX layer entirely to avoid
+    // adding a hook block and source URL link that would break the minimal format.
+    if (content.pluginId === "night-music") {
+      // Direct path: use content.text as-is (it's already the final message).
+      const nightSentText = content.text;
+      const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
+
+      // Send directly to Telegram — no hook, no footer, no source link.
+      const directResult = await this.deps.tg.sendMessage(channel, nightSentText, {
+        parse_mode: "HTML",
+      }).catch((e: unknown) => {
+        return { ok: false, description: e instanceof Error ? e.message : String(e) };
+      });
+
+      const dr = directResult as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+      if (dr?.ok && dr.result) {
+        // Record in history.
+        await this.deps.history.recordPublished(content, dr.result.message_id ?? 0, String(dr.result.chat?.id ?? channel)).catch(() => {});
+        // Record dedup.
+        if (this.deps.duplicateDetector) {
+          await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
+        }
+        return {
+          ok: true,
+          contentId: content.id,
+          category: content.category,
+          telegramMessageId: dr.result.message_id ?? 0,
+          telegramChatId: String(dr.result.chat?.id ?? channel),
+          publishedAt: Date.now(),
+          attempts: 0,
+          sentText: nightSentText,
+          sentMediaUrl: null,
+        };
+      } else {
+        return {
+          ok: false,
+          contentId: content.id,
+          category: content.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: dr?.description ?? "Night Music direct publish failed",
+          attempts: 0,
+          sentText: nightSentText,
+          sentMediaUrl: null,
+        };
+      }
+    }
+
     const finalPost = await this.deps.uxLayer.transform(content);
 
     this.deps.logger.info("pipeline.start", {
