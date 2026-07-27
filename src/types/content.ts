@@ -63,7 +63,7 @@ export interface ContentItem {
 
 /** Media attached to a content item. */
 export interface ContentMedia {
-  readonly type: "image" | "video" | "animation" | "none";
+  readonly type: "image" | "video" | "animation" | "none" | "audio";
   readonly url: string;
   readonly alt?: string;
 }

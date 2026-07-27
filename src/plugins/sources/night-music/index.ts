@@ -1,22 +1,22 @@
 /**
  * src/plugins/sources/night-music/index.ts
- * v13.2.0: Night Music content source plugin.
+ * v13.3.0: Night Music — Jamendo API, 10-stage quality pipeline, sendAudio().
  *
- * Zero-API: uses Last.fm RSS feeds (no API key, no rate limit).
- * Fetches trending/popular tracks, then runs a 10-stage quality pipeline:
- *   1. Required fields (artist, title not empty)
- *   2. Bad-version filter (live, demo, karaoke, remix, etc.)
- *   3. Popularity (Last.fm playcount > 10M if available)
- *   4. Artist blacklist (podcast, ASMR, meditation, etc.)
- *   5. Recency protection (artist 30d, song 180d)
- *   6. Genre diversity (avoid 5 same-genre in a row)
- *   7. Artist diversity (max 2 per artist per 60 days)
- *   8. Hall of Fame (must be in curated 300+ legendary songs list)
- *   9. Mood rotation (day-of-week mood)
- *   10. Weighted random selection
+ * Zero-static-data: all tracks come from Jamendo API.
+ * JAMENDO_CLIENT_ID is read from Worker Secret (never hardcoded).
  *
- * Dedup: Song + Artist hash (180-day TTL).
- * KV usage: minimal — 2 keys per published song (artist + song hash).
+ * Pipeline:
+ *   1. Fetch 50-100 tracks from Jamendo API (order=popularity_week)
+ *   2. Stage 1: Reject invalid (missing title/artist/audio)
+ *   3. Stage 2: Reject non-downloadable (audiodownload_allowed=false)
+ *   4. Stage 3: Reject duration outside 2-8 min
+ *   5. Stage 4: Reject low-quality titles (demo, test, ASMR, etc.)
+ *   6. Stage 5: Reject duplicate artists (30-day KV)
+ *   7. Stage 6: Reject duplicate songs (180-day KV, normalized artist+title)
+ *   8. Stage 7: Prefer tracks with album_image (artwork)
+ *   9. Stage 8: Weighted quality score (0-100, reject < 80)
+ *   10. Stage 9: Weighted random selection among high-scoring tracks
+ *   11. Stage 10: Record publication in KV (artist + song hash)
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -28,28 +28,34 @@ import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { nightMusicManifest } from "./manifest";
 export { nightMusicManifest } from "./manifest";
-export { HALL_OF_FAME, isInHallOfFame, normalizeForMusicMatch } from "./hall-of-fame";
-import { HALL_OF_FAME, isInHallOfFame, normalizeForMusicMatch, type HallOfFameEntry } from "./hall-of-fame";
 
 // ────────────────────────────────────────────────────────────
 // Constants
 // ────────────────────────────────────────────────────────────
 
-const CACHE_KEY = "fredy:source:night-music:feed"; // v13.2.3: kept for stale cache cleanup only
+const JAMENDO_API = "https://api.jamendo.com/v3.0/tracks/";
+const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_LIMIT = 100;
 
 const DEDUP_ARTIST_PREFIX = "fredy:music:artist:";
 const DEDUP_SONG_PREFIX = "fredy:music:song:";
 const ARTIST_TTL = 30 * 24 * 3600; // 30 days
 const SONG_TTL = 180 * 24 * 3600; // 180 days
 
-const FETCH_TIMEOUT_MS = 10_000;
-
-// RSS feed URLs (Zero-API, no key needed)
-const RSS_FEEDS: readonly string[] = [
-  "https://www.last.fm/music/+charts/top/tracks",
-  "https://www.last.fm/music/+charts",
-  "https://rss.app/feeds/v1.1/lastfm.json",
+// Stage 4: Low-quality title patterns
+const BAD_TITLE_PATTERNS: readonly RegExp[] = [
+  /demo/i, /test/i, /sample/i, /intro/i, /outro/i, /untitled/i,
+  /track\s*0?\d/i, /noise/i, /asmr/i, /meditation/i, /podcast/i,
+  /audiobook/i, /prom/i, /advertisement/i, /trailer/i, /preview/i,
+  /unknown/i, /placeholder/i, /work\s*in\s*progress/i, /wip/i,
 ];
+
+// Stage 3: Duration limits (seconds)
+const MIN_DURATION_SEC = 120; // 2 min
+const MAX_DURATION_SEC = 480; // 8 min
+
+// Stage 8: Quality score threshold
+const MIN_QUALITY_SCORE = 80;
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -61,70 +67,29 @@ export interface NightMusicPluginDeps {
   readonly logger: PluginLogger;
 }
 
-interface RSSTrack {
-  readonly title: string;
-  readonly artist: string;
-  readonly playcount?: number;
-  readonly listeners?: number;
-  readonly url?: string;
+interface JamendoTrack {
+  readonly id: string;
+  readonly name: string;
+  readonly artist_name: string;
+  readonly album_name?: string;
+  readonly album_image?: string;
+  readonly audio?: string;
+  readonly audiodownload?: string;
+  readonly audiodownload_allowed?: boolean;
+  readonly duration?: number;
+  readonly release_date?: string;
+  readonly musicinfo?: { tags?: readonly string[] };
+}
+
+interface JamendoResponse {
+  readonly headers: { readonly status: string; readonly results_count: number; readonly error_message?: string };
+  readonly results: readonly JamendoTrack[];
 }
 
 interface MusicCandidate {
-  readonly song: string;
-  readonly artist: string;
-  readonly hallOfFameEntry: HallOfFameEntry;
-  readonly playcount?: number;
+  readonly track: JamendoTrack;
+  readonly audioUrl: string;
   readonly score: number;
-}
-
-// ────────────────────────────────────────────────────────────
-// Stage filters
-// ────────────────────────────────────────────────────────────
-
-const BAD_VERSION_PATTERNS: readonly RegExp[] = [
-  /live\s*(version|at|@|concert|session|acoustic)/i,
-  /\blive\b/i,
-  /demo/i,
-  /karaoke/i,
-  /instrumental/i,
-  /remix/i,
-  /sped\s*up/i,
-  /slowed/i,
-  /\b8d\b/i,
-  /nightcore/i,
-  /cover\s*version/i,
-  /rehearsal/i,
-  /acapella/i,
-  /bootleg/i,
-  /edit\b/i,
-  /radio\s*edit/i,
-  /extended\s*mix/i,
-  /club\s*mix/i,
-];
-
-const ARTIST_BLACKLIST: readonly string[] = [
-  "podcast", "audiobook", "meditation", "white noise", "sleep sounds",
-  "asmr", "nature sounds", "ambient noise", "relaxing sounds", "binaural",
-  "spoken word", "guided", "hypnosis", "affirmations",
-];
-
-// ────────────────────────────────────────────────────────────
-// Day-of-week mood rotation
-// ────────────────────────────────────────────────────────────
-
-const MOOD_BY_DAY: readonly { day: number; mood: string; genres: readonly HallOfFameEntry["genre"][] }[] = [
-  { day: 1, mood: "Energetic", genres: ["rock", "pop", "electronic"] },      // Monday
-  { day: 2, mood: "Chill", genres: ["classic", "indie", "r&b"] },           // Tuesday
-  { day: 3, mood: "Rock", genres: ["rock", "metal"] },                       // Wednesday
-  { day: 4, mood: "Electronic", genres: ["electronic", "pop"] },            // Thursday
-  { day: 5, mood: "Hip Hop", genres: ["hiphop", "r&b"] },                   // Friday
-  { day: 6, mood: "Pop", genres: ["pop", "rock"] },                         // Saturday
-  { day: 0, mood: "Classic", genres: ["classic", "rock"] },                 // Sunday
-];
-
-function getTodayMood(): { mood: string; genres: readonly HallOfFameEntry["genre"][] } {
-  const day = new Date().getDay();
-  return MOOD_BY_DAY.find((m) => m.day === day) ?? MOOD_BY_DAY[1]!;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -142,258 +107,225 @@ export class NightMusicPlugin implements Plugin {
   supportsMedia(): boolean { return this.metadata.supportsImages; }
 
   // ────────────────────────────────────────────────────────────
-  // Stage 1: Fetch RSS feed
+  // Stage 1: Fetch from Jamendo API
   // ────────────────────────────────────────────────────────────
 
   async fetch(): Promise<readonly SourceItem[]> {
-    this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
-
-    // v13.2.3: REMOVED cache entirely.
-    // Night Music is a Tier V provider that runs once per night. Caching
-    // the result for 6 hours meant that if the first fetch produced a bad
-    // item (e.g., url: "" in v13.2.0-v13.2.1), the bad item would persist
-    // in KV for 6 hours — even after deploying a fix. Now: always fetch
-    // fresh. The 10-stage pipeline runs every time, which is fine because
-    // it only runs once per night (Tier V).
-    //
-    // Also: clear any stale cache from previous versions.
-    await this.deps.kv.delete(CACHE_KEY).catch(() => {});
-
-    // Try RSS feeds
-    let tracks: RSSTrack[] = [];
-    for (const url of RSS_FEEDS) {
-      try {
-        tracks = await this.fetchRSS(url);
-        if (tracks.length > 0) break;
-      } catch (error) {
-        this.deps.logger.warn("source.fetch_error", {
-          plugin: "night-music", source: "rss", url,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    // Fallback: use Hall of Fame directly (RSS may be blocked)
-    if (tracks.length === 0) {
-      this.deps.logger.info("source.fetch_success", {
-        plugin: "night-music", source: "hall-of-fame-fallback",
-        message: "RSS feeds unavailable — using Hall of Fame directly",
-      });
-      tracks = HALL_OF_FAME.slice(0, 50).map((e) => ({
-        title: e.song,
-        artist: e.artist,
-        playcount: 10_000_000, // assume high popularity for Hall of Fame
-      }));
-    }
-
-    // Run the 10-stage quality pipeline
-    const selected = await this.selectTrack(tracks);
-    if (!selected) {
+    const clientId = this.deps.env.JAMENDO_CLIENT_ID;
+    if (!clientId) {
       this.deps.logger.warn("source.fetch_error", {
-        plugin: "night-music", reason: "no_valid_track_after_pipeline",
-        message: "[NIGHT_MUSIC] No valid track after 10-stage pipeline — skipping tonight",
+        plugin: "night-music",
+        reason: "missing_jamendo_client_id",
+        message: "[NIGHT_MUSIC] JAMENDO_CLIENT_ID not configured — skipping",
       });
       return [];
     }
 
-    // Build SourceItem with minimal text
-    const text = this.buildMessage(selected.song, selected.artist);
-    const songHash = this.hashSongArtist(selected.song, selected.artist);
+    this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
+
+    let tracks: JamendoTrack[] = [];
+    try {
+      tracks = await this.fetchJamendoTracks(clientId);
+    } catch (error) {
+      // Retry once
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        error: error instanceof Error ? error.message : String(error),
+        message: "[NIGHT_MUSIC] RSS_FETCH failed — retrying",
+      });
+      try {
+        tracks = await this.fetchJamendoTracks(clientId);
+      } catch (retryError) {
+        this.deps.logger.error("source.fetch_error", {
+          plugin: "night-music",
+          error: retryError instanceof Error ? retryError.message : String(retryError),
+          message: "[NIGHT_MUSIC] RSS_FETCH retry failed — skipping tonight",
+        });
+        return [];
+      }
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music",
+      itemCount: tracks.length,
+      message: `[NIGHT_MUSIC] RSS_ITEMS: ${tracks.length} tracks fetched`,
+    });
+
+    if (tracks.length === 0) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        reason: "rss_empty",
+        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo",
+      });
+      return [];
+    }
+
+    // Run 10-stage quality pipeline
+    const selected = await this.selectTrack(tracks);
+    if (!selected) {
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        reason: "no_valid_track_after_pipeline",
+        message: "[NIGHT_MUSIC] QUALITY_FILTER: no valid track after 10-stage pipeline — skipping tonight",
+      });
+      return [];
+    }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music",
+      song: selected.track.name,
+      artist: selected.track.artist_name,
+      score: selected.score,
+      audioUrl: selected.audioUrl,
+      message: `[NIGHT_MUSIC] TRACK_SELECTED: ${selected.track.name} by ${selected.track.artist_name} (score ${selected.score})`,
+    });
+
+    // Build SourceItem
+    const text = this.buildMessage(selected.track.name, selected.track.artist_name);
+    const songHash = this.hashSongArtist(selected.track.name, selected.track.artist_name);
 
     const item: SourceItem = {
       id: `night-music-${songHash}`,
       source: this.metadata.id,
       category: this.metadata.category,
-      title: `${selected.song} — ${selected.artist}`,
+      title: `${selected.track.name} — ${selected.track.artist_name}`,
       body: text,
-      // v13.2.2: Normalizer requires a non-empty URL. Use Last.fm search URL
-      // for the song (not displayed in the post — post is text-only).
-      url: `https://www.last.fm/music/${encodeURIComponent(selected.artist)}/_/${encodeURIComponent(selected.song)}`,
+      url: selected.track.audio ?? selected.audioUrl,
       language: "en",
       publishedAt: Date.now(),
+      media: {
+        type: "audio",
+        url: selected.audioUrl,
+        alt: selected.track.name,
+      },
       metadata: {
-        song: selected.song,
-        artist: selected.artist,
-        mood: getTodayMood().mood,
-        hallOfFame: true,
+        song: selected.track.name,
+        artist: selected.track.artist_name,
+        audioUrl: selected.audioUrl,
+        albumImage: selected.track.album_image,
         score: selected.score,
+        jamendoId: selected.track.id,
       },
       displayIcon: this.metadata.displayIcon ?? "🎵",
       displaySource: this.metadata.displaySource ?? "Night Music",
       fetchedAt: Date.now(),
     };
 
-    const items = [item];
-    // v13.2.3: No cache write — always fetch fresh (see comment at top of fetch()).
-
-    this.deps.logger.info("source.fetch_success", {
-      plugin: "night-music",
-      source: "pipeline",
-      returned: 1,
-      song: selected.song,
-      artist: selected.artist,
-      mood: getTodayMood().mood,
-      score: selected.score,
-      message: `[NIGHT_MUSIC] Selected: ${selected.song} by ${selected.artist} (score ${selected.score})`,
-    });
-
-    return items;
+    return [item];
   }
 
   // ────────────────────────────────────────────────────────────
-  // RSS fetcher — parses Last.fm charts page
+  // Jamendo API fetch
   // ────────────────────────────────────────────────────────────
 
-  private async fetchRSS(url: string): Promise<RSSTrack[]> {
+  private async fetchJamendoTracks(clientId: string): Promise<JamendoTrack[]> {
+    const params = new URLSearchParams({
+      client_id: clientId,
+      format: "json",
+      limit: String(FETCH_LIMIT),
+      order: "popularity_week",
+      include: "musicinfo",
+      audioformat: "mp32",
+    });
+    const url = `${JAMENDO_API}?${params.toString()}`;
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (FredyBot/1.0)" },
+        headers: { "User-Agent": "FredyBot/1.0" },
         signal: controller.signal,
       });
       clearTimeout(timeout);
       if (!res.ok) {
-        this.deps.logger.warn("source.fetch_error", { plugin: "night-music", url, status: res.status });
-        return [];
+        throw new Error(`Jamendo API returned ${res.status}`);
       }
-
-      const text = await res.text();
-      // Try to parse as XML RSS first, then HTML
-      if (text.includes("<rss") || text.includes("<feed")) {
-        return this.parseXMLRSS(text);
+      const data = await res.json() as JamendoResponse;
+      if (data.headers.status !== "success") {
+        throw new Error(`Jamendo API error: ${data.headers.error_message ?? "unknown"}`);
       }
-      // Last.fm charts page is HTML — extract track rows
-      return this.parseLastFmHTML(text);
+      return [...data.results];
     } catch (error) {
       clearTimeout(timeout);
       throw error;
     }
   }
 
-  private parseXMLRSS(xml: string): RSSTrack[] {
-    const tracks: RSSTrack[] = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match: RegExpExecArray | null;
-    while ((match = itemRegex.exec(xml)) !== null && tracks.length < 30) {
-      const block = match[1] ?? "";
-      const title = this.extractTag(block, "title");
-      // RSS title is usually "Artist – Song" or "Song by Artist"
-      const parts = title.split(/\s+[–\-—]\s+|\s+by\s+/i);
-      if (parts.length >= 2) {
-        tracks.push({
-          title: parts[parts.length - 1]!.trim(),
-          artist: parts.slice(0, -1).join(" ").trim(),
-          url: this.extractTag(block, "link"),
-        });
-      }
-    }
-    return tracks;
-  }
-
-  private parseLastFmHTML(html: string): RSSTrack[] {
-    const tracks: RSSTrack[] = [];
-    // Last.fm chart rows: <td class="chartlist-name">...</td>
-    const rowRegex = /chartlist-name[^>]*><a[^>]*>([^<]+)<\/a>[\s\S]*?chartlist-artist[^>]*>([^<]+)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = rowRegex.exec(html)) !== null && tracks.length < 30) {
-      const song = match[1]?.trim();
-      const artist = match[2]?.trim();
-      if (song && artist) {
-        tracks.push({ title: song, artist });
-      }
-    }
-    return tracks;
-  }
-
-  private extractTag(xml: string, tag: string): string {
-    const regex = new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>|<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
-    const match = regex.exec(xml);
-    return (match?.[1] ?? match?.[2] ?? "").trim();
-  }
-
   // ────────────────────────────────────────────────────────────
   // 10-Stage Quality Pipeline
   // ────────────────────────────────────────────────────────────
 
-  private async selectTrack(tracks: RSSTrack[]): Promise<MusicCandidate | null> {
-    const todayMood = getTodayMood();
+  private async selectTrack(tracks: JamendoTrack[]): Promise<MusicCandidate | null> {
     const candidates: MusicCandidate[] = [];
 
-    for (const track of tracks.slice(0, 30)) {
+    for (const track of tracks) {
       // Stage 1: Required fields
-      if (!track.artist || !track.title || track.artist === "Unknown") continue;
+      if (!track.name || !track.artist_name || (!track.audio && !track.audiodownload)) continue;
 
-      // Stage 2: Bad-version filter
-      const fullText = `${track.title} ${track.artist}`.toLowerCase();
-      if (BAD_VERSION_PATTERNS.some((re) => re.test(fullText))) continue;
+      // Stage 2: Must be downloadable
+      if (track.audiodownload_allowed === false) continue;
 
-      // Stage 3: Artist blacklist
-      if (ARTIST_BLACKLIST.some((b) => fullText.includes(b))) continue;
+      // Determine audio URL: prefer audiodownload, fallback to audio
+      const audioUrl = track.audiodownload ?? track.audio;
+      if (!audioUrl) continue;
 
-      // Stage 4: Hall of Fame (Stage 7 in spec — required)
-      const hofEntry = isInHallOfFame(track.title, track.artist);
-      if (!hofEntry) continue;
+      // Stage 3: Duration 2-8 min
+      const duration = track.duration ?? 0;
+      if (duration < MIN_DURATION_SEC || duration > MAX_DURATION_SEC) continue;
 
-      // Stage 5: Recency protection (artist 30d, song 180d)
-      const artistKey = `${DEDUP_ARTIST_PREFIX}${normalizeForMusicMatch(track.artist)}`;
-      const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(track.title, track.artist)}`;
+      // Stage 4: Low-quality title filter
+      if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) continue;
+
+      // Stage 5: Duplicate artist (30-day KV)
+      const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(track.artist_name)}`;
       const artistRecent = await this.deps.kv.get(artistKey).catch(() => null);
-      if (artistRecent) continue; // artist published in last 30 days
-      const songRecent = await this.deps.kv.get(songKey).catch(() => null);
-      if (songRecent) continue; // song published in last 180 days
-
-      // Stage 6: Mood rotation — boost if genre matches today's mood
-      const moodMatch = todayMood.genres.includes(hofEntry.genre);
-
-      // Stage 8: Compute quality score
-      const score = this.computeScore(hofEntry, track, moodMatch);
-
-      candidates.push({
-        song: track.title,
-        artist: track.artist,
-        hallOfFameEntry: hofEntry,
-        playcount: track.playcount,
-        score,
-      });
-
-      if (candidates.length >= 10) break; // enough candidates
-    }
-
-    // If no candidates from RSS, use Hall of Fame directly
-    if (candidates.length === 0) {
-      this.deps.logger.info("pipeline.start", {
-        plugin: "night-music",
-        step: "hall-of-fame-pool",
-        message: "[NIGHT_MUSIC] No RSS candidates — using Hall of Fame pool",
-      });
-      // Pick from Hall of Fame, filtered by mood
-      const moodPool = HALL_OF_FAME.filter((e) => todayMood.genres.includes(e.genre));
-      const pool = moodPool.length > 0 ? moodPool : HALL_OF_FAME;
-      for (const entry of pool) {
-        const artistKey = `${DEDUP_ARTIST_PREFIX}${normalizeForMusicMatch(entry.artist)}`;
-        const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(entry.song, entry.artist)}`;
-        const artistRecent = await this.deps.kv.get(artistKey).catch(() => null);
-        if (artistRecent) continue;
-        const songRecent = await this.deps.kv.get(songKey).catch(() => null);
-        if (songRecent) continue;
-        const score = this.computeScore(entry, { title: entry.song, artist: entry.artist }, true);
-        candidates.push({
-          song: entry.song,
-          artist: entry.artist,
-          hallOfFameEntry: entry,
-          score,
+      if (artistRecent) {
+        this.deps.logger.debug("source.fetch_success", {
+          plugin: "night-music", stage: "DEDUP_SKIP",
+          artist: track.artist_name, reason: "artist_recently_published",
         });
-        if (candidates.length >= 10) break;
+        continue;
       }
+
+      // Stage 6: Duplicate song (180-day KV, normalized artist+title)
+      const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(track.name, track.artist_name)}`;
+      const songRecent = await this.deps.kv.get(songKey).catch(() => null);
+      if (songRecent) {
+        this.deps.logger.debug("source.fetch_success", {
+          plugin: "night-music", stage: "DEDUP_SKIP",
+          song: track.name, reason: "song_recently_published",
+        });
+        continue;
+      }
+
+      // Stage 7: Prefer tracks with artwork
+      const hasArtwork = !!track.album_image;
+
+      // Stage 8: Weighted quality score
+      const score = this.computeScore(track, audioUrl, hasArtwork);
+      if (score < MIN_QUALITY_SCORE) continue;
+
+      candidates.push({ track, audioUrl, score });
+      if (candidates.length >= 20) break; // enough candidates for weighted random
     }
 
-    if (candidates.length === 0) {
-      return null;
-    }
+    if (candidates.length === 0) return null;
 
     // Stage 9: Weighted random selection
     const selected = this.weightedRandom(candidates);
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music", stage: "AUDIO_FOUND",
+      song: selected.track.name, artist: selected.track.artist_name,
+      audioUrl: selected.audioUrl,
+      message: `[NIGHT_MUSIC] AUDIO_FOUND: ${selected.audioUrl}`,
+    });
+
+    // Stage 10: Record publication in KV
+    const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(selected.track.artist_name)}`;
+    const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(selected.track.name, selected.track.artist_name)}`;
+    await this.deps.kv.set(artistKey, String(Date.now()), ARTIST_TTL).catch(() => {});
+    await this.deps.kv.set(songKey, String(Date.now()), SONG_TTL).catch(() => {});
+
     return selected;
   }
 
@@ -401,24 +333,34 @@ export class NightMusicPlugin implements Plugin {
   // Stage 8: Quality Score
   // ────────────────────────────────────────────────────────────
 
-  private computeScore(entry: HallOfFameEntry, track: RSSTrack, moodMatch: boolean): number {
-    let score = 50; // base
+  private computeScore(track: JamendoTrack, _audioUrl: string, hasArtwork: boolean): number {
+    let score = 0;
 
-    // Legendary artist (Hall of Fame) — +25
-    score += 25;
+    // Downloadable: +30
+    if (track.audiodownload) score += 30;
+    else if (track.audiodownload_allowed !== false) score += 20;
 
-    // Popularity bonus
-    if (track.playcount && track.playcount > 5_000_000) score += 20;
-    else if (track.playcount && track.playcount > 1_000_000) score += 10;
+    // Has artwork: +15
+    if (hasArtwork) score += 15;
 
-    // Era bonus (classic songs)
-    if (entry.era === "70s" || entry.era === "80s") score += 5;
+    // Duration 3-5 min: +15
+    const duration = track.duration ?? 0;
+    if (duration >= 180 && duration <= 300) score += 15;
+    else if (duration >= 120 && duration <= 480) score += 8;
 
-    // Mood match bonus
-    if (moodMatch) score += 15;
+    // Recent release: +10 (within last 2 years)
+    if (track.release_date) {
+      const releaseYear = new Date(track.release_date).getFullYear();
+      const currentYear = new Date().getFullYear();
+      if (currentYear - releaseYear <= 2) score += 10;
+      else if (currentYear - releaseYear <= 5) score += 5;
+    }
 
-    // Genre diversity bonus (not rock-only)
-    if (entry.genre !== "rock") score += 5;
+    // Complete metadata: +10
+    if (track.album_name && track.musicinfo?.tags && track.musicinfo.tags.length > 0) score += 10;
+
+    // Remaining bonus: +10 (base for passing all stages)
+    score += 10;
 
     return Math.min(100, score);
   }
@@ -428,10 +370,7 @@ export class NightMusicPlugin implements Plugin {
   // ────────────────────────────────────────────────────────────
 
   private weightedRandom(candidates: MusicCandidate[]): MusicCandidate {
-    const weights = candidates.map((c) => ({
-      candidate: c,
-      weight: Math.max(1, c.score),
-    }));
+    const weights = candidates.map((c) => ({ candidate: c, weight: Math.max(1, c.score) }));
     const totalWeight = weights.reduce((sum, w) => sum + w.weight, 0);
     let random = Math.random() * totalWeight;
     for (const w of weights) {
@@ -442,22 +381,15 @@ export class NightMusicPlugin implements Plugin {
   }
 
   // ────────────────────────────────────────────────────────────
-  // Dedup recording (called by Tier V scheduler after publish)
+  // Helpers
   // ────────────────────────────────────────────────────────────
 
-  async recordPublished(song: string, artist: string): Promise<void> {
-    const artistKey = `${DEDUP_ARTIST_PREFIX}${normalizeForMusicMatch(artist)}`;
-    const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(song, artist)}`;
-    await this.deps.kv.set(artistKey, String(Date.now()), ARTIST_TTL).catch(() => {});
-    await this.deps.kv.set(songKey, String(Date.now()), SONG_TTL).catch(() => {});
+  private normalizeStr(s: string): string {
+    return s.toLowerCase().replace(/[^a-z0-9]/gi, "").trim();
   }
 
-  // ────────────────────────────────────────────────────────────
-  // Hash helper (for dedup key + content ID)
-  // ────────────────────────────────────────────────────────────
-
   private hashSongArtist(song: string, artist: string): string {
-    const normalized = `${normalizeForMusicMatch(song)}|${normalizeForMusicMatch(artist)}`;
+    const normalized = `${this.normalizeStr(song)}|${this.normalizeStr(artist)}`;
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
       hash = ((hash << 5) - hash + normalized.charCodeAt(i)) | 0;
@@ -465,38 +397,20 @@ export class NightMusicPlugin implements Plugin {
     return `m${Math.abs(hash).toString(36)}`;
   }
 
-  // ────────────────────────────────────────────────────────────
-  // Minimal message format
-  // ────────────────────────────────────────────────────────────
+  private escapeHtml(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
 
   private buildMessage(song: string, artist: string): string {
-    // v13.2.5: Use HTML <code> tags instead of markdown backticks.
-    // The FinalPublisher sends with parse_mode: "HTML", so backticks
-    // would be displayed as literal text, not as monospace.
-    // <code> renders as monospace in Telegram HTML mode.
     return `<code>${this.escapeHtml(song)}</code>\n<code>${this.escapeHtml(artist)}</code>\n\n🌀 @ILIVIR3`;
   }
 
-  /** Escape HTML special characters for Telegram HTML parse mode. */
-  private escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
-  // ────────────────────────────────────────────────────────────
-  // normalize() — called by content pipeline (but we skip AI)
-  // ────────────────────────────────────────────────────────────
-
   normalize(raw: unknown): SourceItem {
-    // The fetch() already builds a complete SourceItem.
-    // This is here for the Plugin interface — just pass through.
     return raw as SourceItem;
   }
 
   validate(item: SourceItem): boolean {
-    return !!item.title && !!item.body;
+    return !!item.title && !!item.body && !!item.metadata?.audioUrl;
   }
 
   async health(): Promise<PluginStatus> {

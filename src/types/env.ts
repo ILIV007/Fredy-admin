@@ -27,6 +27,7 @@ export interface Env {
   GITHUB_TOKEN?: string;
   NEWSAPI_KEY?: string;
   NASA_API_KEY?: string;
+  JAMENDO_CLIENT_ID?: string; // v13.3.0: Night Music — Jamendo API
   WEBHOOK_SECRET?: string;
   DEBUG_TOKEN?: string;
 }

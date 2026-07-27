@@ -134,6 +134,7 @@ MANAGER_URL = "https://fredy-admin.iliv007-34b.workers.dev/Manager"
 #   NEWSAPI_KEY           — from https://newsapi.org
 #   NASA_API_KEY          — from https://api.nasa.gov
 #   GITHUB_TOKEN          — from https://github.com/settings/tokens
+#   JAMENDO_CLIENT_ID     — from https://developer.jamendo.com/v3.0 (Night Music)
 #
 # OPTIONAL (enhancement):
 #   GITHUB_TOKEN           — from https://github.com/settings/tokens (higher rate limit)

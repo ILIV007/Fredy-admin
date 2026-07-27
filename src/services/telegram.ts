@@ -69,6 +69,21 @@ export class TelegramService {
     });
   }
 
+  /** v13.3.0: Send an audio file by file_id or URL (for Night Music). */
+  async sendAudio(
+    chatId: number | string,
+    audio: string,
+    caption?: string,
+    extra: Readonly<Record<string, unknown>> = {},
+  ): Promise<TelegramResult<TelegramMessage>> {
+    return this.callApi<TelegramMessage>("sendAudio", {
+      chat_id: chatId,
+      audio,
+      caption,
+      ...extra,
+    });
+  }
+
   /** Send a video by file_id or URL. */
   async sendVideo(
     chatId: number | string,

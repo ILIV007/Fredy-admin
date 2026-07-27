@@ -198,37 +198,40 @@ export class FinalPublisher {
     // post (Song/Artist in mono + footer). Skip the UX layer entirely to avoid
     // adding a hook block and source URL link that would break the minimal format.
     if (content.pluginId === "night-music") {
-      // Direct path: use content.text as-is (it's already the final message).
+      // v13.3.0: Night Music sends AUDIO via sendAudio() — native Telegram playback.
+      // The plugin's text is the caption, and the audio URL is in content.media.url.
       const nightSentText = content.text;
       const channel = settings?.telegram?.targetChannel ?? "@ILIVIR3";
 
-      // v13.2.7: Add YouTube link preview so users can LISTEN to the song.
-      // The URL is set via link_preview_options.url (NOT in the visible text).
-      // Telegram fetches the YouTube page and shows a video preview above the text.
-      // Users tap the preview to play the song on YouTube.
-      // This is Zero-API — we just construct a search URL, no API key needed.
-      const songMeta = (content as ReadyContent & { raw?: { metadata?: { song?: string; artist?: string } } }).raw?.metadata;
-      const songName = songMeta?.song ?? "";
-      const artistName = songMeta?.artist ?? "";
-      const ytQuery = encodeURIComponent(`${songName} ${artistName}`.trim());
-      const ytUrl = `https://www.youtube.com/results?search_query=${ytQuery}`;
+      // Extract audio URL from content metadata (set by the plugin).
+      const songMeta = content.raw?.metadata as { audioUrl?: string } | undefined;
+      const audioUrl = songMeta?.audioUrl ?? content.media?.url ?? "";
 
-      // Send directly to Telegram — no hook, no footer, no source link.
-      // link_preview_options.url sets the preview URL WITHOUT showing it in text.
-      const directResult = await this.deps.tg.sendMessage(channel, nightSentText, {
-        parse_mode: "HTML",
-        link_preview_options: {
-          is_disabled: false,
-          url: ytUrl,
-          show_above_text: true,
-        },
-      } as Record<string, unknown>).catch(() => {
-        // Fallback: send without link preview if it fails.
-        return this.deps.tg.sendMessage(channel, nightSentText, {
-          parse_mode: "HTML",
-        }).catch((e2: unknown) => {
-          return { ok: false, description: e2 instanceof Error ? e2.message : String(e2) };
+      if (!audioUrl) {
+        // No audio URL — skip this night (per spec: never send text-only).
+        this.deps.logger.warn("source.fetch_error", {
+          plugin: "night-music", reason: "no_audio_url",
+          message: "[NIGHT_MUSIC] No audio URL — skipping (no text-only fallback)",
         });
+        return {
+          ok: false,
+          contentId: content.id,
+          category: content.category,
+          telegramMessageId: null,
+          telegramChatId: null,
+          publishedAt: Date.now(),
+          error: "Night Music: no audio URL available — skipping (no text-only fallback per spec)",
+          attempts: 0,
+          sentText: nightSentText,
+          sentMediaUrl: null,
+        };
+      }
+
+      // Send audio via sendAudio() — native playback in Telegram.
+      const directResult = await this.deps.tg.sendAudio(channel, audioUrl, nightSentText, {
+        parse_mode: "HTML",
+      }).catch((e: unknown) => {
+        return { ok: false, description: e instanceof Error ? e.message : String(e) };
       });
 
       const dr = directResult as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
@@ -239,6 +242,11 @@ export class FinalPublisher {
         if (this.deps.duplicateDetector) {
           await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
         }
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music", stage: "AUDIO_SENT",
+          messageId: dr.result.message_id,
+          message: "[NIGHT_MUSIC] AUDIO_SENT via sendAudio()",
+        });
         return {
           ok: true,
           contentId: content.id,
@@ -248,7 +256,7 @@ export class FinalPublisher {
           publishedAt: Date.now(),
           attempts: 0,
           sentText: nightSentText,
-          sentMediaUrl: null,
+          sentMediaUrl: audioUrl,
         };
       } else {
         return {
@@ -258,10 +266,10 @@ export class FinalPublisher {
           telegramMessageId: null,
           telegramChatId: null,
           publishedAt: Date.now(),
-          error: dr?.description ?? "Night Music direct publish failed",
+          error: dr?.description ?? "Night Music sendAudio() failed",
           attempts: 0,
           sentText: nightSentText,
-          sentMediaUrl: null,
+          sentMediaUrl: audioUrl,
         };
       }
     }

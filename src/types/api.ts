@@ -56,7 +56,7 @@ export interface SourceItem {
 
 /** Media attached to a source item. */
 export interface SourceMedia {
-  readonly type: "image" | "video" | "animation" | "none";
+  readonly type: "image" | "video" | "animation" | "none" | "audio";
   readonly url: string;
   readonly alt?: string;
   /** Where the media came from (provider, og:image, github-social, logo). */
