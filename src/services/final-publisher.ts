@@ -242,11 +242,17 @@ export class FinalPublisher {
           throw new Error(`HTTP ${audioRes.status}`);
         }
 
-        // v13.3.4: Content-Type check — must be audio/*.
+        // v13.3.5: Content-Type check — relaxed for Jamendo.
+        // Jamendo's CDN sometimes returns text/html Content-Type even for
+        // valid MP3 files (redirect pages, CDN edge behavior). Instead of
+        // rejecting based on Content-Type, we download and check the actual
+        // file size + first bytes (MP3 magic bytes: 0xFF 0xFB or ID3).
         const contentType = audioRes.headers.get("content-type") ?? "";
-        if (!contentType.includes("audio") && !contentType.includes("octet-stream") && !contentType.includes("binary")) {
-          throw new Error(`Invalid Content-Type: ${contentType}`);
-        }
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music", event: "NIGHT_MUSIC_AUDIO_DOWNLOAD",
+          contentType: contentType,
+          message: `[NIGHT_MUSIC] Content-Type: ${contentType}`,
+        });
 
         // v13.3.4: Content-Length check — reject files > 20MB.
         const contentLength = audioRes.headers.get("content-length");
@@ -265,10 +271,23 @@ export class FinalPublisher {
 
         audioBlob = await audioRes.arrayBuffer();
 
-        // v13.3.4: Post-download size check (in case Content-Length was missing).
+        // v13.3.5: Post-download size check (in case Content-Length was missing).
         const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
         if (audioBlob.byteLength > MAX_AUDIO_BYTES) {
           throw new Error(`Downloaded file too large: ${(audioBlob.byteLength / 1024 / 1024).toFixed(1)}MB > 20MB`);
+        }
+
+        // v13.3.5: Post-download magic-byte check — verify it's actually an MP3.
+        // MP3 files start with: 0xFF 0xFB (MPEG-1 Layer 3) or "ID3" (ID3 tag).
+        // If it starts with "<" (HTML), it's an error page, not audio.
+        const view = new Uint8Array(audioBlob);
+        const isMp3 = (view[0] === 0xFF && (view[1] === 0xFB || view[1] === 0xF3 || view[1] === 0xF2))
+          || (view[0] === 0x49 && view[1] === 0x44 && view[2] === 0x33); // "ID3"
+        const isHtml = view[0] === 0x3C; // "<"
+        if (!isMp3 && isHtml) {
+          // Downloaded an HTML page instead of audio — Jamendo returned an error.
+          const preview = new TextDecoder().decode(view.slice(0, 200));
+          throw new Error(`Downloaded HTML instead of MP3 (Jamendo error page): ${preview.slice(0, 100)}`);
         }
 
         this.deps.logger.info("source.fetch_success", {
