@@ -470,9 +470,19 @@ export class NightMusicPlugin implements Plugin {
   // ────────────────────────────────────────────────────────────
 
   private buildMessage(song: string, artist: string): string {
-    // v13.2.1: Minimal format — no header, no emoji, no blank line between song/artist.
-    // Just: `Song`\n`Artist`\n\n🌀 @ILIVIR3
-    return `\`${song}\`\n\`${artist}\`\n\n🌀 @ILIVIR3`;
+    // v13.2.5: Use HTML <code> tags instead of markdown backticks.
+    // The FinalPublisher sends with parse_mode: "HTML", so backticks
+    // would be displayed as literal text, not as monospace.
+    // <code> renders as monospace in Telegram HTML mode.
+    return `<code>${this.escapeHtml(song)}</code>\n<code>${this.escapeHtml(artist)}</code>\n\n🌀 @ILIVIR3`;
+  }
+
+  /** Escape HTML special characters for Telegram HTML parse mode. */
+  private escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   // ────────────────────────────────────────────────────────────
