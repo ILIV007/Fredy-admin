@@ -51,21 +51,18 @@ export const tierVDefaults: TierVConfig = {
     {
       id: "nasa-apod",
       enabled: true,
-      time: "23:00",
+      time: "00:00",
       providerId: "nasa",
       category: "V",
-      description: "NASA Astronomy Picture of the Day — nightly at 23:00",
+      description: "NASA Astronomy Picture of the Day — nightly at 00:00",
     },
     {
-      // v13.2.0: Night Music — 23:02 (after NASA, with ~2 min gap).
-      // The Tier V scheduler fires this at the exact time (no jitter).
-      // The 2-minute gap ensures NASA is published first, then Night Music.
       id: "night-music",
       enabled: true,
-      time: "23:02",
+      time: "00:03",
       providerId: "night-music",
       category: "V",
-      description: "Night Music — legendary song after NASA APOD (Zero-API RSS)",
+      description: "Night Music — CC audio track from Jamendo API after NASA APOD",
     },
   ],
 };

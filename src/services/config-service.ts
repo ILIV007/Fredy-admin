@@ -114,29 +114,49 @@ export class ConfigService {
     }
 
     // v13.2.2: Auto-migrate Tier V entries — add night-music if missing.
-    // Old configs only have nasa-apod; the new night-music entry needs to be added.
+    // v13.3.7: Also fix NASA time to 00:00 and Night Music time to 00:03.
+    // Old configs had NASA at 23:00 and Night Music at 23:02 — user wants 00:00/00:03.
     if (settings.tierV?.entries) {
-      const hasNightMusic = settings.tierV.entries.some((e: { id: string }) => e.id === "night-music");
+      let needsTierVUpdate = false;
+      const updatedTierVEntries = settings.tierV.entries.map((entry: Record<string, unknown>) => {
+        if (entry["id"] === "nasa-apod" && entry["time"] !== "00:00") {
+          needsTierVUpdate = true;
+          return { ...entry, time: "00:00", description: "NASA Astronomy Picture of the Day — nightly at 00:00" };
+        }
+        if (entry["id"] === "night-music") {
+          const needsTimeFix = entry["time"] !== "00:03";
+          const desc = entry["description"] as string | undefined;
+          const needsDescFix = !desc || desc.includes("legendary") || desc.includes("Zero-API");
+          if (needsTimeFix || needsDescFix) {
+            needsTierVUpdate = true;
+            return { ...entry, time: "00:03", description: "Night Music — CC audio track from Jamendo API after NASA APOD" };
+          }
+        }
+        return entry;
+      });
+
+      const hasNightMusic = updatedTierVEntries.some((e: Record<string, unknown>) => e["id"] === "night-music");
       if (!hasNightMusic) {
-        const oldCount = settings.tierV.entries.length;
+        needsTierVUpdate = true;
+        updatedTierVEntries.push({
+          id: "night-music",
+          enabled: true,
+          time: "00:03",
+          providerId: "night-music",
+          category: "V",
+          description: "Night Music — CC audio track from Jamendo API after NASA APOD",
+        });
+      }
+
+      if (needsTierVUpdate) {
         settings = {
           ...settings,
           tierV: {
             ...settings.tierV,
-            entries: [
-              ...settings.tierV.entries,
-              {
-                id: "night-music",
-                enabled: true,
-                time: "23:02",
-                providerId: "night-music",
-                category: "V",
-                description: "Night Music — legendary song after NASA APOD (Zero-API RSS)",
-              },
-            ],
+            entries: updatedTierVEntries as unknown as typeof settings.tierV.entries,
           },
         };
-        console.log(`[config] v13.2.2: Auto-migrated Tier V entries from ${oldCount} to ${settings.tierV.entries.length} (added night-music)`);
+        console.log(`[config] v13.3.7: Auto-migrated Tier V times (NASA→00:00, Night Music→00:03)`);
         await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
       }
     }
