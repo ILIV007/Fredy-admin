@@ -153,7 +153,17 @@ export class TimeGenerator {
   private buildCategoryList(distribution: Readonly<Record<Category, number>>): Category[] {
     const list: Category[] = [];
     // v13.0.8: A, B, and H are round-robin interleaved.
+    // v13.4.1: SHUFFLE the starting order of dayCategories so H doesn't
+    // always get the same segment position. Previously, with balanced mode
+    // (A=3, B=1, H=1), the order was always [A, B, H, A, C], which meant
+    // H always landed in segment 2 (around 12-14). Now the starting order
+    // is randomized daily, so H gets a different segment each day.
     const dayCategories: Category[] = ["A", "B", "H"];
+    // Shuffle starting order (Fisher-Yates on 3 elements).
+    for (let i = dayCategories.length - 1; i > 0; i--) {
+      const j = randomInt(0, i);
+      [dayCategories[i], dayCategories[j]] = [dayCategories[j]!, dayCategories[i]!];
+    }
     let dist = { ...distribution };
     let remaining = true;
     while (remaining) {

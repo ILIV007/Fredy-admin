@@ -54,7 +54,14 @@ export class TierVScheduler {
     if (entries.length === 0) return 0;
 
     const tz = settings.scheduler.timezone || "UTC";
-    const today = formatDateInZone(now, tz);
+
+    // v13.4.1: Tier V daily reset at 01:00 instead of 00:00.
+    // Posts at 00:00/00:03 belong to the PREVIOUS day's Tier V cycle.
+    // This prevents the dashboard from showing "published" status from
+    // midnight posts when the user checks during the day — instead,
+    // the current day's Tier V shows "pending" until the next midnight.
+    // The "Tier V date" = formatDateInZone(now - 1h, tz).
+    const tierVDate = formatDateInZone(now - 60 * 60 * 1000, tz);
 
     // Get current time in minutes-since-midnight (timezone-aware).
     const nowInTz = new Intl.DateTimeFormat("en-US", {
@@ -75,14 +82,13 @@ export class TierVScheduler {
       // Check if the time has been reached.
       if (nowMinutes < entryMinutes) continue; // not yet
 
-      // Check if already published today.
-      const sentKey = `${TIER_V_SENT_PREFIX}:${today}:${entry.id}`;
+      // v13.4.1: Use tierVDate (offset by -1h) for sent marker.
+      const sentKey = `${TIER_V_SENT_PREFIX}:${tierVDate}:${entry.id}`;
       const alreadySent = await this.deps.container.kv.get(sentKey).catch(() => null);
       if (alreadySent) continue;
 
-      // v13.3.12: Check attempt count — max 2 attempts per night per entry.
-      // After 2 failed attempts, give up and notify admin.
-      const attemptKey = `${TIER_V_ATTEMPT_PREFIX}:${today}:${entry.id}`;
+      // v13.4.1: Use tierVDate for attempt tracking too.
+      const attemptKey = `${TIER_V_ATTEMPT_PREFIX}:${tierVDate}:${entry.id}`;
       const attemptStr = await this.deps.container.kv.get(attemptKey).catch(() => null);
       const attemptCount = attemptStr ? parseInt(attemptStr, 10) : 0;
       if (attemptCount >= TIER_V_MAX_ATTEMPTS) {
@@ -287,15 +293,16 @@ export class TierVScheduler {
   }
 
   /** v12.1.3: Get published status for all Tier V entries (for dashboard).
+   *  v13.4.1: Uses tierVDate (offset by -1h) so dashboard shows correct status.
    * Returns a map of entryId → { published: boolean, publishedAt: number | null }. */
   async getPublishedStatus(settings: FredySettings, now: number): Promise<Record<string, { published: boolean; publishedAt: number | null }>> {
     const entries = settings.tierV?.entries ?? [];
     const result: Record<string, { published: boolean; publishedAt: number | null }> = {};
     const tz = settings.scheduler.timezone || "UTC";
-    const today = formatDateInZone(now, tz);
+    const tierVDate = formatDateInZone(now - 60 * 60 * 1000, tz); // v13.4.1: -1h offset
 
     for (const entry of entries) {
-      const sentKey = `${TIER_V_SENT_PREFIX}:${today}:${entry.id}`;
+      const sentKey = `${TIER_V_SENT_PREFIX}:${tierVDate}:${entry.id}`;
       const sentValue = await this.deps.container.kv.get(sentKey).catch(() => null);
       if (sentValue) {
         const publishedAt = Number(sentValue);
