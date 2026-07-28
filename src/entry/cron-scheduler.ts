@@ -127,20 +127,37 @@ async function runSchedulerWatch(container: Container, env: Env): Promise<void> 
       // ════════════════════════════════════════════════════════════
       // 0c. v12.0.2: ZERO-KV QUIET HOURS GUARD
       // ════════════════════════════════════════════════════════════
-      // Check quiet hours BEFORE any KV-heavy operation. During quiet
-      // hours (default 00:00-07:30), no post can publish and no window
-      // is active, so we skip ALL KV operations:
-      //   - processScheduledQueue (1+ KV reads)
-      //   - scheduler.tick() (1 plan read + potential writes)
-      //   - stats flush
+      // v13.3.10: CRITICAL FIX — Tier V (NASA/Night Music) must be allowed
+      // to publish DURING quiet hours if their scheduled time has been reached.
+      // Previously, the quiet hours guard returned early, which blocked Tier V
+      // from publishing at 00:00/00:03. Then at 07:30 (when quiet hours end),
+      // Tier V would see the entries as "due" and publish them — causing Tier V
+      // posts to appear at 07:30 instead of midnight.
       //
-      // v12.0.2: NO KV writes either — not even a skip marker.
-      // The dashboard computes quiet-hours status live from settings +
-      // current time (cronOptimization.currentState). No stored marker.
-      //
-      // The QuietHoursChecker handles midnight-crossing periods
-      // (e.g., 23:00-07:30) correctly.
+      // Now: Tier V is checked BEFORE the quiet hours guard. If Tier V has a
+      // post due (time reached + not yet published today), it publishes
+      // immediately — even during quiet hours. The normal scheduler still
+      // respects quiet hours.
       const isQuiet = container.quietHoursChecker?.isQuietHours(startTime, settings.scheduler) ?? false;
+
+      // ── 0d. v13.3.10: Check Tier V BEFORE quiet hours guard ────
+      // Tier V has fixed schedules (00:00, 00:03) that may fall within
+      // quiet hours. These must publish at their exact time regardless
+      // of quiet hours — they are scheduled content, not window-based.
+      try {
+        if (settings) {
+          const tierVResult = await container.tierVScheduler.checkAndPublish(settings, startTime);
+          if (tierVResult > 0) {
+            didWork = true;
+            log.push(`🟣 Tier V: published ${tierVResult} scheduled post(s)`);
+          }
+        }
+      } catch (error) {
+        log.push(`❌ Tier V error: ${error instanceof Error ? error.message : String(error)}`);
+        didWork = true;
+      }
+
+      // Now apply quiet hours guard for the NORMAL scheduler.
       if (isQuiet) {
         const tz = settings.scheduler.timezone || "UTC";
         const localTime = new Intl.DateTimeFormat("en-US", {
@@ -180,21 +197,10 @@ async function runSchedulerWatch(container: Container, env: Env): Promise<void> 
     }
     // "No due slots" is the normal case — silent, no log entry, no KV write.
 
-    // ── 2b. v12.0.9: Check Tier V scheduled content (NASA APOD, etc) ────
-    //  Tier V uses fixed schedules (no jitter, no window). Checked after the
-    //  normal scheduler tick so both systems coexist.
-    try {
-      if (settings) {
-        const tierVResult = await container.tierVScheduler.checkAndPublish(settings, startTime);
-        if (tierVResult > 0) {
-          didWork = true;
-          log.push(`🟣 Tier V: published ${tierVResult} scheduled post(s)`);
-        }
-      }
-    } catch (error) {
-      log.push(`❌ Tier V error: ${error instanceof Error ? error.message : String(error)}`);
-      didWork = true;
-    }
+    // v13.3.10: Tier V check moved BEFORE the quiet hours guard (above).
+    // The old Tier V check here (after the scheduler tick) was inside the
+    // non-quiet-hours block, which meant it never ran during quiet hours.
+    // This caused Tier V posts to be delayed until 07:30 (when quiet hours end).
 
     // ── 3. Flush batched stats if we published ────
     if (result.fired) {

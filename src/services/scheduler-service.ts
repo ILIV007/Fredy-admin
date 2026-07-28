@@ -551,15 +551,31 @@ export class SchedulerService {
     }
 
     // 1. Try to dequeue ready content for this category.
-    // v13.1.5: CRITICAL FIX — dedup check on dequeue.
-    // Content sitting in the queue can become stale (duplicate of something
-    // published between enqueue and dequeue). Without this check, the
-    // dequeued content would be published WITHOUT dedup verification,
-    // causing duplicate posts.
+    // v13.3.11: CRITICAL FIX — only dequeue content from the PREFERRED provider.
+    // Previously, the queue could contain content from ANY provider (enqueued
+    // by the background provider refresh). When the scheduler dequeued it, the
+    // post would come from a DIFFERENT provider than what the plan assigned.
+    // Now: we check if the dequeued content's pluginId matches the preferred
+    // provider. If it doesn't match, we skip it and try fresh fetch instead.
     for (let attempt = 0; attempt < 5; attempt++) {
       const queued = await this.deps.contentQueue.dequeue(slot.category);
       if (!queued) break;
       const queuedLang = queued.content.language;
+
+      // v13.3.11: If we have a preferred provider, only use queued content
+      // from that exact provider — not from a random other provider.
+      if (preferredProvider && queued.content.pluginId !== preferredProvider) {
+        this.deps.logger.info("scheduler.skip", {
+          slotIndex: slot.index,
+          contentId: queued.content.id,
+          reason: "wrong_provider_in_queue",
+          queuedProvider: queued.content.pluginId,
+          preferredProvider: preferredProvider,
+          message: `Queued content is from "${queued.content.pluginId}" but plan assigned "${preferredProvider}" — skipping queue, trying fresh fetch`,
+        });
+        continue; // Skip this queued item — wrong provider.
+      }
+
       if (queuedLang === expectedLang || queuedLang === settings.language.default) {
         // v13.1.5: Dedup check BEFORE returning queued content.
         // The content passed dedup at enqueue time, but the dedup landscape
