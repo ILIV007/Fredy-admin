@@ -32,6 +32,9 @@ import { formatDateInZone } from "../primitives/time";
 
 const TIER_V_SENT_PREFIX = "fredy:tierV:sent";
 const TIER_V_SENT_TTL = 48 * 3600; // 48 hours
+const TIER_V_ATTEMPT_PREFIX = "fredy:tierV:attempt"; // v13.3.12: retry tracking
+const TIER_V_ATTEMPT_TTL = 6 * 3600; // 6 hours — enough for 2 attempts in one night
+const TIER_V_MAX_ATTEMPTS = 2; // v13.3.12: max 2 attempts per entry per night
 
 export interface TierVSchedulerDeps {
   readonly container: Container;
@@ -65,7 +68,7 @@ export class TierVScheduler {
     for (const entry of entries) {
       if (!entry.enabled) continue;
 
-      // Parse the fixed time (e.g., "22:30" → 1350 minutes).
+      // Parse the fixed time (e.g., "00:03" → 3 minutes).
       const [eH, eM] = entry.time.split(":").map(Number);
       const entryMinutes = (eH ?? 0) * 60 + (eM ?? 0);
 
@@ -77,13 +80,25 @@ export class TierVScheduler {
       const alreadySent = await this.deps.container.kv.get(sentKey).catch(() => null);
       if (alreadySent) continue;
 
+      // v13.3.12: Check attempt count — max 2 attempts per night per entry.
+      // After 2 failed attempts, give up and notify admin.
+      const attemptKey = `${TIER_V_ATTEMPT_PREFIX}:${today}:${entry.id}`;
+      const attemptStr = await this.deps.container.kv.get(attemptKey).catch(() => null);
+      const attemptCount = attemptStr ? parseInt(attemptStr, 10) : 0;
+      if (attemptCount >= TIER_V_MAX_ATTEMPTS) {
+        // Already tried max times — skip silently (admin was already notified).
+        continue;
+      }
+
       // Due! Fetch content from the provider and publish.
       this.deps.container.logger.info("tierV.publish_start", {
         entryId: entry.id,
         providerId: entry.providerId,
         scheduledTime: entry.time,
         nowTime: nowInTz,
-        message: `Tier V entry "${entry.id}" is due — publishing`,
+        attempt: attemptCount + 1,
+        maxAttempts: TIER_V_MAX_ATTEMPTS,
+        message: `Tier V entry "${entry.id}" is due — attempt ${attemptCount + 1}/${TIER_V_MAX_ATTEMPTS}`,
       });
 
       try {
@@ -92,22 +107,49 @@ export class TierVScheduler {
           published++;
           // Mark as sent so we don't republish today.
           await this.deps.container.kv.set(sentKey, String(now), TIER_V_SENT_TTL).catch(() => {});
+          // Clear attempt counter (no longer needed).
+          await this.deps.container.kv.delete(attemptKey).catch(() => {});
           this.deps.container.logger.info("tierV.publish_success", {
             entryId: entry.id,
             contentId: result.contentId,
             messageId: result.telegramMessageId,
           });
         } else {
+          // Failed — increment attempt counter.
+          const newAttemptCount = attemptCount + 1;
+          await this.deps.container.kv.set(attemptKey, String(newAttemptCount), TIER_V_ATTEMPT_TTL).catch(() => {});
+
           this.deps.container.logger.warn("tierV.publish_failed", {
             entryId: entry.id,
             error: result.error,
+            attempt: newAttemptCount,
+            maxAttempts: TIER_V_MAX_ATTEMPTS,
+            willRetry: newAttemptCount < TIER_V_MAX_ATTEMPTS,
           });
+
+          // v13.3.12: If this was the last attempt, notify admin.
+          if (newAttemptCount >= TIER_V_MAX_ATTEMPTS) {
+            await this.notifyAdminOfFailure(entry, result.error ?? "unknown error", nowInTz).catch(() => {});
+          }
         }
       } catch (error) {
+        // Exception — increment attempt counter.
+        const newAttemptCount = attemptCount + 1;
+        await this.deps.container.kv.set(attemptKey, String(newAttemptCount), TIER_V_ATTEMPT_TTL).catch(() => {});
+
         this.deps.container.logger.error("tierV.publish_error", {
           entryId: entry.id,
           error: error instanceof Error ? error.message : String(error),
+          attempt: newAttemptCount,
+          maxAttempts: TIER_V_MAX_ATTEMPTS,
+          willRetry: newAttemptCount < TIER_V_MAX_ATTEMPTS,
         });
+
+        // If this was the last attempt, notify admin.
+        if (newAttemptCount >= TIER_V_MAX_ATTEMPTS) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          await this.notifyAdminOfFailure(entry, errMsg, nowInTz).catch(() => {});
+        }
       }
     }
 
@@ -182,6 +224,34 @@ export class TierVScheduler {
     }
 
     return pubResult;
+  }
+
+  /** v13.3.12: Notify admin when a Tier V entry fails after all retry attempts. */
+  private async notifyAdminOfFailure(
+    entry: TierVEntry,
+    error: string,
+    nowTime: string,
+  ): Promise<void> {
+    const container = this.deps.container;
+    const adminId = Number(container.env.ADMIN_ID ?? "0");
+    if (adminId <= 0 || !container.tg) return;
+
+    const isNightMusic = entry.providerId === "night-music";
+    const emoji = isNightMusic ? "🎵" : "🪐";
+
+    await container.tg.sendMessage(adminId, [
+      ``,
+      `<b>━━━ ${emoji} TIER V FAILED ━━━</b>`,
+      ``,
+      ``,
+      `<blockquote>🏷️ <b>Entry:</b> ${entry.id}</blockquote>`,
+      `<blockquote>📡 <b>Provider:</b> ${entry.providerId}</blockquote>`,
+      `<blockquote>⏰ <b>Scheduled:</b> ${entry.time} (fixed)</blockquote>`,
+      `<blockquote>🕐 <b>Failed at:</b> ${nowTime}</blockquote>`,
+      `<blockquote>❌ <b>Error:</b> ${error}</blockquote>`,
+      `<blockquote>🔄 <b>Attempts:</b> ${TIER_V_MAX_ATTEMPTS}/${TIER_V_MAX_ATTEMPTS} (exhausted)</blockquote>`,
+      `<blockquote>⏭️ <b>Action:</b> Skipped for tonight — will retry tomorrow.</blockquote>`,
+    ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
 
   /**

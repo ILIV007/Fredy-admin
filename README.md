@@ -1,227 +1,289 @@
-# Fredy v13.0.9
+# Fredy v13.3.11
 
 > **Autonomous AI-powered Technology News Hub for Telegram channels.**
-> Built on Cloudflare Workers Free Tier. Tier H Hardware Headlines + Quality Filter + Novelty Score + Random Window Shuffling.
+> Built on Cloudflare Workers Free Tier. Zero-KV quiet hours, Tier V scheduled content, Jamendo Night Music, 10-stage quality pipeline, weighted provider selection, and 488 passing tests.
 
-[![Version](https://img.shields.io/badge/version-13.0.9-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-13.3.11-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-481%20passing-brightgreen)](./scripts)
+[![Tests](https://img.shields.io/badge/tests-488%20passing-brightgreen)](./scripts)
+[![Channel](https://img.shields.io/badge/Telegram-@ILIVIR3-2AABEE)](https://t.me/ILIVIR3)
 
 ---
 
 ## Overview
 
-Fredy is a production-grade, serverless content publishing platform that automatically fetches, processes, and publishes high-quality technology news to Telegram channels. It evolved from a Developer Content Bot into a complete **Technology News Hub** with the introduction of Tier H (Hardware & Technology Headlines).
+Fredy is a production-grade, serverless content publishing platform that automatically fetches, processes, and publishes high-quality technology news to Telegram channels. It evolved from a Developer Content Bot into a complete **Technology News Hub** with Tier H (Hardware & Technology Headlines) and Tier V (Scheduled Content — NASA APOD + Night Music).
 
 ### What Makes Fredy Different
 
-- **23 Content Source Providers** across 5 tiers (S/A/B/H/V) — RSS, REST API, GraphQL, JSON
-- **Tier H Hardware News** — Ars Technica, Tom's Hardware, TechPowerUp with Quality Filter (0-100 scoring, threshold 70)
+- **25 Content Source Providers** across 6 tiers (S/A/B/H/V/Legacy) — RSS, REST API, GraphQL, JSON
+- **Tier H Hardware News** — Ars Technica, Tom's Hardware, TechPowerUp with Quality Filter (0-100 scoring, deal/promo rejection, clickbait hard-reject)
+- **Tier V Scheduled Content** — NASA APOD at 00:00 + Night Music (Jamendo CC audio) at 00:03
+- **Night Music** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 10-stage quality pipeline, 180-day song dedup + 30-day artist cooldown
 - **Novelty Score** — prevents same news from different providers being published within 48h
-- **Truly Random Wildcard** — daily wildcard post picks from ALL 17 active APIs with zero filter
-- **Random Window Shuffling** — posting windows shuffle daily, no permanent gaps
+- **Weighted Provider Selection** — `selectProviderWeighted()` uses config weights (e.g., GitHub Releases weight=100 > StackExchange weight=80)
+- **Equal-Segment Schedule** — day divided into N equal segments, each post gets its own segment with center-bias sampling (v13.1.2)
+- **Truly Random Wildcard** — daily wildcard post picks from ALL active APIs (never picks H slots)
 - **6 AI Models** — Gemini (primary) + OpenRouter (fallback, 6 free models)
-- **Zero API Keys Required** for basic operation (GitHub, Dev.to, HackerNews, StackExchange, RSS feeds)
-- **481 Passing Tests** across 7 test suites
+- **Zero-KV Quiet Hours** — 0 KV reads + 0 KV writes during quiet hours (except Tier V)
+- **488 Passing Tests** across 7 test suites
 
 ---
 
-## Key Features
+## Telegram Channel
 
-### Content Sources (23 providers)
-
-| Tier | Providers | Refresh | Type |
-|------|-----------|---------|------|
-| S (Core) | GitHub, GitHub Releases, GitHub Trending, GitHub Events, Dev.to, HackerNews (Algolia) | 2h | API |
-| A (Important) | Stack Overflow, Cloudflare Blog, Hugging Face Blog, Product Hunt | 4h | RSS/API |
-| B (Supporting) | XKCD, Reddit, GitHub Security, OpenAI News | 6h | RSS/API |
-| H (Hardware) | Ars Technica, Tom's Hardware, TechPowerUp | 4h | RSS |
-| V (Scheduled) | NASA APOD | Nightly 23:00 | API |
-| Legacy | AnandTech, Reddit (old), HackerNews (old), News, Joke, Wikimedia | — | Disabled |
-
-### Tier H Quality Filter
-
-Every Tier H article receives a quality score (0-100) BEFORE entering the AI pipeline:
-
-- **Positive signals** (+15 each): RTX, Ryzen, Apple Silicon, benchmark, AI hardware, TSMC, DDR5, PCIe Gen5, etc.
-- **Negative signals** (-15 each): minor driver, buying guide, opinion, firmware patch, deal, etc.
-- **Recent bonus** (+10): article <24h old
-- **Launch word bonus** (+10): title contains "announced", "released", "launch"
-- **Trend bonus** (+20): multiple providers covering same event
-- **Clickbait penalty** (-25): "Everything you need to know...", "Best..."
-
-Default threshold: **70** (configurable 50-90).
-
-### Novelty Score
-
-Prevents same NEWS from different providers:
-- Extracts hardware product names (RTX 5090, Ryzen 9, M4 Ultra) as "trend keys"
-- KV-backed tracking with 48h TTL
-- If same trend key already published → rejected (unless quality is 15+ points higher)
-- Different from Dedup: Dedup blocks same article (URL/hash). Novelty blocks same NEWS.
-
-### Strategy Modes
-
-| Mode | A/B/C Posts | Tier H Posts | Total |
-|------|-------------|--------------|-------|
-| Minimal | 4 | 0 | 4 |
-| Conservative | 9 | 0 (every 2 days) | 9 |
-| Balanced (default) | 9 | +1 | 10 |
-| Active | 13 | +2 | 15 |
-| Aggressive | 13 | +3 | 16 |
-| Turbo | 13 | +4 | 17 |
-
-All H-posts-per-mode values are **fully configurable** from the Manager — no redeploy needed.
-
-### Random Window Shuffling
-
-- 8 posting windows cover the full day (08:00-22:00)
-- Windows are **shuffled** each day — no permanent gaps
-- Multiple posts can share a window when post count > window count
-- MinGap enforced between posts (default 90 min)
+**[@ILIVIR3](https://t.me/ILIVIR3)** — Live channel powered by Fredy.
 
 ---
 
 ## Architecture
 
 ```
-Layer 4 (Entry)    → src/entry/ — HTTP handler, cron triggers, Manager dashboard
-Layer 3 (Orchestrators) → src/orchestrators/ — Admin, Scheduler
-Layer 2 (Services)  → src/services/ — 54 files, ~11k LOC
-Layer 1 (Primitives) → src/primitives/, src/types/ — Pure functions, types
+┌─────────────────────────────────────────────────────────────────┐
+│                    Cloudflare Worker (Free Tier)                  │
+│                                                                   │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │  Layer 1     │  │  Layer 2      │  │  Layer 3                │ │
+│  │  Scheduler   │  │  Provider     │  │  Maintenance            │ │
+│  │  (20-min     │  │  Refresh      │  │  (daily at midnight)    │ │
+│  │   cron)      │  │  (2h cron)    │  │                         │ │
+│  └──────┬───────┘  └──────┬───────┘  └─────────────────────────┘ │
+│         │                  │                                      │
+│  ┌──────▼──────────────────▼──────────────────────────────────┐  │
+│  │                    Content Pipeline                         │  │
+│  │  Fetch → Normalize → Freshness → Dedup → Popularity →      │  │
+│  │  Rank → AI (Gemini/OpenRouter) → Quality → Format →        │  │
+│  │  Media → Telegram → History → Dedup Record                 │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Tier V (Fixed Schedule)                                     │ │
+│  │  00:00 NASA APOD (image + explanation)                      │ │
+│  │  00:03 Night Music (Jamendo CC audio via sendAudio)         │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+│  ┌─────────────────┐  ┌──────────────┐  ┌────────────────────┐  │
+│  │  Cloudflare KV  │  │  Telegram    │  │  Admin Manager     │  │
+│  │  (storage)      │  │  Bot API     │  │  Dashboard (/Manager)│ │
+│  └─────────────────┘  └──────────────┘  └────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-### Content Pipeline (15 stages)
-
-```
-Fetch → Normalize → Enrich → Tag → Validate → Freshness → Dedup
-→ ContentEnricher → CategoryResolve → Tier H Filter → Novelty Score
-→ CandidateRanker → AI Generate → Quality Score → Format → Enqueue
-```
-
-### Three-Layer Cron
-
-1. **Layer 1** (Cloudflare Cron, every 20 min): Tick + publish due slots
-2. **Layer 2** (External cron-job.org, every 2h): Provider refresh + queue maintenance
-3. **Layer 3** (Cloudflare Cron, daily midnight): Cleanup + stats
 
 ---
 
-## Getting Started
+## Content Providers
 
-### Prerequisites
+### Tier S — Core (refresh every 2h)
+| Provider | Category | Source | Images |
+|----------|----------|--------|--------|
+| GitHub Releases | A | REST API | ✅ |
+| GitHub Events | A | REST API | ❌ |
+| GitHub Trending | A | REST API | ✅ |
+| GitHub Topic Search | A | REST API | ✅ |
+| Dev.to | A | REST API | ✅ |
+| Hacker News (Algolia) | B | REST API | ❌ |
+| NASA APOD | V (Tier V) | REST API | ✅ |
 
-- Cloudflare Workers account (Free tier works)
-- Telegram Bot Token (via @BotFather)
-- Gemini API Key (free tier: 15 RPM, 1,500/day)
-- Optional: OpenRouter API Key (free models available)
+### Tier A — Important (refresh every 6h)
+| Provider | Category | Source | Images |
+|----------|----------|--------|--------|
+| Cloudflare Blog | B | RSS | ❌ |
+| Hugging Face Blog | A | RSS | ❌ |
+| Stack Overflow | A | REST API | ✅ |
+| Product Hunt | B | RSS | ✅ |
 
-### Installation
+### Tier B — Supporting (refresh every 12h)
+| Provider | Category | Source | Images |
+|----------|----------|--------|--------|
+| GitHub Security | A | REST API | ❌ |
+| OpenAI News | B | RSS | ❌ |
+| Reddit Programming | A | Reddit JSON | ❌ |
+| XKCD | C | JSON | ✅ |
 
-```bash
-# Clone the repository
-git clone https://github.com/ilivir3/fredy.git
-cd fredy
+### Tier H — Hardware Headlines (refresh every 4h)
+| Provider | Category | Source | Images |
+|----------|----------|--------|--------|
+| Ars Technica | H | RSS | ✅ |
+| Tom's Hardware | H | RSS | ✅ |
+| TechPowerUp | H | RSS | ✅ |
 
-# Install dependencies
-bun install
+### Tier V — Scheduled Content (fixed schedule)
+| Provider | Time | Description |
+|----------|------|-------------|
+| NASA APOD | 00:00 | Astronomy Picture of the Day |
+| Night Music | 00:03 | CC audio from Jamendo API via `sendAudio()` |
 
-# Configure secrets
-cp .env.example .env
-# Edit .env with your BOT_TOKEN, GEMINI_API_KEY, etc.
+---
 
-# Push schema to database
-bun run db:push
+## Night Music (Tier V)
 
-# Run tests
-bun run test
+Every night at 00:03, Fredy publishes one Creative Commons audio track from the Jamendo API.
 
-# Deploy to Cloudflare Workers
-wrangler deploy
+### How it works
+
+1. Fetch 100 tracks from Jamendo API (`order=popularity_week`)
+2. Run a 10-stage quality pipeline:
+   - Stage 1: Required fields (title, artist, audio URL)
+   - Stage 2: Must be downloadable
+   - Stage 3: Duration 2-10 minutes
+   - Stage 4: Reject low-quality titles (demo, karaoke, live, remix, ASMR, etc.)
+   - Stage 5: Artist cooldown (30-day KV dedup)
+   - Stage 6: Song cooldown (180-day KV dedup, normalized artist+title)
+   - Stage 7: Prefer tracks with album artwork
+   - Stage 8: Weighted quality score (0-100, reject < 40)
+   - Stage 9: Weighted random selection
+   - Stage 10: Record publication in KV (only after successful upload)
+3. Worker downloads the MP3 (with Content-Type + 20MB size check)
+4. Uploads binary to Telegram via `sendAudio()` multipart/form-data
+5. Admin PM receives a copy of the audio post
+
+### Post format
 ```
+Song Name              (monospace)
+Artist Name            (monospace)
+
+🌀 @ILIVIR3
+```
+
+### KV usage
+- `fredy:music:artist:<normalized>` — 30-day TTL
+- `fredy:music:song:<hash>` — 180-day TTL
+- Only 2 KV writes per night (recorded AFTER successful upload)
+
+---
+
+## Schedule System
+
+### Normal Posts (A/B/C/H)
+- Day divided into N equal segments (N = total post count)
+- Each post gets a random time in the middle 60% of its segment
+- Daily offset (0-30 min) shifts segment boundaries
+- Quiet hours (00:00-07:30) = zero KV operations
+- 10 posting windows (08:00-22:00, overlapping)
+
+### Tier V (Fixed Schedule)
+- No jitter — fires at exact configured time
+- Checked BEFORE quiet hours guard (so 00:00/00:03 posts fire during quiet hours)
+- Independent from strategy engine
+
+### Strategy Modes
+| Mode | A | B | C | H | Total |
+|------|---|---|---|---|-------|
+| Minimal | 2 | 1 | 0 | 0 | 3 |
+| Conservative | 2 | 1 | 1 | 1 | 5 |
+| Balanced | 3 | 1 | 1 | 1 | 6 |
+| Active | 4 | 2 | 1 | 2 | 9 |
+| Aggressive | 5 | 3 | 1 | 3 | 12 |
+| Turbo | 6 | 4 | 1 | 4 | 15 |
+
+---
+
+## Quality Pipeline
+
+### Content Pipeline (15 stages)
+1. Source Fetch → 2. Normalize → 3. Freshness Filter → 4. Dedup (3-layer: canonical + URL + hash) → 5. Popularity Filter → 6. Candidate Ranking → 7. Top-N Selection → 8. Language Detection → 9. AI Rewrite (Gemini/OpenRouter) → 10. Response Parse → 11. Quality Engine → 12. Content Validator → 13. Media Handler → 14. Telegram Publish → 15. Dedup Record
+
+### Tier H Quality Filter
+- **Positive signals**: GPU/CPU launches, AI hardware, cybersecurity, self-driving, quantum, cloud, etc.
+- **Negative signals**: buying guides, deals, discounts, "save $", black friday, opinion articles, minor driver updates, etc.
+- **Clickbait hard-reject** (penalty = -100): "Everything you need to know", "Best...", "Deal:", "Save $..."
+- **Threshold**: 50 (lowered from 70 to accept broader tech news)
+
+---
+
+## Security
+
+### Manager Dashboard
+- Protected by `MANAGER_TOKEN` (dedicated secret, separate from `DEBUG_TOKEN`)
+- Fallback to `DEBUG_TOKEN` for backward compatibility
+- Supports: Authorization header, query parameter, cookie
+
+### Telegram Bot Admin Panel
+- Admin-only access (verified by `ADMIN_ID`)
+- Manager Dashboard button includes token in URL for direct access
 
 ---
 
 ## Configuration
 
-All configuration is stored in Cloudflare KV and editable via the Manager dashboard or Telegram bot — **no redeploy needed**.
-
-### Key Settings
-
-- **Strategy**: mode (balanced/active/turbo/etc), weekly themes, language
-- **Scheduler**: posting windows, quiet hours, timezone, min gap
-- **Categories**: enable/disable per category, daily limits, weights
-- **Tier H**: enabled, threshold, extra H posts per mode, cooldown, retry count
-- **AI**: provider (Gemini/OpenRouter), model, quality threshold, timeout
-- **Telegram**: target channel, parse mode, link preview mode
-
----
-
-## Telegram Bot Commands
-
-```
-/start     — Register as admin
-/menu      — Main menu (inline keyboard)
-/plan      — View today's publishing plan
-/stats     — View publishing statistics
-/tiers     — View all providers grouped by tier
-/help      — Help
-```
-
----
-
-## Manager Dashboard
-
-Access via your Worker URL: `https://your-worker.workers.dev/Manager`
-
-Features:
-- **Dashboard**: real-time metrics, queue depth, provider health
-- **Strategy**: switch modes, view weekly schedule, regenerate plan
-- **Scheduler**: view daily plan (sorted by time), fire next slot, debug
-- **Post to Channel**: manual publish from any provider (Tier S/A/B/H/V)
-- **Plugins**: enable/disable providers, view health + last fetch
-- **Statistics**: 7-day charts, category distribution, quality scores, heatmap
-- **Debug**: runtime config, tick logs, pipeline logs, dedup diagnostics
-- **Settings**: all configuration sections
-
----
-
-## Testing
-
+### Required Secrets
 ```bash
-# Run all 7 test suites (481 tests)
-bun run test
+npx wrangler secret put ADMIN_ID        # Your Telegram numeric user ID
+npx wrangler secret put BOT_TOKEN        # From @BotFather
+npx wrangler secret put GEMINI_API_KEY   # From https://aistudio.google.com/apikey
+npx wrangler secret put OPENROUTER_API_KEY # From https://openrouter.ai/keys
+npx wrangler secret put CRON_KEY         # Random string for cron auth
+```
 
-# Individual suites
-bun run test:scheduler     # 87 tests — time generation, slot firing
-bun run test:strategy      # 203 tests — plan generation, themes, wildcard
-bun run test:pipeline      # 41 tests — content pipeline
-bun run test:dedup         # 19 tests — duplicate detection
-bun run test:registry      # 65 tests — provider config consistency
-bun run test:tier-h        # 40 tests — Tier H quality filter
-bun run test:novelty       # 26 tests — Novelty score
+### Recommended Secrets
+```bash
+npx wrangler secret put MANAGER_TOKEN    # Manager dashboard security
+npx wrangler secret put WEBHOOK_SECRET   # Webhook verification
+npx wrangler secret put MANAGER_URL      # Manager URL (e.g., https://your-worker.workers.dev/Manager)
+```
+
+### Optional Secrets
+```bash
+npx wrangler secret put NASA_API_KEY       # NASA APOD
+npx wrangler secret put GITHUB_TOKEN       # Higher GitHub API rate limit
+npx wrangler secret put JAMENDO_CLIENT_ID  # Night Music (Jamendo API)
 ```
 
 ---
 
 ## Deployment
 
+### Quick Start
 ```bash
-# Set secrets
-wrangler secret put BOT_TOKEN
-wrangler secret put GEMINI_API_KEY
-wrangler secret put ADMIN_ID
-wrangler secret put CRON_KEY
+# 1. Install dependencies
+bun install
 
-# Deploy
-wrangler deploy
+# 2. Set secrets (see Configuration above)
+npx wrangler secret put BOT_TOKEN
+# ... repeat for each secret
 
-# Set up external cron (cron-job.org)
-# URL: https://your-worker.workers.dev/internal/provider-refresh?key=YOUR_CRON_KEY
-# Every 2 hours
+# 3. Deploy
+npx wrangler deploy
+
+# 4. Set webhook (optional, for bot commands)
+bash scripts/set-webhook.sh
+
+# 5. Run tests
+bun run test
 ```
+
+### Environment Variables (wrangler.toml)
+```toml
+[vars]
+DEFAULT_AI_PROVIDER = "gemini"
+DEFAULT_LANGUAGE = "fa"
+SCHEDULER_TIMEZONE = "Asia/Tehran"
+SCHEDULE_SLOTS = "09:00,13:00,18:00,22:00"
+SCHEDULE_JITTER_MINUTES = "30"
+MANAGER_URL = "https://your-worker.workers.dev/Manager"
+```
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+bun run test
+
+# Individual suites
+bun run test:scheduler    # 87 tests — time generation, slot firing, quiet hours
+bun run test:strategy     # 191+ tests — plan gen, weekly themes, wildcard
+bun run test:pipeline     # 41 tests — content pipeline 15-stage flow
+bun run test:dedup        # 28 tests — 3-layer dedup (canonical + URL + hash)
+bun run test:registry     # 80 tests — 25 providers config consistency
+bun run test:tier-h       # 35 tests — quality scoring, deal/promo rejection
+bun run test:novelty      # 26 tests — hardware news trend detection
+```
+
+**Total: 488 tests passing across 7 suites.**
 
 ---
 
@@ -230,19 +292,32 @@ wrangler deploy
 ```
 Fredy-admin/
 ├── src/
-│   ├── entry/           # HTTP handlers (manager, tick, cron, webhook)
-│   ├── orchestrators/    # Admin + Scheduler orchestrators
-│   ├── services/         # 54 service files (~11k LOC)
+│   ├── core/              # Constants, config sections, provider config
+│   ├── services/          # 40+ service modules
+│   │   ├── scheduler-service.ts      # Main scheduler (fireSlot, acquireContent)
+│   │   ├── strategy-engine.ts        # Plan generation, provider selection
+│   │   ├── time-generator.ts         # Equal-segment schedule algorithm
+│   │   ├── final-publisher.ts        # Telegram publish (sendPhoto/sendAudio/sendMessage)
+│   │   ├── duplicate-detector.ts     # 3-layer dedup (canonical + URL + hash)
+│   │   ├── tier-h-filter.ts          # Quality scoring for hardware news
+│   │   ├── tier-v-scheduler.ts       # Fixed-schedule content (NASA, Night Music)
+│   │   └── ...
 │   ├── plugins/
-│   │   ├── sources/      # 23 content source plugins
-│   │   └── ai/           # 2 AI providers (Gemini, OpenRouter)
-│   ├── admin/            # Telegram bot screens + commands
-│   ├── core/             # Config, constants, providers config
-│   ├── types/            # TypeScript type definitions
-│   └── primitives/       # Pure utility functions
-├── scripts/              # Test suites + packaging
-├── docs/                 # Architecture docs
-├── wrangler.toml         # Cloudflare Workers config
+│   │   ├── sources/       # 25 content source plugins
+│   │   │   ├── nasa/                 # NASA APOD (Tier V)
+│   │   │   ├── night-music/          # Jamendo CC audio (Tier V)
+│   │   │   ├── ars-technica/         # RSS (Tier H)
+│   │   │   ├── toms-hardware/        # RSS (Tier H)
+│   │   │   ├── techpowerup/          # RSS (Tier H)
+│   │   │   ├── github/               # REST API (Tier S)
+│   │   │   └── ...
+│   │   └── ai/            # AI providers (Gemini, OpenRouter)
+│   ├── admin/             # Telegram bot admin panel
+│   ├── entry/             # Cloudflare Workers entry points
+│   └── types/             # TypeScript type definitions
+├── scripts/               # Test suites + deployment scripts
+├── docs/                  # Architecture docs, soul.md, guidelines
+├── wrangler.toml          # Cloudflare Workers config
 └── package.json
 ```
 
@@ -250,10 +325,18 @@ Fredy-admin/
 
 ## License
 
-MIT License — see [LICENSE](./LICENSE)
+MIT License — Built for the developer community by **@ILIVIR3**.
 
 ---
 
-## Author
+## Links
 
-🌀 @ILIVIR3 — Built with Next.js 16, Tailwind CSS 4, shadcn/ui, Cloudflare Workers
+- **Telegram Channel**: [@ILIVIR3](https://t.me/ILIVIR3)
+- **Cloudflare Workers**: [workers.cloudflare.com](https://workers.cloudflare.com)
+- **Jamendo API**: [developer.jamendo.com](https://developer.jamendo.com/v3.0)
+- **Gemini AI**: [aistudio.google.com](https://aistudio.google.com/apikey)
+- **OpenRouter**: [openrouter.ai](https://openrouter.ai)
+
+---
+
+> 🌀 **@ILIVIR3** · MIT License · Built with Next.js 16 · Tailwind CSS 4 · shadcn/ui · Cloudflare Workers
