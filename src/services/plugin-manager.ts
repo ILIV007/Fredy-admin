@@ -334,12 +334,15 @@ export class PluginManager {
     if (!entry.enabled) throw new PluginDisabledError(id);
 
     const startTime = Date.now();
-    this.updateStatus(id, { lastFetchAt: startTime });
+    // v13.4.2: Only update in-memory status before fetch (no KV write).
+    // The KV persist happens only once after fetch completes.
+    this.updateStatusInMemory(id, { lastFetchAt: startTime });
 
     try {
       const items = await entry.plugin.fetch();
       const durationMs = Date.now() - startTime;
 
+      // v13.4.2: Only persist to KV once (after fetch completes).
       this.updateStatus(id, {
         healthy: true,
         lastSuccessAt: Date.now(),
@@ -444,6 +447,16 @@ export class PluginManager {
     const next: PluginStatus = { ...current, ...patch, pluginId: id };
     this.statuses.set(id, next);
     void this.persistStatus(id, next);
+    return next;
+  }
+
+  /** v13.4.2: Update in-memory status only (no KV write). Used for intermediate
+   *  updates like "lastFetchAt" before a fetch — the final persist happens
+   *  when updateStatus() is called after the fetch completes. */
+  private updateStatusInMemory(id: string, patch: Partial<PluginStatus>): PluginStatus {
+    const current = this.getStatus(id);
+    const next: PluginStatus = { ...current, ...patch, pluginId: id };
+    this.statuses.set(id, next);
     return next;
   }
 
