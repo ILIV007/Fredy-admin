@@ -113,23 +113,22 @@ export class ConfigService {
       await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
     }
 
-    // v13.2.2: Auto-migrate Tier V entries — add night-music if missing.
-    // v13.3.7: Also fix NASA time to 00:00 and Night Music time to 00:03.
-    // Old configs had NASA at 23:00 and Night Music at 23:02 — user wants 00:00/00:03.
+    // v13.4.3: Auto-migrate Tier V entries to 23:20/23:23 (before quiet hours).
+    // Previous versions used 00:00/00:03 (inside quiet hours, caused issues).
     if (settings.tierV?.entries) {
       let needsTierVUpdate = false;
       const updatedTierVEntries = settings.tierV.entries.map((entry: Record<string, unknown>) => {
-        if (entry["id"] === "nasa-apod" && entry["time"] !== "00:00") {
+        if (entry["id"] === "nasa-apod" && entry["time"] !== "23:20") {
           needsTierVUpdate = true;
-          return { ...entry, time: "00:00", description: "NASA Astronomy Picture of the Day — nightly at 00:00" };
+          return { ...entry, time: "23:20", description: "NASA Astronomy Picture of the Day — nightly at 23:20" };
         }
         if (entry["id"] === "night-music") {
-          const needsTimeFix = entry["time"] !== "00:03";
+          const needsTimeFix = entry["time"] !== "23:23";
           const desc = entry["description"] as string | undefined;
-          const needsDescFix = !desc || desc.includes("legendary") || desc.includes("Zero-API");
+          const needsDescFix = !desc || desc.includes("legendary") || desc.includes("Zero-API") || desc.includes("00:03") || desc.includes("00:00");
           if (needsTimeFix || needsDescFix) {
             needsTierVUpdate = true;
-            return { ...entry, time: "00:03", description: "Night Music — CC audio track from Jamendo API after NASA APOD" };
+            return { ...entry, time: "23:23", description: "Night Music — CC audio track from Jamendo API after NASA APOD" };
           }
         }
         return entry;
@@ -141,7 +140,7 @@ export class ConfigService {
         updatedTierVEntries.push({
           id: "night-music",
           enabled: true,
-          time: "00:03",
+          time: "23:23",
           providerId: "night-music",
           category: "V",
           description: "Night Music — CC audio track from Jamendo API after NASA APOD",
@@ -156,7 +155,7 @@ export class ConfigService {
             entries: updatedTierVEntries as unknown as typeof settings.tierV.entries,
           },
         };
-        console.log(`[config] v13.3.7: Auto-migrated Tier V times (NASA→00:00, Night Music→00:03)`);
+        console.log(`[config] v13.4.3: Auto-migrated Tier V times (NASA->23:20, Night Music->23:23)`);
         await this.deps.repository.save(key, settings as unknown as Record<string, unknown>).catch(() => {});
       }
     }

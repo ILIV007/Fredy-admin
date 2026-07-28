@@ -51,15 +51,15 @@ export const tierVDefaults: TierVConfig = {
     {
       id: "nasa-apod",
       enabled: true,
-      time: "00:00",
+      time: "23:20",
       providerId: "nasa",
       category: "V",
-      description: "NASA Astronomy Picture of the Day — nightly at 00:00",
+      description: "NASA Astronomy Picture of the Day — nightly at 23:20",
     },
     {
       id: "night-music",
       enabled: true,
-      time: "00:03",
+      time: "23:23",
       providerId: "night-music",
       category: "V",
       description: "Night Music — CC audio track from Jamendo API after NASA APOD",

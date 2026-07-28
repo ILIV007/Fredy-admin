@@ -55,13 +55,14 @@ export class TierVScheduler {
 
     const tz = settings.scheduler.timezone || "UTC";
 
-    // v13.4.1: Tier V daily reset at 01:00 instead of 00:00.
-    // Posts at 00:00/00:03 belong to the PREVIOUS day's Tier V cycle.
-    // This prevents the dashboard from showing "published" status from
-    // midnight posts when the user checks during the day — instead,
-    // the current day's Tier V shows "pending" until the next midnight.
-    // The "Tier V date" = formatDateInZone(now - 1h, tz).
-    const tierVDate = formatDateInZone(now - 60 * 60 * 1000, tz);
+    // v13.4.3: Use standard date (no -1h offset). Tier V is now at 23:20/23:23,
+    // which is BEFORE midnight and BEFORE quiet hours (00:00-07:30).
+    // This means:
+    // - Posts publish at 23:20/23:23 on the current day
+    // - Daily reset happens at midnight (standard date change)
+    // - Dashboard shows correct "pending/published" status during the day
+    // - No conflict with quiet hours
+    const tierVDate = formatDateInZone(now, tz);
 
     // Get current time in minutes-since-midnight (timezone-aware).
     const nowInTz = new Intl.DateTimeFormat("en-US", {
@@ -293,13 +294,12 @@ export class TierVScheduler {
   }
 
   /** v12.1.3: Get published status for all Tier V entries (for dashboard).
-   *  v13.4.1: Uses tierVDate (offset by -1h) so dashboard shows correct status.
-   * Returns a map of entryId → { published: boolean, publishedAt: number | null }. */
+   *  v13.4.3: Use standard date (no -1h offset). */
   async getPublishedStatus(settings: FredySettings, now: number): Promise<Record<string, { published: boolean; publishedAt: number | null }>> {
     const entries = settings.tierV?.entries ?? [];
     const result: Record<string, { published: boolean; publishedAt: number | null }> = {};
     const tz = settings.scheduler.timezone || "UTC";
-    const tierVDate = formatDateInZone(now - 60 * 60 * 1000, tz); // v13.4.1: -1h offset
+    const tierVDate = formatDateInZone(now, tz);
 
     for (const entry of entries) {
       const sentKey = `${TIER_V_SENT_PREFIX}:${tierVDate}:${entry.id}`;
