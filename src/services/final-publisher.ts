@@ -550,6 +550,9 @@ export class FinalPublisher {
     // ── v11.7.0: Unified Image Resolution ──────────────────
     // Priority: post.media → ImageResolver (og:image, twitter:image, etc.)
     // NO fallback logos — if no real image, send text-only.
+    // v13.4.10: NASA GUARANTEE — NASA posts MUST have an image. If all
+    // resolution paths fail, force-fetch the APOD page's og:image as a
+    // last resort. A NASA post without an image is NEVER acceptable.
     let coverUrl: string | null = null;
 
     // 1. Check if post already has media from the pipeline.
@@ -561,13 +564,16 @@ export class FinalPublisher {
     if (!coverUrl && this.deps.imageResolver && post.sourceUrl) {
       try {
         // Reconstruct a minimal SourceItem for the resolver.
+        // v13.4.10: Pass the pluginId so ImageResolver can use provider-specific
+        // logic. Also pass the raw imageUrl from the FinalPost if available.
         const fakeItem = {
           id: "",
-          source: "",
+          source: post.internalMetadata?.pluginId ?? "",
           category: "A" as const,
-          title: "",
+          title: post.hook ?? "",
           body: "",
           url: post.sourceUrl,
+          imageUrl: post.media?.url, // v13.4.10: Carry the media URL for provider check
           fetchedAt: Date.now(),
         };
         const resolved = await this.deps.imageResolver.resolve(fakeItem);
@@ -586,6 +592,51 @@ export class FinalPublisher {
     // 3. Old fallback resolver (for backward compat if ImageResolver not wired).
     if (!coverUrl && !this.deps.imageResolver && post.sourceUrl) {
       coverUrl = await this.resolveSourceCoverImage(post.sourceUrl);
+    }
+
+    // v13.4.10: NASA IMAGE GUARANTEE.
+    // NASA APOD posts MUST always have an image. If all resolution paths above
+    // failed (post.media was null, ImageResolver returned null), this is the
+    // last-resort fallback:
+    //   1. Fetch the APOD page URL (post.sourceUrl) and extract og:image
+    //      (YouTube thumbnail for video days, or the APOD image for image days)
+    //   2. Log an error if even this fails — a NASA post without an image is
+    //      a bug that should be investigated.
+    //
+    // This works because v13.4.10 changed the NASA plugin to ALWAYS set `url`
+    // to the APOD page URL (https://apod.nasa.gov/apod/apYYMMDD.html), which
+    // contains og:image meta tags for both image and video days.
+    const pluginId = post.internalMetadata?.pluginId ?? "";
+    if (!coverUrl && pluginId === "nasa" && post.sourceUrl) {
+      this.deps.logger.warn("telegram.error", {
+        stage: "nasa_image_guarantee",
+        sourceUrl: post.sourceUrl,
+        hasMedia: !!post.media,
+        message: "NASA post has no image after normal resolution — activating NASA image guarantee",
+      });
+
+      // Fetch the APOD page and extract og:image.
+      try {
+        const ogImage = await this.fetchNasaOgImage(post.sourceUrl);
+        if (ogImage) {
+          coverUrl = ogImage;
+          this.deps.logger.info("pipeline.start", {
+            stage: "nasa_image_guarantee",
+            imageSource: "nasa_og_image",
+            imageUrl: coverUrl,
+            message: "NASA image guarantee: fetched og:image from APOD page",
+          });
+        }
+      } catch { /* non-fatal */ }
+
+      // If STILL no image, log a critical error.
+      if (!coverUrl) {
+        this.deps.logger.error("telegram.error", {
+          stage: "nasa_image_guarantee_failed",
+          sourceUrl: post.sourceUrl,
+          message: "NASA image guarantee FAILED — post will be text-only. This should NEVER happen.",
+        });
+      }
     }
 
     // Validate image format.
@@ -736,6 +787,82 @@ export class FinalPublisher {
     } catch { /* non-fatal */
       return null;
     }
+  }
+
+  /**
+   * v13.4.10: Validate a cover URL — must be http/https and not a known
+   * non-image format. Used by the NASA image guarantee.
+   */
+  private isValidCoverUrl(url: string): boolean {
+    if (!url || url.length < 10) return false;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
+    const lower = url.toLowerCase().split("?")[0] ?? "";
+    // Reject non-image formats.
+    if (lower.match(/\.(ico|gif|svg|bmp|tiff|html?|php|asp|jsp)$/)) return false;
+    return true;
+  }
+
+  /**
+   * v13.4.10: Fetch the APOD page and extract og:image.
+   * Used as a last-resort fallback for the NASA image guarantee.
+   * The APOD page (https://apod.nasa.gov/apod/apYYMMDD.html) always has
+   * an og:image meta tag — either the APOD image itself (for image days)
+   * or the YouTube thumbnail (for video days).
+   *
+   * Returns the absolute image URL, or null if fetch/extraction fails.
+   */
+  private async fetchNasaOgImage(pageUrl: string): Promise<string | null> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(pageUrl, {
+          signal: controller.signal,
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+        });
+        clearTimeout(timeout);
+        if (!response.ok) return null;
+
+        const html = await response.text();
+
+        // Try og:image first (standard OpenGraph).
+        const ogMatch = /<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i.exec(html)
+          ?? /<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i.exec(html);
+        if (ogMatch?.[1]) {
+          const absolute = new URL(ogMatch[1], pageUrl).href;
+          if (this.isValidCoverUrl(absolute)) return absolute;
+        }
+
+        // Try og:image:secure_url.
+        const secureMatch = /<meta\s+property=["']og:image:secure_url["']\s+content=["']([^"']+)["']/i.exec(html);
+        if (secureMatch?.[1]) {
+          const absolute = new URL(secureMatch[1], pageUrl).href;
+          if (this.isValidCoverUrl(absolute)) return absolute;
+        }
+
+        // Try twitter:image.
+        const twMatch = /<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i.exec(html)
+          ?? /<meta\s+content=["']([^"']+)["']\s+name=["']twitter:image["']/i.exec(html);
+        if (twMatch?.[1]) {
+          const absolute = new URL(twMatch[1], pageUrl).href;
+          if (this.isValidCoverUrl(absolute)) return absolute;
+        }
+
+        // v13.4.10: Try the <img> tag inside the page (APOD pages have
+        // <img src="..."> for the main image). This is a last resort.
+        const imgMatch = /<img\s+[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i.exec(html);
+        if (imgMatch?.[1]) {
+          const absolute = new URL(imgMatch[1], pageUrl).href;
+          if (this.isValidCoverUrl(absolute)) return absolute;
+        }
+
+        return null;
+      } catch {
+        clearTimeout(timeout);
+        return null;
+      }
+    } catch { /* non-fatal */ }
+    return null;
   }
 
   /** Simulate publishing (for debug/testing — no Telegram call). */

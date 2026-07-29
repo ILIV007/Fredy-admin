@@ -316,4 +316,11 @@ const IMAGE_CDN_ALLOWLIST: readonly string[] = [
   "images.unsplash.com",
   "mshcdn.com",
   "zmescience.com/wp-content",
+  // v13.4.10: NASA image hosts — APOD images are served from these domains.
+  "apod.nasa.gov",
+  "www.nasa.gov",
+  "images-assets.nasa.gov",
+  "stsci-opo.org",
+  "img.youtube.com", // v13.4.10: YouTube thumbnails (NASA video days)
+  "i.ytimg.com",    // v13.4.10: YouTube thumbnails (NASA video days)
 ];

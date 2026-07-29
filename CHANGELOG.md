@@ -2,6 +2,65 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.4.10] — 2026-07-30 — NASA Image Guarantee (APOD Posts Always Have Image)
+
+### 🐛 CRITICAL FIX: NASA APOD Posts Without Images
+
+**User report:** "پست های ناسا بدون ایمج ارسال میشن!!!!این اتفاق اصلا نباید بیوفته!!!!" (NASA posts are being sent without images — this should NEVER happen!)
+
+**Root cause:** The NASA plugin set `url = apod.url` for image days — the raw IMAGE URL, not the APOD page URL. This caused 4 downstream problems:
+
+1. **Footer link pointed to the raw image file** — clicking the source link opened a `.jpg` file in the browser, not the APOD page with the explanation.
+
+2. **Dedup canonical ID extraction FAILED** — the regex `/ap(\d{6})/i` looks for `apYYMMDD` in the URL, but the image URL (`https://apod.nasa.gov/apod/image/2024/SomeImage.jpg`) doesn't contain this pattern. Only the page URL (`https://apod.nasa.gov/apod/ap240729.html`) has it. This meant NASA dedup relied on the slower URL-hash + content-hash layers.
+
+3. **ImageResolver fallback FAILED** — when `post.media` was null (e.g., the media was dropped during enrichment), the FinalPublisher's ImageResolver tried to fetch `post.sourceUrl` as an HTML page to extract `og:image`. But `post.sourceUrl` was the IMAGE URL (binary data), not an HTML page. The OG regex found nothing → no fallback image → text-only post.
+
+4. **Link preview fallback FAILED** — when `sendPhoto` failed (e.g., image too large, Telegram couldn't fetch it), the code fell back to text-only with `show_above_text: true` link preview. But the preview tried to show the IMAGE URL, which has no `og:image` meta tags. The preview was empty.
+
+**Fix — 3-part change:**
+
+1. **NASA plugin (`nasa/index.ts`)**: Changed `url` to ALWAYS be the APOD page URL (`https://apod.nasa.gov/apod/apYYMMDD.html`) for both image AND video days. The direct image URL stays in `imageUrl` and `media`. This fixes all 4 downstream problems:
+   - Footer link → APOD page ✅
+   - Dedup canonical ID → extracts `apYYMMDD` ✅
+   - ImageResolver fallback → fetches OG from HTML page ✅
+   - Link preview fallback → APOD page has og:image ✅
+
+2. **NASA plugin cache re-normalization**: Added cache migration logic (like the GitHub v13.4.8 fix). When cached items are loaded, they're re-normalized to apply the new URL. Old cached items with `url = image_url` are detected (by checking if `url` contains `apod.nasa.gov/apod/ap`) and fixed to use the page URL. This ensures the fix takes effect immediately without waiting for the 6-hour cache to expire.
+
+3. **NASA Image Guarantee (`final-publisher.ts`)**: Added a last-resort fallback specifically for NASA posts. If all normal image resolution paths fail (`post.media` is null, ImageResolver returns null), the FinalPublisher:
+   - Detects `pluginId === "nasa"` and `coverUrl === null`
+   - Calls `fetchNasaOgImage(post.sourceUrl)` which fetches the APOD page HTML and extracts og:image / twitter:image / `<img src>` tags
+   - If found, uses that as the cover image
+   - If STILL no image, logs a critical error: "NASA image guarantee FAILED — post will be text-only. This should NEVER happen."
+
+4. **MediaResolver CDN allowlist**: Added NASA image hosts to the `IMAGE_CDN_ALLOWLIST`:
+   - `apod.nasa.gov` — main APOD image host
+   - `www.nasa.gov` — NASA website images
+   - `images-assets.nasa.gov` — NASA image library
+   - `stsci-opo.org` — Space Telescope Science Institute
+   - `img.youtube.com` / `i.ytimg.com` — YouTube thumbnails (for NASA video days)
+
+   This ensures NASA image URLs without standard extensions (`.jpg`, `.png`) are still accepted as valid image URLs.
+
+**Result:** NASA APOD posts will ALWAYS have an image. The image flows through 4 layers of resolution:
+1. Plugin sets `media` + `imageUrl` (direct image URL)
+2. MediaResolver validates and returns the media
+3. If lost, ImageResolver fetches og:image from the APOD page URL
+4. If still lost, NASA Image Guarantee fetches og:image directly
+
+A NASA post without an image is now virtually impossible — it would require all 4 layers to fail simultaneously.
+
+**Files changed:**
+- `src/plugins/sources/nasa/index.ts` — `url` = APOD page URL (always), cache re-normalization, `apodPageUrl` in metadata
+- `src/services/final-publisher.ts` — NASA Image Guarantee (`fetchNasaOgImage`, `isValidCoverUrl`), improved ImageResolver fakeItem (passes `source` and `imageUrl`)
+- `src/services/media-resolver.ts` — Added NASA + YouTube hosts to `IMAGE_CDN_ALLOWLIST`
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 488 passing (87+191+41+28+80+35+26) ✅
+- Manager dashboard: v13.4.10 visible ✅
+
 ## [13.4.9] — 2026-07-30 — Duplicate Forwarding to Admin PM (GitHub Posts Visibility Fix)
 
 ### 🐛 CRITICAL FIX: Pipeline-Rejected Duplicates Now Forwarded to Admin PM
