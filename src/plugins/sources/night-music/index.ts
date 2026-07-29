@@ -2,21 +2,23 @@
  * src/plugins/sources/night-music/index.ts
  * v13.3.0: Night Music — Jamendo API, 10-stage quality pipeline, sendAudio().
  * v13.4.14: KV efficiency fix — batch dedup checks + API param optimization.
+ * v13.5.0: Artist dedup REMOVED — only song dedup (180-day) remains.
  *
  * Zero-static-data: all tracks come from Jamendo API.
  * JAMENDO_CLIENT_ID is read from Worker Secret (never hardcoded).
  *
- * Pipeline:
+ * Pipeline (v13.5.0 — 9 stages, artist cooldown removed):
  *   1. Fetch 200 tracks from Jamendo API (order=popularity_month, groupby=artist_id)
  *   2. Stage 1: Reject invalid (missing title/artist/audio)
  *   3. Stage 2: Reject non-downloadable (audiodownload_allowed=false)
  *   4. Stage 3: Reject duration outside 2-10 min
  *   5. Stage 4: Reject low-quality titles (demo, test, ASMR, etc.)
- *   6. Stage 5+6: BATCH dedup check — single KV list() for all artists + songs
+ *   6. Stage 6: BATCH song dedup — single KV list() for all songs (180-day)
+ *      [Stage 5 (artist dedup) REMOVED in v13.5.0 — artists can repeat]
  *   7. Stage 7: Prefer tracks with album_image (artwork)
  *   8. Stage 8: Weighted quality score (0-100, reject < 40)
  *   9. Stage 9: Weighted random selection among high-scoring tracks
- *   10. Stage 10: Record publication in KV (artist + song hash) — after publish
+ *   10. Stage 10: Record publication in KV (song hash only) — after publish
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -348,30 +350,22 @@ export class NightMusicPlugin implements Plugin {
 
   private async selectTrack(tracks: JamendoTrack[]): Promise<MusicCandidate | null> {
     const candidates: MusicCandidate[] = [];
-    let rejected = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0, stage6: 0, stage8: 0 };
+    let rejected = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage6: 0, stage8: 0 };
 
-    // v13.4.14: BATCH DEDUP — fetch ALL published artist + song keys in 2 KV list() calls
-    // instead of 2 separate KV reads PER TRACK (which was 200+ reads for 100 tracks).
+    // v13.5.0: ARTIST DEDUP REMOVED per user request.
+    // User: "محدودیت هنرمند نمیخواد بزاری!!خواننده جزو محدودیت ها نباشه!!"
+    // ("Don't set artist limitation!! Singer should not be among limitations!!")
     //
-    // OLD (v13.3.4): for each of 100 tracks → 2 sequential KV reads = up to 200 reads
-    // NEW (v13.4.14): 2 KV list() calls (1 for artists prefix, 1 for songs prefix)
-    //                 → ~2 reads total (regardless of track count)
+    // Previously (v13.3.0–v13.4.14): Stage 5 rejected tracks from artists
+    // published in the last 30 days (artist cooldown). This prevented the same
+    // artist from appearing twice within a month — but the user wants NO artist
+    // limitation. Artists can now repeat freely.
     //
-    // KV reads reduced from ~200 to ~2 — 100× improvement!
+    // Only SONG dedup (Stage 6, 180-day) remains — the same song won't repeat
+    // within 6 months, but the same artist can appear multiple times.
     //
-    // Note: KV list() returns up to 1000 keys per call. With 30-day artist TTL
-    // (max 30 artists) and 180-day song TTL (max 180 songs), we're well within
-    // the 1000-key limit.
-    const publishedArtists = new Set<string>();
+    // KV savings: 1 fewer list() call per fetch (no artist list needed).
     const publishedSongs = new Set<string>();
-
-    try {
-      // v13.4.14: limit=200 for artists (30-day TTL, max ~30 artists, 200 is safe)
-      const artistKeys = await this.deps.kv.list(DEDUP_ARTIST_PREFIX, 200);
-      for (const key of artistKeys) {
-        publishedArtists.add(key.slice(DEDUP_ARTIST_PREFIX.length));
-      }
-    } catch { /* non-fatal — treat as empty */ }
 
     try {
       // v13.4.14: limit=1000 for songs (180-day TTL, max ~180 songs, 1000 is KV max)
@@ -384,9 +378,8 @@ export class NightMusicPlugin implements Plugin {
     this.deps.logger.info("source.fetch_success", {
       plugin: "night-music",
       stage: "DEDUP_BATCH_LOAD",
-      publishedArtists: publishedArtists.size,
       publishedSongs: publishedSongs.size,
-      message: `[NIGHT_MUSIC] DEDUP_BATCH: ${publishedArtists.size} artists + ${publishedSongs.size} songs loaded in 2 KV list() calls`,
+      message: `[NIGHT_MUSIC] DEDUP_BATCH: ${publishedSongs.size} songs loaded (artist dedup REMOVED v13.5.0)`,
     });
 
     for (const track of tracks) {
@@ -408,12 +401,10 @@ export class NightMusicPlugin implements Plugin {
       // Stage 4: Low-quality title filter
       if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) { rejected.stage4++; continue; }
 
-      // v13.4.14: Stage 5+6 — BATCH dedup check (in-memory Set lookup, 0 KV reads)
-      // Previously: 2 sequential KV reads per track (up to 200 reads for 100 tracks)
-      // Now: in-memory Set.has() — O(1) lookup, 0 KV reads
-      const artistNormalized = this.normalizeStr(track.artist_name);
-      if (publishedArtists.has(artistNormalized)) { rejected.stage5++; continue; }
+      // v13.5.0: Stage 5 (artist dedup) REMOVED — artists can repeat freely.
 
+      // v13.4.14: Stage 6 — song dedup (in-memory Set lookup, 0 KV reads)
+      // Only the SAME SONG is rejected (180-day cooldown). Same artist, different song = OK.
       const songHash = this.hashSongArtist(track.name, track.artist_name);
       if (publishedSongs.has(songHash)) { rejected.stage6++; continue; }
 
@@ -434,7 +425,7 @@ export class NightMusicPlugin implements Plugin {
       totalTracks: tracks.length,
       candidates: candidates.length,
       rejected: rejected,
-      message: `[NIGHT_MUSIC] QUALITY_FILTER: ${tracks.length} total → ${candidates.length} candidates (rejected: s1=${rejected.stage1} s2=${rejected.stage2} s3=${rejected.stage3} s4=${rejected.stage4} s5=${rejected.stage5} s6=${rejected.stage6} s8=${rejected.stage8})`,
+      message: `[NIGHT_MUSIC] QUALITY_FILTER: ${tracks.length} total → ${candidates.length} candidates (rejected: s1=${rejected.stage1} s2=${rejected.stage2} s3=${rejected.stage3} s4=${rejected.stage4} s6=${rejected.stage6} s8=${rejected.stage8})`,
     });
 
     if (candidates.length === 0) return null;
@@ -512,11 +503,14 @@ export class NightMusicPlugin implements Plugin {
   // Helpers
   // ────────────────────────────────────────────────────────────
 
-  /** v13.3.4: Record publication in KV — called by FinalPublisher AFTER successful upload. */
+  /** v13.3.4: Record publication in KV — called by FinalPublisher AFTER successful upload.
+   *  v13.5.0: Artist recording REMOVED per user request (no artist limitation).
+   *  Only the SONG is recorded (180-day dedup). The same artist can publish
+   *  multiple songs within the 180-day window — no cooldown on artists. */
   async recordPublished(song: string, artist: string): Promise<void> {
-    const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(artist)}`;
+    // v13.5.0: Artist KV recording removed — artists can repeat freely.
+    // Only record the song hash (180-day dedup for the SAME song only).
     const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(song, artist)}`;
-    await this.deps.kv.set(artistKey, String(Date.now()), ARTIST_TTL).catch(() => {});
     await this.deps.kv.set(songKey, String(Date.now()), SONG_TTL).catch(() => {});
   }
 

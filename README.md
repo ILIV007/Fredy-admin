@@ -1,13 +1,13 @@
-# Fredy v13.4.13
+# Fredy v13.5.0 — FINAL
 
 > **Autonomous AI-powered Technology News Hub for Telegram channels.**
-> Built on Cloudflare Workers Free Tier. NASA batch-fetch with dedup-aware image guarantee, duplicate forwarding to admin PM, Tier V scheduled content, Jamendo Night Music, 10-stage quality pipeline, weighted provider selection, and 492 passing tests.
+> Built on Cloudflare Workers Free Tier. NASA batch-fetch with dedup-aware image guarantee, duplicate forwarding to admin PM, Night Music with optimized Jamendo API + batch KV dedup (artist limitation removed), 10-stage quality pipeline, and 487 passing tests.
 
-[![Version](https://img.shields.io/badge/version-13.4.13-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-13.5.0-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-492%20passing-brightgreen)](./scripts)
+[![Tests](https://img.shields.io/badge/tests-487%20passing-brightgreen)](./scripts)
 [![Channel](https://img.shields.io/badge/Telegram-@ILIVIR3-2AABEE)](https://t.me/ILIVIR3)
 
 ---
@@ -24,14 +24,14 @@ Fredy is a production-grade, serverless content publishing platform that automat
 - **NASA Image Guarantee (v13.4.10)** — 4-layer image resolution: plugin media → MediaResolver → ImageResolver og:image → NASA page og:image fetch
 - **Tier H Hardware News** — Ars Technica, Tom's Hardware, TechPowerUp with Quality Filter (0-100 scoring, deal/promo rejection, clickbait hard-reject)
 - **Tier V Scheduled Content** — NASA APOD at 23:20 + Night Music (Jamendo CC audio) at 23:23
-- **Night Music** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 10-stage quality pipeline, 180-day song dedup + 30-day artist cooldown
+- **Night Music (v13.5.0 FINAL)** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 9-stage quality pipeline (artist limitation REMOVED — singers can repeat), 180-day song dedup only, optimized Jamendo API params (limit=200, popularity_month, groupby=artist_id), batch KV dedup (100× fewer reads)
 - **Novelty Score** — prevents same news from different providers being published within 48h
 - **Weighted Provider Selection** — `selectProviderWeighted()` uses config weights (e.g., GitHub Releases weight=100 > StackExchange weight=80)
 - **Equal-Segment Schedule** — day divided into N equal segments, each post gets its own segment with center-bias sampling (v13.1.2)
 - **Truly Random Wildcard** — daily wildcard post picks from ALL active APIs (never picks H slots)
 - **6 AI Models** — Gemini (primary) + OpenRouter (fallback, 6 free models)
 - **Zero-KV Quiet Hours** — 0 KV reads + 0 KV writes during quiet hours (except Tier V)
-- **492 Passing Tests** across 7 test suites
+- **487 Passing Tests** across 7 test suites
 
 ---
 
@@ -120,25 +120,26 @@ Fredy is a production-grade, serverless content publishing platform that automat
 
 ---
 
-## Night Music (Tier V)
+## Night Music (Tier V) — v13.5.0 FINAL
 
 Every night at 23:23, Fredy publishes one Creative Commons audio track from the Jamendo API.
 
-### How it works
+### How it works (v13.5.0 — 9-stage pipeline, artist limitation removed)
 
-1. Fetch 100 tracks from Jamendo API (`order=popularity_week`)
-2. Run a 10-stage quality pipeline:
+1. **Fetch 200 tracks** from Jamendo API (`order=popularity_month`, `groupby=artist_id`, `limit=200`)
+   - v13.4.14: API response cached for 1h (ToU compliant) — retries don't hit API
+2. Run a 9-stage quality pipeline:
    - Stage 1: Required fields (title, artist, audio URL)
    - Stage 2: Must be downloadable
    - Stage 3: Duration 2-10 minutes
    - Stage 4: Reject low-quality titles (demo, karaoke, live, remix, ASMR, etc.)
-   - Stage 5: Artist cooldown (30-day KV dedup)
-   - Stage 6: Song cooldown (180-day KV dedup, normalized artist+title)
+   - ~~Stage 5: Artist cooldown (30-day KV dedup)~~ **REMOVED in v13.5.0** — singers can repeat!
+   - Stage 6: Song cooldown (180-day KV dedup, normalized artist+title) — BATCH check via `list()` + `Set.has()`
    - Stage 7: Prefer tracks with album artwork
    - Stage 8: Weighted quality score (0-100, reject < 40)
    - Stage 9: Weighted random selection
-   - Stage 10: Record publication in KV (only after successful upload)
-3. Worker downloads the MP3 (with Content-Type + 20MB size check)
+   - Stage 10: Record publication in KV (song hash only — artist NOT recorded)
+3. Worker downloads the MP3 (with Content-Type + 20MB size check + MP3 magic bytes)
 4. Uploads binary to Telegram via `sendAudio()` multipart/form-data
 5. Admin PM receives a copy of the audio post
 
@@ -150,10 +151,12 @@ Artist Name            (monospace)
 🌀 @ILIVIR3
 ```
 
-### KV usage
-- `fredy:music:artist:<normalized>` — 30-day TTL
-- `fredy:music:song:<hash>` — 180-day TTL
-- Only 2 KV writes per night (recorded AFTER successful upload)
+### KV usage (v13.5.0 — optimized)
+- `fredy:source:night-music:api-response` — 1h TTL (API response cache, ToU compliant)
+- `fredy:music:song:<hash>` — 180-day TTL (song dedup only)
+- ~~`fredy:music:artist:<normalized>` — 30-day TTL~~ **REMOVED in v13.5.0** — no artist limitation
+- **Reads per fetch**: ~2 (1 API cache check + 1 song list() call) — was ~200 before v13.4.14!
+- **Writes per night**: 1 (song hash only, after successful upload) — was 2 before v13.5.0!
 
 ---
 

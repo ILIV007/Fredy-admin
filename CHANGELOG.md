@@ -2,6 +2,84 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.5.0] — 2026-07-30 — FINAL — Artist Dedup Removed + All Optimizations Consolidated
+
+### 🎯 FINAL RELEASE
+
+This is the **FINAL version** of Fredy. All optimizations from v13.4.x are consolidated, plus one user-requested change: **artist dedup removed**.
+
+### 🔧 CHANGE: Artist Limitation Removed (User Request)
+
+**User request:** "محدودیت هنرمند نمیخواد بزاری!!خواننده جزو محدودیت ها نباشه!!" ("Don't set artist limitation!! Singer should not be among limitations!!")
+
+**Change:** Removed the 30-day artist cooldown (Stage 5) from the Night Music pipeline:
+
+1. **`selectTrack()` method:**
+   - Removed `publishedArtists` Set and the `list(DEDUP_ARTIST_PREFIX)` call
+   - Removed Stage 5 check (`if (publishedArtists.has(artistNormalized)) continue`)
+   - Now only Stage 6 (song dedup) remains — same song won't repeat within 180 days, but the same artist can appear multiple times
+
+2. **`recordPublished()` method:**
+   - Removed `kv.set(artistKey, ...)` — artist is no longer recorded in KV
+   - Only `kv.set(songKey, ...)` remains (song hash, 180-day TTL)
+
+**Impact:**
+- Artists can now repeat freely — no 30-day cooldown
+- Same song still won't repeat within 180 days (song dedup preserved)
+- 1 fewer KV `list()` call per fetch (no artist list needed)
+- 1 fewer KV `set()` call per publish (no artist record)
+- KV reads per fetch: ~2 (was ~3 in v13.4.14)
+- KV writes per publish: 1 (was 2 in v13.4.14)
+
+### 📊 Consolidated Feature Set (v13.5.0 FINAL)
+
+All features from v13.4.x are included:
+
+| Version | Feature |
+|---------|---------|
+| v13.4.9 | Duplicate forwarding to admin PM (GitHub posts visibility) |
+| v13.4.10 | NASA Image Guarantee (4-layer image resolution) |
+| v13.4.11 | NASA video days skipped (only images) |
+| v13.4.12 | NASA batch fetch (14 days, dedup-aware image selection) |
+| v13.4.13 | NASA KV efficiency (one-time migration flag) |
+| v13.4.14 | Night Music KV optimization (batch dedup, 100× fewer reads) + Jamendo API optimization |
+| **v13.5.0** | **Artist dedup REMOVED — singers can repeat (FINAL)** |
+
+### 📈 Final KV Usage
+
+**NASA (per day):**
+- Reads: 3-16 (best case 3, average 5, worst case 16)
+- Writes: 3-4 (dedup records after publish)
+- API calls: 1 (14-day batch, 6h cache)
+
+**Night Music (per night):**
+- Reads: ~2 (1 API cache + 1 song list)
+- Writes: 1 (song hash only — artist NOT recorded)
+- API calls: 0-1 (1h cache, 2 retries use cache)
+
+**Total daily KV usage:** ~5-18 reads + ~4-5 writes — well within Cloudflare KV free tier (100k reads/day, 1k writes/day).
+
+### ✅ Verification
+
+- TypeScript: 0 errors (src/) ✅
+- Tests: 487 passing (87+190+41+28+80+35+26) ✅
+- Manager dashboard: v13.5.0 · FINAL ✅
+- README: updated to v13.5.0 FINAL ✅
+- CHANGELOG: complete v13.4.x history documented ✅
+
+### 📦 Deliverables (FINAL)
+
+- `Fredy-admin-v13.5.0.zip` — Source code (702K)
+- `Fredy-admin-v13.5.0-FULL.zip` — Bundled Markdown (521K)
+- `Fredy-admin-v13.5.0-FULL.md` — All 248 files concatenated (2.1M, 49,000+ lines)
+
+**Files changed in v13.5.0:**
+- `src/plugins/sources/night-music/index.ts` — Artist dedup removed (Stage 5 + recordPublished)
+- `src/core/constants.ts` — APP_VERSION = "13.5.0"
+- `src/entry/manager.ts` — Dashboard label "v13.5.0 · FINAL"
+- `README.md` — Updated to v13.5.0 FINAL with artist removal noted
+- `src/app/fredy-data.ts` (Next.js dashboard) — Updated version + test counts
+
 ## [13.4.14] — 2026-07-30 — Night Music KV Optimization (100× fewer reads) + Jamendo API Optimization
 
 ### 🚀 PERFORMANCE: Night Music KV Usage Reduced 100×
