@@ -170,15 +170,20 @@ export class GitHubPlugin implements Plugin {
   normalize(raw: unknown): SourceItem {
     const repo = raw as GHRepo;
     const ownerLogin = repo.owner?.login ?? "";
-    const ownerAvatar = repo.owner?.avatar_url ?? undefined;
+    const repoFullName = repo.full_name ?? "";
+    // v13.4.6: Use GitHub social preview card (shows repo name, stars, description)
+    // instead of owner avatar (which was just a small profile picture).
+    const imageUrl = repoFullName
+      ? `https://opengraph.githubassets.com/1/${repoFullName}`
+      : undefined;
     return {
-      id: `gh-${repo.id ?? repo.full_name ?? ""}`,
+      id: `gh-${repo.id ?? repoFullName ?? ""}`,
       source: this.metadata.id,
       category: this.metadata.category,
-      title: String(repo.full_name ?? repo.name ?? ""),
+      title: String(repoFullName ?? repo.name ?? ""),
       body: String(repo.description ?? ""),
       url: String(repo.html_url ?? ""),
-      imageUrl: ownerAvatar,
+      imageUrl,
       language: "en",
       publishedAt: repo.created_at ? Date.parse(repo.created_at) || undefined : undefined,
       metadata: {
