@@ -44,6 +44,19 @@ export class ImageResolver {
    * Returns null if no real image is found (no fallback logos).
    */
   async resolve(item: SourceItem): Promise<ResolvedImage | null> {
+    // v13.4.7: If the SourceItem already has a provider imageUrl, return it
+    // directly WITHOUT checking the cache. The cache was causing stale avatar
+    // URLs to be returned even after the plugin was updated to use opengraph
+    // URLs. The cache key is based on item.url (the repo URL), so changing
+    // the imageUrl doesn't invalidate the cache entry.
+    if (item.imageUrl && this.isValidImageUrl(item.imageUrl)) {
+      const result: ResolvedImage = { url: item.imageUrl, source: "provider" };
+      // Update cache with the new (correct) URL.
+      const cacheKey = `${CACHE_PREFIX}${this.hashUrl(item.url)}`;
+      await this.cacheResult(cacheKey, result);
+      return result;
+    }
+
     // 1. Check cache first. v11.7.1: No logging on cache hit (avoid verbose).
     const cacheKey = `${CACHE_PREFIX}${this.hashUrl(item.url)}`;
     const cached = await this.deps.kv.getJson<ResolvedImage>(cacheKey).catch(() => null);
@@ -51,14 +64,7 @@ export class ImageResolver {
       return cached;
     }
 
-    // 2. Provider-supplied image.
-    if (item.imageUrl && this.isValidImageUrl(item.imageUrl)) {
-      const result: ResolvedImage = { url: item.imageUrl, source: "provider" };
-      await this.cacheResult(cacheKey, result);
-      return result;
-    }
-
-    // 3. Provider media.
+    // 2. Provider-supplied media (not imageUrl — already checked above).
     if (item.media?.url && item.media.type === "image" && this.isValidImageUrl(item.media.url)) {
       const result: ResolvedImage = { url: item.media.url, source: "provider" };
       await this.cacheResult(cacheKey, result);
