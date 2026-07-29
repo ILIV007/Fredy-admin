@@ -150,6 +150,11 @@ export class GitHubSecurityPlugin implements Plugin {
 
   normalize(raw: unknown): SourceItem {
     const advisory = raw as GHAdvisory;
+    // v13.4.5: Build GitHub social preview image URL for the affected repo.
+    const repoName = this.extractGithubRepo(raw);
+    const imageUrl = repoName && repoName.includes("/") && repoName !== "GitHub"
+      ? `https://opengraph.githubassets.com/1/${repoName}`
+      : undefined;
     return {
       id: `sec-${advisory.ghsa_id}`,
       source: this.metadata.id,
@@ -157,6 +162,7 @@ export class GitHubSecurityPlugin implements Plugin {
       title: advisory.summary,
       body: String(advisory.description ?? "").slice(0, 1000),
       url: advisory.html_url ?? `https://github.com/advisories/${advisory.ghsa_id}`,
+      imageUrl,
       language: "en",
       publishedAt: advisory.published_at ? Date.parse(advisory.published_at) || undefined : undefined,
       metadata: {
@@ -166,7 +172,7 @@ export class GitHubSecurityPlugin implements Plugin {
         cvss: advisory.cvss?.score ?? 0,
       },
             displayIcon: this.metadata.displayIcon ?? "🐙",
-      displaySource: this.extractGithubRepo(raw),
+      displaySource: repoName,
       fetchedAt: Date.now(),
     };
   }

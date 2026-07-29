@@ -296,6 +296,7 @@ function isUsableImageUrl(url: string): boolean {
 /** Hosts known to serve real images even without a file extension. */
 const IMAGE_CDN_ALLOWLIST: readonly string[] = [
   "opengraph.githubassets.com",
+  "avatars.githubusercontent.com", // v13.4.5: GitHub owner avatars
   "upload.wikimedia.org",
   "images.unsplash.com",
   "cdn.sstatic.net",
