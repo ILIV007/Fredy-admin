@@ -90,7 +90,14 @@ export async function tickHandler(
       }
     }
   }
-  await container.kv.set(LAST_TICK_KEY, String(now)).catch(() => {});
+  // v13.4.4: Only write LAST_TICK_KEY if >1h since last write.
+  // The stale-tick alert only needs hour-level precision, not minute-level.
+  // This reduces heartbeat writes from 72/day to ~24/day.
+  const previousTickNum = previousTickStr ? Number(previousTickStr) : 0;
+  const hourMs = 60 * 60 * 1000;
+  if (!previousTickNum || !Number.isFinite(previousTickNum) || (now - previousTickNum) >= hourMs) {
+    await container.kv.set(LAST_TICK_KEY, String(now)).catch(() => {});
+  }
 
   if (ctx) {
     ctx.waitUntil(runTickWork(container, env, tickLock, settings, now, fullMode));
@@ -233,13 +240,27 @@ async function runTickWork(
 
   } finally {
     await tickLock.release();
-    await container.kv.setJson(LAST_LOG_KEY, {
-      time: Date.now(),
-      tickTime: tickStartTime,
-      layer: fullMode ? "manual-full" : "manual-scheduler-watch",
-      durationMs: Date.now() - tickStartTime,
-      log,
-    }, 3600).catch(() => {});
+
+    // v13.4.4: Only write lastTick/lastLog if actual work was done.
+    // Previously, every tick (including manual /internal/tick calls) wrote
+    // 2 KV entries even when nothing happened. Now we check if any meaningful
+    // work happened before writing.
+    const didWork = log.some(l =>
+      l.includes("slot fired") || l.includes("slot skipped") ||
+      l.includes("generating") || l.includes("providers refreshed") ||
+      l.includes("providers failed") || l.includes("error") ||
+      l.includes("published") || l.includes("cleanup")
+    );
+
+    if (didWork) {
+      await container.kv.setJson(LAST_LOG_KEY, {
+        time: Date.now(),
+        tickTime: tickStartTime,
+        layer: fullMode ? "manual-full" : "manual-scheduler-watch",
+        durationMs: Date.now() - tickStartTime,
+        log,
+      }, 3600).catch(() => {});
+    }
   }
 
   return log;

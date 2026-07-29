@@ -186,18 +186,20 @@ export class DuplicateDetector {
       expiresAt: now + this.ttlSeconds * 1000,
     };
 
-    // v13.1.0: Optimize KV writes — canonical and URL writes are fire-and-forget
-    // (void), only hash write is awaited. This saves ~30ms per publish (2 fewer
-    // awaited KV writes). The check() function reads all 3 layers in parallel,
-    // so the fire-and-forget writes are safe — by the time a duplicate check
-    // runs, the writes have completed (Cloudflare KV is eventually consistent
-    // within the same edge).
+    // v13.4.4: Reverted fire-and-forget back to await for correctness.
+    // The v13.1.0 "optimization" changed these to `void` (fire-and-forget),
+    // but that doesn't reduce KV write count (all 3 writes still execute),
+    // and bare `void` without ctx.waitUntil() has no guarantee of completing
+    // in Cloudflare Workers — the isolate can be torn down before the writes
+    // finish, leaving 2 of 3 dedup layers unwritten. This weakens dedup
+    // exactly for the layers that catch duplicates when AI-rewritten text
+    // differs from prior posts. The 30ms latency saving is not worth the risk.
     if (canonicalId) {
-      void this.deps.kv.setJson(`fredy:dedup:canonical:${canonicalId}`, record, this.ttlSeconds);
+      await this.deps.kv.setJson(`fredy:dedup:canonical:${canonicalId}`, record, this.ttlSeconds);
     }
     if (normalizedUrl) {
       const urlHash = await sha1(normalizedUrl);
-      void this.deps.kv.setJson(`fredy:dedup:url:${urlHash}`, record, this.ttlSeconds);
+      await this.deps.kv.setJson(`fredy:dedup:url:${urlHash}`, record, this.ttlSeconds);
     }
     await this.deps.kv.setJson(dedupKey(hash), record, this.ttlSeconds);
   }

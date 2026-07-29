@@ -114,17 +114,11 @@ async function runProviderRefresh(container: Container, env: Env): Promise<void>
         timezone: tz,
         localTime,
       }));
-      // Write a lightweight log entry so the dashboard shows this tick ran.
-      await container.kv.setJson(LAST_LOG_KEY, {
-        time: Date.now(),
-        tickTime: startTime,
-        layer: "provider-refresh",
-        skipped: true,
-        reason: "quiet_hours_active",
-        localTime,
-        log: [`quiet hours active (${localTime} ${tz}) — skipping provider refresh entirely`],
-      }, 3600).catch(() => {});
-      return; // No lock, no API calls, no KV writes beyond the log entry.
+      // v13.4.4: Skip KV log write during quiet hours — console.log is enough.
+      // Previously wrote LAST_LOG_KEY here (1 KV write per quiet-hours tick = ~22/night).
+      // The dashboard doesn't need to see "quiet hours skip" ticks — it can
+      // compute quiet-hours status live from settings + current time.
+      return; // 0 KV writes during quiet hours.
     }
   }
 
@@ -132,15 +126,8 @@ async function runProviderRefresh(container: Container, env: Env): Promise<void>
   const lockTimeoutSec = settings?.scheduler?.lockTimeoutSec ?? 90;
   const tickLock = await acquireTickLock(container.kv, lockTimeoutSec);
   if (!tickLock.acquired) {
-    // Another tick (likely a Layer 1 publish) is running — skip provider refresh.
-    await container.kv.setJson(LAST_LOG_KEY, {
-      time: Date.now(),
-      tickTime: startTime,
-      layer: "provider-refresh",
-      skipped: true,
-      reason: "lock_held",
-      log: ["skipped: lock held (Layer 1 publish in progress)"],
-    }, 3600).catch(() => {});
+    // v13.4.4: Skip KV log write on lock-held — console.log is enough.
+    console.log(JSON.stringify({ layer: "provider-refresh", status: "skipped", reason: "lock_held" }));
     return;
   }
 
@@ -191,15 +178,26 @@ async function runProviderRefresh(container: Container, env: Env): Promise<void>
   } finally {
     await tickLock.release();
 
-    // Write combined lastTick + lastLog.
-    await container.kv.set(LAST_TICK_KEY, String(startTime)).catch(() => {});
-    await container.kv.setJson(LAST_LOG_KEY, {
-      time: Date.now(),
-      tickTime: startTime,
-      layer: "provider-refresh",
-      durationMs: Date.now() - startTime,
-      log,
-    }, 3600).catch(() => {});
+    // v13.4.4: Only write lastTick/lastLog if actual work was done.
+    // Previously, every provider-refresh tick wrote 2 KV entries even when
+    // all queues were full and nothing was refreshed. This was ~24 KV writes/day
+    // wasted on no-op ticks. Now we check if any meaningful work happened.
+    const didWork = log.some(l =>
+      l.includes("generating") || l.includes("providers refreshed") ||
+      l.includes("providers failed") || l.includes("error") ||
+      l.includes("stats flushed")
+    );
+
+    if (didWork) {
+      await container.kv.set(LAST_TICK_KEY, String(startTime)).catch(() => {});
+      await container.kv.setJson(LAST_LOG_KEY, {
+        time: Date.now(),
+        tickTime: startTime,
+        layer: "provider-refresh",
+        durationMs: Date.now() - startTime,
+        log,
+      }, 3600).catch(() => {});
+    }
   }
 }
 
