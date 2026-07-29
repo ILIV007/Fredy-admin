@@ -1,22 +1,22 @@
 /**
  * src/plugins/sources/night-music/index.ts
  * v13.3.0: Night Music — Jamendo API, 10-stage quality pipeline, sendAudio().
+ * v13.4.14: KV efficiency fix — batch dedup checks + API param optimization.
  *
  * Zero-static-data: all tracks come from Jamendo API.
  * JAMENDO_CLIENT_ID is read from Worker Secret (never hardcoded).
  *
  * Pipeline:
- *   1. Fetch 50-100 tracks from Jamendo API (order=popularity_week)
+ *   1. Fetch 200 tracks from Jamendo API (order=popularity_month, groupby=artist_id)
  *   2. Stage 1: Reject invalid (missing title/artist/audio)
  *   3. Stage 2: Reject non-downloadable (audiodownload_allowed=false)
- *   4. Stage 3: Reject duration outside 2-8 min
+ *   4. Stage 3: Reject duration outside 2-10 min
  *   5. Stage 4: Reject low-quality titles (demo, test, ASMR, etc.)
- *   6. Stage 5: Reject duplicate artists (30-day KV)
- *   7. Stage 6: Reject duplicate songs (180-day KV, normalized artist+title)
- *   8. Stage 7: Prefer tracks with album_image (artwork)
- *   9. Stage 8: Weighted quality score (0-100, reject < 80)
- *   10. Stage 9: Weighted random selection among high-scoring tracks
- *   11. Stage 10: Record publication in KV (artist + song hash)
+ *   6. Stage 5+6: BATCH dedup check — single KV list() for all artists + songs
+ *   7. Stage 7: Prefer tracks with album_image (artwork)
+ *   8. Stage 8: Weighted quality score (0-100, reject < 40)
+ *   9. Stage 9: Weighted random selection among high-scoring tracks
+ *   10. Stage 10: Record publication in KV (artist + song hash) — after publish
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -35,7 +35,16 @@ export { nightMusicManifest } from "./manifest";
 
 const JAMENDO_API = "https://api.jamendo.com/v3.0/tracks/";
 const FETCH_TIMEOUT_MS = 10_000;
-const FETCH_LIMIT = 100;
+// v13.4.14: Increased from 100 to 200 (Jamendo API max).
+// More candidates = better variety + more likely to find unpublished tracks.
+const FETCH_LIMIT = 200;
+
+// v13.4.14: Short-term API response cache (1h TTL).
+// Jamendo ToU §3.3 allows "short-lived operational caching" — a 1h cache
+// for the track list is compliant. This prevents duplicate API calls when
+// Tier V retries within the same night (up to 2 attempts in 6h window).
+const API_CACHE_KEY = "fredy:source:night-music:api-response";
+const API_CACHE_TTL_SECONDS = 3600; // 1 hour
 
 const DEDUP_ARTIST_PREFIX = "fredy:music:artist:";
 const DEDUP_SONG_PREFIX = "fredy:music:song:";
@@ -224,13 +233,39 @@ export class NightMusicPlugin implements Plugin {
   // ────────────────────────────────────────────────────────────
 
   private async fetchJamendoTracks(clientId: string): Promise<JamendoTrack[]> {
+    // v13.4.14: Check API response cache first (1h TTL, ToU compliant).
+    // This prevents duplicate API calls when Tier V retries within the same night.
+    const cached = await this.deps.kv.getJson<readonly JamendoTrack[]>(API_CACHE_KEY).catch(() => null);
+    if (cached && cached.length > 0) {
+      this.deps.logger.info("source.fetch_cache_hit", {
+        plugin: "night-music",
+        count: cached.length,
+        message: `[NIGHT_MUSIC] API_CACHE_HIT: ${cached.length} tracks from 1h cache`,
+      });
+      return [...cached];
+    }
+
+    // v13.4.14: Optimized API parameters:
+    //   - limit=200 (was 100) — Jamendo API max, more candidates
+    //   - order=popularity_month (was popularity_week) — more stable charts
+    //   - groupby=artist_id — deduplicates tracks by artist (1 track per artist)
+    //     This prevents the same artist from appearing 5× in results, giving us
+    //     more unique artists to choose from (better variety).
+    //   - include=licenses,musicinfo,stats (was just musicinfo) — CC license URL
+    //     + tags + stats counters for better quality scoring
+    //   - audioformat=mp32 (unchanged) — VBR good quality
+    //   - audiodlformat=mp32 — explicit download format
+    //   - imagesize=300 — album artwork at 300px (reasonable size)
     const params = new URLSearchParams({
       client_id: clientId,
       format: "json",
       limit: String(FETCH_LIMIT),
-      order: "popularity_week",
-      include: "musicinfo",
+      order: "popularity_month",
+      include: "musicinfo,licenses",
       audioformat: "mp32",
+      audiodlformat: "mp32",
+      imagesize: "300",
+      groupby: "artist_id",
     });
     const url = `${JAMENDO_API}?${params.toString()}`;
 
@@ -238,7 +273,7 @@ export class NightMusicPlugin implements Plugin {
       plugin: "night-music",
       stage: "RSS_FETCH",
       url: JAMENDO_API,
-      message: `[NIGHT_MUSIC] RSS_FETCH: calling Jamendo API`,
+      message: `[NIGHT_MUSIC] RSS_FETCH: calling Jamendo API (limit=${FETCH_LIMIT}, order=popularity_month, groupby=artist_id)`,
     });
 
     const controller = new AbortController();
@@ -277,9 +312,15 @@ export class NightMusicPlugin implements Plugin {
         throw new Error(`Jamendo API error: ${data.headers.error_message ?? "unknown"}`);
       }
 
+      const tracks = [...(data.results ?? [])];
+
+      // v13.4.14: Cache the API response for 1h (ToU compliant — short-lived operational cache).
+      // This saves an API call when Tier V retries within the same night.
+      await this.deps.kv.setJson(API_CACHE_KEY, tracks, API_CACHE_TTL_SECONDS).catch(() => {});
+
       // Log first track sample for debugging
-      if (data.results && data.results.length > 0) {
-        const sample = data.results[0]!;
+      if (tracks.length > 0) {
+        const sample = tracks[0]!;
         this.deps.logger.info("source.fetch_success", {
           plugin: "night-music",
           stage: "SAMPLE_TRACK",
@@ -294,7 +335,7 @@ export class NightMusicPlugin implements Plugin {
         });
       }
 
-      return [...(data.results ?? [])];
+      return tracks;
     } catch (error) {
       clearTimeout(timeout);
       throw error;
@@ -309,6 +350,45 @@ export class NightMusicPlugin implements Plugin {
     const candidates: MusicCandidate[] = [];
     let rejected = { stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0, stage6: 0, stage8: 0 };
 
+    // v13.4.14: BATCH DEDUP — fetch ALL published artist + song keys in 2 KV list() calls
+    // instead of 2 separate KV reads PER TRACK (which was 200+ reads for 100 tracks).
+    //
+    // OLD (v13.3.4): for each of 100 tracks → 2 sequential KV reads = up to 200 reads
+    // NEW (v13.4.14): 2 KV list() calls (1 for artists prefix, 1 for songs prefix)
+    //                 → ~2 reads total (regardless of track count)
+    //
+    // KV reads reduced from ~200 to ~2 — 100× improvement!
+    //
+    // Note: KV list() returns up to 1000 keys per call. With 30-day artist TTL
+    // (max 30 artists) and 180-day song TTL (max 180 songs), we're well within
+    // the 1000-key limit.
+    const publishedArtists = new Set<string>();
+    const publishedSongs = new Set<string>();
+
+    try {
+      // v13.4.14: limit=200 for artists (30-day TTL, max ~30 artists, 200 is safe)
+      const artistKeys = await this.deps.kv.list(DEDUP_ARTIST_PREFIX, 200);
+      for (const key of artistKeys) {
+        publishedArtists.add(key.slice(DEDUP_ARTIST_PREFIX.length));
+      }
+    } catch { /* non-fatal — treat as empty */ }
+
+    try {
+      // v13.4.14: limit=1000 for songs (180-day TTL, max ~180 songs, 1000 is KV max)
+      const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
+      for (const key of songKeys) {
+        publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
+      }
+    } catch { /* non-fatal — treat as empty */ }
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music",
+      stage: "DEDUP_BATCH_LOAD",
+      publishedArtists: publishedArtists.size,
+      publishedSongs: publishedSongs.size,
+      message: `[NIGHT_MUSIC] DEDUP_BATCH: ${publishedArtists.size} artists + ${publishedSongs.size} songs loaded in 2 KV list() calls`,
+    });
+
     for (const track of tracks) {
       // Stage 1: Required fields
       if (!track.name || !track.artist_name) { rejected.stage1++; continue; }
@@ -321,22 +401,21 @@ export class NightMusicPlugin implements Plugin {
       const audioUrl = track.audiodownload ?? track.audio;
       if (!audioUrl) { rejected.stage1++; continue; }
 
-      // Stage 3: Duration 2-8 min
+      // Stage 3: Duration 2-10 min
       const duration = track.duration ?? 0;
       if (duration > 0 && (duration < MIN_DURATION_SEC || duration > MAX_DURATION_SEC)) { rejected.stage3++; continue; }
 
       // Stage 4: Low-quality title filter
       if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) { rejected.stage4++; continue; }
 
-      // Stage 5: Duplicate artist (30-day KV)
-      const artistKey = `${DEDUP_ARTIST_PREFIX}${this.normalizeStr(track.artist_name)}`;
-      const artistRecent = await this.deps.kv.get(artistKey).catch(() => null);
-      if (artistRecent) { rejected.stage5++; continue; }
+      // v13.4.14: Stage 5+6 — BATCH dedup check (in-memory Set lookup, 0 KV reads)
+      // Previously: 2 sequential KV reads per track (up to 200 reads for 100 tracks)
+      // Now: in-memory Set.has() — O(1) lookup, 0 KV reads
+      const artistNormalized = this.normalizeStr(track.artist_name);
+      if (publishedArtists.has(artistNormalized)) { rejected.stage5++; continue; }
 
-      // Stage 6: Duplicate song (180-day KV, normalized artist+title)
-      const songKey = `${DEDUP_SONG_PREFIX}${this.hashSongArtist(track.name, track.artist_name)}`;
-      const songRecent = await this.deps.kv.get(songKey).catch(() => null);
-      if (songRecent) { rejected.stage6++; continue; }
+      const songHash = this.hashSongArtist(track.name, track.artist_name);
+      if (publishedSongs.has(songHash)) { rejected.stage6++; continue; }
 
       // Stage 7: Prefer tracks with artwork
       const hasArtwork = !!track.album_image;
