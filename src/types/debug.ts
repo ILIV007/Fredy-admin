@@ -71,7 +71,11 @@ export type DebugEventName =
   // v13.0.6: Novelty Score events
   | "novelty_score"
   | "novelty_accepted"
-  | "novelty_rejected";
+  | "novelty_rejected"
+  // v13.4.9: Duplicate forwarding events (admin PM notification)
+  | "pipeline.duplicate_forward"
+  | "scheduler.duplicate_forward_failed"
+  | "scheduler.duplicate_forward_item_failed";
 
 /** A single debug log entry. Stored in KV ring buffers when debug mode is on. */
 export interface DebugEvent {

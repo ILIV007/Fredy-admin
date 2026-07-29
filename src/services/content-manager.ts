@@ -75,11 +75,24 @@ export class ContentManager {
    *             → ContentEnricher → Category → Rank → AI → Quality → Format → Enqueue
    *
    * Each stage is isolated. If one fails, the pipeline continues when possible.
+   *
+   * v13.4.9: Added `onDuplicate` callback — invoked when Stage 6 detects a
+   * duplicate. This lets the scheduler collect duplicate items and forward
+   * them to the admin PM (matching the manual publish path behavior).
    */
   async process(
     sourceItem: SourceItem,
     language?: string,
-    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
+    options?: {
+      skipDedup?: boolean;
+      skipEnqueue?: boolean;
+      /** v13.4.9: Callback invoked when a duplicate is detected at Stage 6. */
+      onDuplicate?: (info: {
+        item: ContentItem;
+        existingId: string;
+        reason: "canonical" | "url" | "hash" | "title";
+      }) => void;
+    },
   ): Promise<PipelineResult> {
     const settings = await this.deps.settings();
     const lang = language ?? settings.language.default;
@@ -157,6 +170,16 @@ export class ContentManager {
       const dupCheck = await this.deps.duplicateDetector.check(item);
       if (dupCheck.isDuplicate) {
         const reason = `duplicate_${dupCheck.reason}` as RejectionReason;
+        // v13.4.9: Notify the caller about the duplicate so the scheduler
+        // can forward the formatted post to the admin PM (matching the
+        // manual publish path behavior in admin/screens/manual.ts).
+        try {
+          options?.onDuplicate?.({
+            item,
+            existingId: dupCheck.existingId ?? "",
+            reason: (dupCheck.reason ?? "hash") as "canonical" | "url" | "hash" | "title",
+          });
+        } catch { /* callback must never crash the pipeline */ }
         return this.rejectDuplicate(item, reason, `Duplicate (${dupCheck.reason}) of ${dupCheck.existingId}`, dupCheck.existingId ?? "", dupCheck.reason ?? "hash");
       }
     }
@@ -491,7 +514,15 @@ export class ContentManager {
   async processFromPlugin(
     pluginId: string,
     language?: string,
-    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
+    options?: {
+      skipDedup?: boolean;
+      skipEnqueue?: boolean;
+      onDuplicate?: (info: {
+        item: ContentItem;
+        existingId: string;
+        reason: "canonical" | "url" | "hash" | "title";
+      }) => void;
+    },
   ): Promise<PipelineResult> {
     const item = await this.deps.pluginManager.fetchOne(pluginId);
     if (!item) {
@@ -513,7 +544,15 @@ export class ContentManager {
     category: Category,
     lastSource: string | null = null,
     language?: string,
-    options?: { skipDedup?: boolean; skipEnqueue?: boolean },
+    options?: {
+      skipDedup?: boolean;
+      skipEnqueue?: boolean;
+      onDuplicate?: (info: {
+        item: ContentItem;
+        existingId: string;
+        reason: "canonical" | "url" | "hash" | "title";
+      }) => void;
+    },
   ): Promise<PipelineResult> {
     const fetchResult = await this.deps.pluginManager.fetchForCategory(category, lastSource);
     if (!fetchResult) {

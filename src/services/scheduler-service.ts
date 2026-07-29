@@ -23,7 +23,8 @@ import type {
   SlotTime,
 } from "../types/scheduler";
 import type { Category } from "../types/category";
-import type { ReadyContent } from "../types/content";
+import type { ReadyContent, ContentItem } from "../types/content";
+import type { SourceItem } from "../types/api";
 import type { FredySettings } from "../types/config";
 import type { DailyPlanner } from "./daily-planner";
 import type { JobQueue } from "./job-queue";
@@ -41,6 +42,25 @@ import { reportBanner, reportRow, qualityRow } from "../primitives/report";
 /** Publisher interface — both PublishingService and FinalPublisher implement this. */
 export interface Publisher {
   publish(content: ReadyContent): Promise<PublishResult>;
+}
+
+/**
+ * v13.4.9: Collected duplicate info.
+ * When the pipeline rejects an item as a duplicate at Stage 6, the item
+ * details are collected so fireSlot can forward the formatted post to
+ * the admin PM (matching the manual publish path in admin/screens/manual.ts).
+ */
+export interface CollectedDuplicate {
+  /** The original SourceItem (for re-processing with skipDedup). */
+  readonly sourceItem: SourceItem;
+  /** The ContentItem built by the pipeline (has raw, title, url, etc.). */
+  readonly contentItem: ContentItem;
+  /** The ID of the previously-published content this duplicates. */
+  readonly existingId: string;
+  /** Which dedup layer matched: canonical, url, hash, or title. */
+  readonly reason: "canonical" | "url" | "hash" | "title";
+  /** Which plugin produced this duplicate. */
+  readonly pluginId: string;
 }
 
 export interface SchedulerServiceDeps {
@@ -71,6 +91,13 @@ export class SchedulerService {
   private static readonly MAX_REPLACEMENT_ATTEMPTS = 5;
 
   constructor(private readonly deps: SchedulerServiceDeps) {}
+
+  /**
+   * v13.4.9: Collected duplicate info — used by acquireContent to report
+   * duplicate rejections to fireSlot, which forwards the formatted posts
+   * to the admin PM (matching the manual publish path behavior).
+   */
+  private static readonly MAX_DUPLICATES_TO_FORWARD = 3;
 
   /**
    * v12.0.5: Check if a publish failure was caused by duplicate detection.
@@ -501,17 +528,44 @@ export class SchedulerService {
    *
    * IMPORTANT: Only returns content from the SAME CATEGORY as the slot.
    * This preserves category distribution — a Cat A slot will never get Cat B content.
+   *
+   * v13.4.9: Added `duplicateCollector` out-parameter. When the pipeline
+   * rejects an item as a duplicate, the item info is pushed to this array
+   * so the caller (fireSlot) can forward the formatted post to the admin PM.
    */
   private async acquireContent(
     slot: SlotTime,
     settings: FredySettings,
     expectedLang: string,
+    duplicateCollector?: CollectedDuplicate[],
   ): Promise<ReadyContent | null> {
     // v12.2.2: Try the plan's assigned provider FIRST, before falling back to
     // category-wide processForCategory. This fixes the bug where the plan
     // carefully selects "openai-news" for a slot, but fireSlot ignores it
     // and just picks whoever has the lowest priority number.
     const preferredProvider = (slot as SlotTime & { provider?: string | null }).provider ?? null;
+
+    // v13.4.9: Helper to build the onDuplicate callback that collects dup info.
+    const buildOnDuplicate = () => (info: {
+      item: ContentItem;
+      existingId: string;
+      reason: "canonical" | "url" | "hash" | "title";
+    }) => {
+      if (!duplicateCollector) return;
+      // Avoid collecting the same item twice (e.g., when processForCategory
+      // retries the same item internally).
+      const itemId = info.item.id;
+      if (duplicateCollector.some((d) => d.contentItem.id === itemId)) return;
+      // Cap the collector to avoid flooding the admin PM.
+      if (duplicateCollector.length >= SchedulerService.MAX_DUPLICATES_TO_FORWARD) return;
+      duplicateCollector.push({
+        sourceItem: info.item.raw,
+        contentItem: info.item,
+        existingId: info.existingId,
+        reason: info.reason,
+        pluginId: info.item.pluginId,
+      });
+    };
 
     if (preferredProvider) {
       this.deps.logger.info("scheduler.preferred_provider", {
@@ -523,7 +577,7 @@ export class SchedulerService {
         const preferredResult = await this.deps.contentManager.processFromPlugin(
           preferredProvider,
           settings.language.default,
-          { skipEnqueue: true },
+          { skipEnqueue: true, onDuplicate: buildOnDuplicate() },
         );
         if (preferredResult.ok && preferredResult.content) {
           this.deps.logger.info("pipeline.complete", {
@@ -591,7 +645,7 @@ export class SchedulerService {
             raw: queued.content.raw,
             language: queuedLang,
             fetchedAt: Date.now(),
-          } as unknown as import("../types/api").SourceItem).catch(() => fallback);
+          } as unknown as SourceItem).catch(() => fallback);
           if (dupCheck.isDuplicate) {
             this.deps.logger.warn("scheduler.skip", {
               slotIndex: slot.index,
@@ -600,6 +654,34 @@ export class SchedulerService {
               duplicateOf: dupCheck.existingId ?? "unknown",
               message: `Queued content is now a duplicate (of ${dupCheck.existingId ?? "unknown"}) — skipping, trying next`,
             });
+            // v13.4.9: Collect this duplicate for admin PM forwarding.
+            // Build a minimal ContentItem from the queued ReadyContent.
+            if (duplicateCollector && queued.content.raw) {
+              const itemId = queued.content.id;
+              if (!duplicateCollector.some((d) => d.contentItem.id === itemId) &&
+                  duplicateCollector.length < SchedulerService.MAX_DUPLICATES_TO_FORWARD) {
+                const fakeContentItem: ContentItem = {
+                  id: queued.content.id,
+                  pluginId: queued.content.pluginId,
+                  title: queued.content.headline ?? queued.content.id,
+                  body: queued.content.text,
+                  category: queued.content.category,
+                  source: queued.content.pluginId,
+                  language: queuedLang,
+                  url: queued.content.sourceUrl,
+                  media: queued.content.media,
+                  fetchedAt: queued.content.fetchedAt,
+                  raw: queued.content.raw,
+                };
+                duplicateCollector.push({
+                  sourceItem: queued.content.raw,
+                  contentItem: fakeContentItem,
+                  existingId: dupCheck.existingId ?? "",
+                  reason: (dupCheck.reason ?? "hash") as "canonical" | "url" | "hash" | "title",
+                  pluginId: queued.content.pluginId,
+                });
+              }
+            }
             continue; // Skip this queued item, try the next one.
           }
         }
@@ -618,7 +700,7 @@ export class SchedulerService {
       slot.category,
       null,
       settings.language.default,
-      { skipEnqueue: true },
+      { skipEnqueue: true, onDuplicate: buildOnDuplicate() },
     );
 
     if (pipelineResult.ok && pipelineResult.content) {
@@ -639,7 +721,7 @@ export class SchedulerService {
         const fbResult = await this.deps.contentManager.processFromPlugin(
           fbPlugin,
           settings.language.default,
-          { skipEnqueue: true },
+          { skipEnqueue: true, onDuplicate: buildOnDuplicate() },
         );
         if (fbResult.ok && fbResult.content) {
           this.deps.logger.info("pipeline.complete", {
@@ -705,6 +787,13 @@ export class SchedulerService {
       reason: string;
     }> = [];
 
+    // v13.4.9: Duplicate collector — accumulates duplicate items rejected by
+    // the pipeline (Stage 6) or the queue dequeue dedup check. When fireSlot
+    // fails to find any non-duplicate content, these are forwarded to the
+    // admin PM so the admin can see what was blocked and manually forward
+    // any post they want published anyway.
+    const duplicateCollector: CollectedDuplicate[] = [];
+
     // v12.0.5: Write "publishing" marker BEFORE the replacement loop.
     // This prevents duplicate processing if the Worker crashes mid-loop.
     if (this.deps.strategyEngine) {
@@ -740,7 +829,9 @@ export class SchedulerService {
       }
 
       // ── Acquire candidate (same-category only) ──
-      const content = await this.acquireContent(slot, settings, expectedLang);
+      // v13.4.9: Pass duplicateCollector so pipeline-rejected duplicates
+      // are captured for admin PM forwarding.
+      const content = await this.acquireContent(slot, settings, expectedLang, duplicateCollector);
 
       if (!content) {
         // No content available from any source.
@@ -880,6 +971,24 @@ export class SchedulerService {
     // ════════════════════════════════════════════════════════════
     // FAILURE HANDLING (all attempts failed, or no content, or non-dedup error)
     // ════════════════════════════════════════════════════════════
+
+    // v13.4.9: Forward collected duplicates to the admin PM BEFORE the
+    // generic failure notification. This matches the manual publish path
+    // (admin/screens/manual.ts) — the admin receives the formatted post
+    // (photo or text) so they can manually forward it to the channel,
+    // followed by a duplicate notice explaining which existing post it
+    // matched. This ensures GitHub (and all other) posts that were
+    // blocked by dedup are still visible to the admin.
+    if (duplicateCollector.length > 0) {
+      await this.sendDuplicatesToAdmin(slot, duplicateCollector).catch((err) => {
+        this.deps.logger.warn("scheduler.duplicate_forward_failed", {
+          slotIndex: slot.index,
+          duplicateCount: duplicateCollector.length,
+          error: err instanceof Error ? err.message : String(err),
+          message: "Failed to forward duplicates to admin PM (non-fatal)",
+        });
+      });
+    }
 
     // v12.2.1: If time budget was exceeded, mark as failed with a clear reason.
     // This prevents the slot from being stuck in "publishing" forever.
@@ -1255,6 +1364,166 @@ export class SchedulerService {
         ? reportRow("📤", "Channel Message ID", String(pubResult.telegramMessageId))
         : reportRow("⚠️", "Error", pubResult.error ?? "unknown"),
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+  }
+
+  /**
+   * v13.4.9: Forward collected duplicate posts to the admin PM.
+   *
+   * When the scheduler's pipeline rejects content as duplicates (Stage 6
+   * in content-manager.ts, or the queue dequeue dedup check), the duplicate
+   * items are collected in `duplicateCollector`. This method re-processes
+   * each one with `skipDedup: true` to produce a full ReadyContent,
+   * transforms it to a FinalPost, and sends it to the admin PM — matching
+   * the manual publish path behavior (admin/screens/manual.ts).
+   *
+   * For each duplicate, the admin receives:
+   *   1. The formatted post (photo or text) — so they can forward it to
+   *      the channel if they want it published anyway.
+   *   2. A duplicate notice explaining which existing post it matched
+   *      and which dedup layer (canonical/url/hash) caught it.
+   *
+   * This ensures GitHub (and all other) posts blocked by dedup are still
+   * visible to the admin — previously they were silently discarded and the
+   * admin only saw a generic "No content available" message.
+   *
+   * Non-fatal: all errors are caught and logged. Never throws.
+   */
+  private async sendDuplicatesToAdmin(
+    slot: SlotTime,
+    duplicates: readonly CollectedDuplicate[],
+  ): Promise<void> {
+    const adminId = this.deps.adminId?.() ?? 0;
+    if (adminId <= 0 || !this.deps.tg) return;
+    if (duplicates.length === 0) return;
+
+    const settings = await this.deps.settings();
+    const lang = settings.language.default;
+
+    this.deps.logger.info("pipeline.duplicate_forward", {
+      slotIndex: slot.index,
+      category: slot.category,
+      duplicateCount: duplicates.length,
+      plugins: duplicates.map((d) => d.pluginId),
+      message: `Forwarding ${duplicates.length} duplicate(s) to admin PM`,
+    });
+
+    for (const dup of duplicates) {
+      try {
+        // 1. Re-process the original SourceItem with skipDedup to get a
+        //    full ReadyContent (runs AI enrichment, quality scoring, etc.).
+        const reprocessed = await this.deps.contentManager.process(
+          dup.sourceItem,
+          lang,
+          { skipDedup: true, skipEnqueue: true },
+        );
+
+        let coverUrl: string | null = null;
+        let caption = "";
+        let fullText = "";
+
+        if (reprocessed.ok && reprocessed.content) {
+          // 2. Transform to FinalPost for the formatted text + media.
+          if (this.deps.uxLayer) {
+            try {
+              const finalPost = await this.deps.uxLayer.transform(reprocessed.content);
+              coverUrl = (finalPost.media && finalPost.media.type === "image" && finalPost.media.url)
+                ? finalPost.media.url
+                : null;
+              caption = finalPost.caption || "";
+              fullText = finalPost.fullText;
+            } catch {
+              // transform failed — use raw content text as fallback.
+              fullText = reprocessed.content.text;
+            }
+          } else {
+            fullText = reprocessed.content.text;
+          }
+        } else {
+          // Re-processing failed (e.g., AI error). Use the raw item info.
+          fullText = [
+            `<b>${escapeHtml(dup.contentItem.title || "(no title)")}</b>`,
+            ``,
+            escapeHtml(dup.contentItem.body || ""),
+            ``,
+            `<blockquote>🔗 ${escapeHtml(dup.contentItem.url || "(no url)")}</blockquote>`,
+          ].join("\n");
+        }
+
+        // 3. Resolve an image if the post doesn't have one but has a source URL.
+        if (!coverUrl && dup.contentItem.url && this.deps.kv) {
+          // Try the ImageResolver — GitHub repos get the opengraph card,
+          // other URLs get og:image fetch.
+          try {
+            const { ImageResolver } = await import("./image-resolver");
+            const resolver = new ImageResolver({
+              kv: this.deps.kv,
+              logger: this.deps.logger,
+            });
+            const resolved = await resolver.resolve({
+              id: dup.contentItem.id,
+              source: dup.pluginId,
+              category: dup.contentItem.category,
+              title: dup.contentItem.title,
+              body: dup.contentItem.body,
+              url: dup.contentItem.url,
+              imageUrl: dup.sourceItem.imageUrl,
+              fetchedAt: Date.now(),
+            } as SourceItem);
+            if (resolved) coverUrl = resolved.url;
+          } catch { /* non-fatal — text-only is acceptable */ }
+        }
+
+        // 4. Send the formatted post (photo or text) to admin PM.
+        const postText = coverUrl ? (caption || fullText) : fullText;
+        if (coverUrl && postText) {
+          await this.deps.tg.sendPhoto(adminId, coverUrl, postText, {
+            parse_mode: "HTML",
+          }).catch(() => {
+            // sendPhoto failed — fall back to text-only.
+            return this.deps.tg?.sendMessage(adminId, fullText, {
+              parse_mode: "HTML",
+            }).catch(() => {});
+          });
+        } else {
+          const previewMode = settings.telegram.linkPreviewMode ?? "smart";
+          const previewOpts = this.resolvePreviewOptionsForAdmin(previewMode, dup.pluginId);
+          await this.deps.tg.sendMessage(adminId, fullText, {
+            parse_mode: "HTML",
+            link_preview_options: previewOpts,
+          }).catch(() => {});
+        }
+
+        // 5. Send the duplicate notice.
+        const reasonLabel: Record<string, string> = {
+          canonical: "🆔 Canonical ID",
+          url: "🔗 URL",
+          hash: "🔐 Content hash",
+          title: "📝 Title",
+        };
+        await this.deps.tg.sendMessage(adminId, [
+          ``,
+          reportBanner("🔁", "DUPLICATE DETECTED (auto)"),
+          ``,
+          ``,
+          reportRow("📅", "Slot", `${slot.date} at ${slot.scheduledTime ?? slot.time}`),
+          reportRow("🏷️", "Category", slot.category),
+          reportRow("🔌", "Plugin", dup.pluginId),
+          reportRow("📰", "Title", escapeHtml((dup.contentItem.title || "(no title)").slice(0, 200))),
+          reportRow("🔗", "URL", escapeHtml(dup.contentItem.url || "(none)")),
+          reportRow("⚠️", "Matches existing", `${dup.existingId || "(unknown)"} (${reasonLabel[dup.reason] ?? dup.reason})`),
+          ``,
+          `<blockquote>💡 <i>The formatted post above was blocked by the duplicate detector and sent here for manual forwarding. Forward it to the channel if you want it published anyway.</i></blockquote>`,
+        ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
+      } catch (err) {
+        this.deps.logger.warn("scheduler.duplicate_forward_item_failed", {
+          slotIndex: slot.index,
+          contentId: dup.contentItem.id,
+          pluginId: dup.pluginId,
+          error: err instanceof Error ? err.message : String(err),
+          message: "Failed to forward a single duplicate (non-fatal, continuing)",
+        });
+      }
+    }
   }
 
   /**

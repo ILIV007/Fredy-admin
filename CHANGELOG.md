@@ -2,6 +2,41 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.4.9] — 2026-07-30 — Duplicate Forwarding to Admin PM (GitHub Posts Visibility Fix)
+
+### 🐛 CRITICAL FIX: Pipeline-Rejected Duplicates Now Forwarded to Admin PM
+
+**User report:** GitHub posts that were detected as duplicates were NOT being sent to the admin. After duplicate detection, they simply disappeared — the admin only saw a generic "No content available" message with no visibility into what was blocked.
+
+**Root cause:** The scheduler's `acquireContent()` method calls `contentManager.processFromPlugin()` and `processForCategory()`, which run the full pipeline including Stage 6 (Duplicate Check). When an item is a duplicate, `ContentManager.process()` returns a rejection result with `duplicateOf` info — but `acquireContent()` **silently discarded this info** and just returned `null`. The replacement loop in `fireSlot()` then tried the next candidate, and if ALL candidates were duplicates, the admin only got a "NO_VALID_CONTENT_AFTER_DEDUP" summary with content IDs — **no formatted posts, no way to see what was blocked**.
+
+This was asymmetric with the **manual publish path** (`admin/screens/manual.ts`), which already had logic to re-process duplicates with `skipDedup: true` and send the formatted post + a duplicate notice to the admin PM. The scheduler path was missing this entirely.
+
+**Fix — 3-part change:**
+
+1. **`content-manager.ts`**: Added `onDuplicate` callback to the `process()`, `processFromPlugin()`, and `processForCategory()` options. When Stage 6 detects a duplicate, the callback is invoked with the `ContentItem`, `existingId`, and `reason` (canonical/url/hash). The callback is wrapped in try/catch so it can never crash the pipeline.
+
+2. **`scheduler-service.ts`**: `acquireContent()` now accepts a `duplicateCollector?: CollectedDuplicate[]` out-parameter. The `onDuplicate` callback pushes rejected items into this array (capped at 3 to avoid flooding). Both the pipeline path (Stage 6) and the queue-dequeue dedup path now collect duplicates.
+
+3. **`scheduler-service.ts`**: New `sendDuplicatesToAdmin()` method. Called at the start of `fireSlot()`'s failure handling (BEFORE the generic failure notification). For each collected duplicate:
+   - Re-processes the original `SourceItem` with `skipDedup: true` to produce a full `ReadyContent`
+   - Transforms it to a `FinalPost` via `UXLayer.transform()` (gets the formatted text + media)
+   - Resolves an image via `ImageResolver` (GitHub repos get the opengraph card)
+   - Sends the formatted post (photo or text) to the admin PM — so the admin can forward it to the channel
+   - Sends a "🔁 DUPLICATE DETECTED (auto)" notice with the slot info, plugin, title, URL, and which existing post it matched
+
+**Result:** GitHub posts (and all other plugin posts) that are blocked by dedup are now **visible to the admin**. The admin receives the exact formatted post that would have gone to the channel, plus a notice explaining why it was blocked. The admin can then manually forward it if desired.
+
+**Files changed:**
+- `src/services/content-manager.ts` — `onDuplicate` callback in process/processFromPlugin/processForCategory
+- `src/services/scheduler-service.ts` — `CollectedDuplicate` interface, `duplicateCollector` param in `acquireContent()`, `sendDuplicatesToAdmin()` method, wired into `fireSlot()`
+- `src/types/debug.ts` — 3 new DebugEventName values: `pipeline.duplicate_forward`, `scheduler.duplicate_forward_failed`, `scheduler.duplicate_forward_item_failed`
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 488 passing (87+191+41+28+80+35+26) ✅
+- Manager dashboard: v13.4.9 visible ✅
+
 ## [13.1.3] — 2026-07-26 — Schedule Integrity Final Fixes (H-slot Collision + Canonical IDs + Weighted Selection)
 
 ### 🐛 CRITICAL FIX: H-slot Collisions with A/B/C Posts Eliminated
