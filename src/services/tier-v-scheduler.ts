@@ -174,11 +174,20 @@ export class TierVScheduler {
   ): Promise<PublishResult> {
     const container = this.deps.container;
 
-    // Fetch content from the configured provider (skipEnqueue — direct publish).
+    // v13.4.12: For NASA, pass skipDedup: true because the NASA plugin
+    // already does its OWN dedup-aware selection (it checks the dedup KV
+    // and picks the most recent unpublished image APOD). If we don't skip
+    // Stage 6, a "throwback" APOD (all recent images already published)
+    // would be rejected by the pipeline's dedup check, and no NASA post
+    // would ever be sent on consecutive video days.
+    //
+    // For other Tier V providers (e.g., night-music), keep the normal
+    // dedup check (they have their own dedup systems that don't conflict).
+    const isNasa = entry.providerId === "nasa";
     const pipelineResult = await container.content.processFromPlugin(
       entry.providerId,
       settings.language.default,
-      { skipEnqueue: true },
+      { skipEnqueue: true, skipDedup: isNasa },
     );
 
     if (!pipelineResult.ok || !pipelineResult.content) {

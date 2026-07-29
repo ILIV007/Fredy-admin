@@ -1,13 +1,13 @@
-# Fredy v13.3.11
+# Fredy v13.4.13
 
 > **Autonomous AI-powered Technology News Hub for Telegram channels.**
-> Built on Cloudflare Workers Free Tier. Zero-KV quiet hours, Tier V scheduled content, Jamendo Night Music, 10-stage quality pipeline, weighted provider selection, and 488 passing tests.
+> Built on Cloudflare Workers Free Tier. NASA batch-fetch with dedup-aware image guarantee, duplicate forwarding to admin PM, Tier V scheduled content, Jamendo Night Music, 10-stage quality pipeline, weighted provider selection, and 492 passing tests.
 
-[![Version](https://img.shields.io/badge/version-13.3.11-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-13.4.13-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-488%20passing-brightgreen)](./scripts)
+[![Tests](https://img.shields.io/badge/tests-492%20passing-brightgreen)](./scripts)
 [![Channel](https://img.shields.io/badge/Telegram-@ILIVIR3-2AABEE)](https://t.me/ILIVIR3)
 
 ---
@@ -19,8 +19,11 @@ Fredy is a production-grade, serverless content publishing platform that automat
 ### What Makes Fredy Different
 
 - **25 Content Source Providers** across 6 tiers (S/A/B/H/V/Legacy) — RSS, REST API, GraphQL, JSON
+- **NASA Batch Fetch (v13.4.12)** — fetches 14 days of APODs in 1 API call, dedup-aware image selection guarantees a NASA image every day (even on video days, uses throwback from recent unpublished images)
+- **Duplicate Forwarding (v13.4.9)** — pipeline-rejected duplicates are forwarded to admin PM as formatted posts + duplicate notices (admin can manually forward to channel)
+- **NASA Image Guarantee (v13.4.10)** — 4-layer image resolution: plugin media → MediaResolver → ImageResolver og:image → NASA page og:image fetch
 - **Tier H Hardware News** — Ars Technica, Tom's Hardware, TechPowerUp with Quality Filter (0-100 scoring, deal/promo rejection, clickbait hard-reject)
-- **Tier V Scheduled Content** — NASA APOD at 00:00 + Night Music (Jamendo CC audio) at 00:03
+- **Tier V Scheduled Content** — NASA APOD at 23:20 + Night Music (Jamendo CC audio) at 23:23
 - **Night Music** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 10-stage quality pipeline, 180-day song dedup + 30-day artist cooldown
 - **Novelty Score** — prevents same news from different providers being published within 48h
 - **Weighted Provider Selection** — `selectProviderWeighted()` uses config weights (e.g., GitHub Releases weight=100 > StackExchange weight=80)
@@ -28,7 +31,7 @@ Fredy is a production-grade, serverless content publishing platform that automat
 - **Truly Random Wildcard** — daily wildcard post picks from ALL active APIs (never picks H slots)
 - **6 AI Models** — Gemini (primary) + OpenRouter (fallback, 6 free models)
 - **Zero-KV Quiet Hours** — 0 KV reads + 0 KV writes during quiet hours (except Tier V)
-- **488 Passing Tests** across 7 test suites
+- **492 Passing Tests** across 7 test suites
 
 ---
 
@@ -112,14 +115,14 @@ Fredy is a production-grade, serverless content publishing platform that automat
 ### Tier V — Scheduled Content (fixed schedule)
 | Provider | Time | Description |
 |----------|------|-------------|
-| NASA APOD | 00:00 | Astronomy Picture of the Day |
-| Night Music | 00:03 | CC audio from Jamendo API via `sendAudio()` |
+| NASA APOD | 23:20 | Astronomy Picture of the Day — batch fetch 14 days, dedup-aware image selection |
+| Night Music | 23:23 | CC audio from Jamendo API via `sendAudio()` |
 
 ---
 
 ## Night Music (Tier V)
 
-Every night at 00:03, Fredy publishes one Creative Commons audio track from the Jamendo API.
+Every night at 23:23, Fredy publishes one Creative Commons audio track from the Jamendo API.
 
 ### How it works
 
@@ -151,6 +154,48 @@ Artist Name            (monospace)
 - `fredy:music:artist:<normalized>` — 30-day TTL
 - `fredy:music:song:<hash>` — 180-day TTL
 - Only 2 KV writes per night (recorded AFTER successful upload)
+
+---
+
+## NASA APOD (Tier V) — v13.4.12 Batch Fetch
+
+Every night at 23:20, Fredy publishes a NASA Astronomy Picture of the Day. The plugin guarantees **a NASA image is published every single day** — even when today's APOD is a video.
+
+### How it works (v13.4.12)
+
+1. **Batch fetch** — fetches the last **14 days** of APODs in ONE API call (`start_date` + `end_date`)
+2. **Filter** — removes video APODs (user request: only images, no videos)
+3. **Sort** — by date descending (most recent first)
+4. **Dedup-aware selection** — for each image APOD candidate, checks the dedup KV:
+   - If NOT published → return it (most recent unpublished image)
+   - If ALL published → return the most recent anyway (throwback)
+5. **4-layer image guarantee** (v13.4.10):
+   - Layer 1: Plugin sets `media` + `imageUrl` (direct image URL)
+   - Layer 2: MediaResolver validates and returns the media
+   - Layer 3: ImageResolver fetches og:image from the APOD page URL
+   - Layer 4: NASA Image Guarantee fetches og:image directly (last resort)
+
+### Daily scenarios
+
+| Day type | Behavior |
+|----------|----------|
+| **Image day** | Today's APOD published (normal) |
+| **Video day** | Most recent unpublished image from last 14 days (throwback) |
+| **Consecutive video days** | Walks further back until unpublished image found |
+| **All 14 days published** | Re-publishes most recent image (rare edge case) |
+
+### API efficiency
+- Only **1 API call per day** (batch fetch returns 14 days at once)
+- Raw batch cached for 6 hours (retries within same night don't hit API)
+- DEMO_KEY: 50 requests/day (we use 1) | Real key: 1,000/hour
+
+### KV usage (v13.4.13 optimized)
+- `fredy:source:nasa:apod:raw` — 6h TTL (raw APODResponse[] batch cache)
+- `fredy:source:nasa:migrated-v13.4.13` — 7-day TTL (one-time migration flag)
+- `fredy:dedup:canonical:nasa:YYMMDD` — 30-day TTL (checked during selection)
+- **Reads per fetch**: 1-14 (best case 1, average 2-3, worst case 14)
+- **Writes per fetch**: 0 (writes happen in FinalPublisher after publish)
+- **Migration**: one-time `delete(old_key)` + `set(flag)` on first run only
 
 ---
 

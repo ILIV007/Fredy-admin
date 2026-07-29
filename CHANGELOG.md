@@ -2,6 +2,139 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.4.13] — 2026-07-30 — KV Efficiency Fix + README Update
+
+### 🔧 OPTIMIZATION: KV Usage Efficiency
+
+**User concern:** "مشکلی که در مصرف kv و باگی ایجاد نمیکنه؟؟؟؟؟بیهنه هست؟؟؟" ("Does it cause issues with KV usage? Is it efficient?")
+
+**Issue found:** The v13.4.12 NASA plugin ran `delete(OLD_CACHE_KEY)` on EVERY fetch — a wasteful KV write that ran unnecessarily after the first migration. Cloudflare KV bills for writes, so this was inefficient.
+
+**Fix:** Added a one-time migration flag (`fredy:source:nasa:migrated-v13.4.13`):
+- On first run: checks the flag (1 read), deletes old key (1 write), sets the flag (1 write) — 3 ops total
+- On subsequent runs: checks the flag (1 read), skips the delete — 1 read only
+- Flag has a 7-day TTL (enough to cover the 6h raw cache TTL)
+- After 7 days, the flag expires and the check runs again — but by then the old key has long expired naturally
+
+**KV usage analysis (v13.4.13):**
+| Operation | Reads | Writes |
+|-----------|-------|--------|
+| Migration check | 1 | 0 (after first run) |
+| Raw cache check | 1 | 0 (cache hit) or 1 (cache miss) |
+| Dedup selection (best case) | 1 | 0 |
+| Dedup selection (video day) | 2-3 | 0 |
+| Dedup selection (worst case) | 14 | 0 |
+| FinalPublisher record | 0 | 3 (canonical+url+hash) |
+| **Total per NASA post** | **3-16** | **3-4** |
+
+With Tier V running once/day, NASA uses at most ~16 reads + 4 writes per day — well within Cloudflare KV free tier limits (100k reads/day, 1k writes/day).
+
+### 📚 DOC: README Updated
+
+Updated `README.md` from v13.3.11 to v13.4.13:
+- Version badges updated
+- Added "NASA Batch Fetch (v13.4.12)" feature to "What Makes Fredy Different"
+- Added "Duplicate Forwarding (v13.4.9)" feature
+- Added "NASA Image Guarantee (v13.4.10)" feature
+- Updated Tier V times (23:20/23:23, not 00:00/00:03)
+- Added full "NASA APOD (Tier V) — v13.4.12 Batch Fetch" section with:
+  - How it works (5-step pipeline)
+  - 4-layer image guarantee
+  - Daily scenarios table
+  - API efficiency notes
+  - KV usage breakdown
+- Fixed Night Music time (23:23, not 00:03)
+- Test count updated to 492
+
+**Files changed:**
+- `src/plugins/sources/nasa/index.ts` — One-time migration flag, KV efficiency doc comment
+- `README.md` — Full update to v13.4.13
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 492 passing ✅
+- Manager dashboard: v13.4.13 visible ✅
+
+## [13.4.12] — 2026-07-30 — NASA Batch Fetch + Dedup-Aware Image Selection (Guaranteed Daily Image)
+
+### 🚀 NEW FEATURE: NASA APOD Image Guaranteed Every Day
+
+**User report:** "خب الان کلا برای ادمین پستی ارسال نمیشه در مواقعی که ویدیو هستش؟؟؟نمیشه عگس از جای دیگه ایی گرفت؟؟؟یا از قبل سیو کرد؟؟؟راه حلی پیدا کن که هر روز یک عکس حداقال از ناسا داشته باشیم!" ("So now no post is sent when it's a video day??? Can't we get an image from elsewhere? Or save from before? Find a solution so every day we have at least one NASA image!")
+
+**Research:** Investigated the NASA APOD API capabilities:
+- The API supports `start_date` + `end_date` parameters that return an ARRAY of APODs (up to 14 days in one call)
+- This is just 1 API call regardless of how many days are fetched
+- Each APOD has a `media_type` field ("image" or "video")
+- The dedup KV key for NASA is `fredy:dedup:canonical:nasa:YYMMDD` (30-day TTL)
+- The plugin has direct KV access via `this.deps.kv`
+
+**Solution — 3-part change:**
+
+1. **NASA plugin (`nasa/index.ts`)**: Complete rewrite of `fetch()`:
+   - Fetches the last **14 days** of APODs in ONE batch API call (`start_date` + `end_date`)
+   - Filters to **image-only** APODs (videos skipped per user request from v13.4.11)
+   - Sorts by date descending (most recent first)
+   - For each candidate, checks the **dedup KV** (`fredy:dedup:canonical:nasa:YYMMDD`):
+     - If NOT in dedup → returns it (unpublished image, most recent first)
+   - If ALL 14 days of image APODs are already published → returns the most recent one anyway (as a "throwback" — re-publishing is better than no post)
+   - If no image APODs exist in the batch (all 14 days were videos — extremely unlikely) → returns null
+
+2. **Cache strategy**: Changed from caching the selected SourceItem to caching the RAW APOD batch:
+   - New cache key: `fredy:source:nasa:apod:raw` (stores the raw `APODResponse[]` array)
+   - The dedup-aware selection runs EVERY TIME (against fresh dedup state)
+   - This prevents a published APOD from staying cached and being rejected by Stage 6
+   - Old cache key (`fredy:source:nasa:apod`) is cleared on first run for migration
+
+3. **Tier V scheduler (`tier-v-scheduler.ts`)**: Pass `skipDedup: true` for NASA:
+   - The NASA plugin already does its OWN dedup-aware selection
+   - If Stage 6 runs, a "throwback" APOD (already published) would be rejected
+   - Setting `skipDedup: true` for NASA prevents this double-check
+   - Other Tier V providers (night-music) keep their normal dedup behavior
+
+**Result:** Every day, the channel gets a NASA image post:
+- **Image day** → today's APOD is published (normal path)
+- **Video day** → the most recent unpublished image APOD from the last 14 days is published (throwback)
+- **Consecutive video days** → walks further back until an unpublished image is found
+- **All 14 days published** → re-publishes the most recent image (rare edge case)
+
+A day without a NASA image is now virtually impossible — it would require 14 consecutive video days (NASA APOD videos are typically 1-2 per week at most).
+
+**API efficiency:** Only 1 API call per day (was also 1 before). The 14-day batch is cached for 6 hours, so retries within the same night don't hit the API again.
+
+**Files changed:**
+- `src/plugins/sources/nasa/index.ts` — Complete `fetch()` rewrite, new `selectBestImage()` method, batch cache strategy
+- `src/services/tier-v-scheduler.ts` — Pass `skipDedup: true` for NASA in `processFromPlugin()`
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 492 passing (87+195+41+28+80+35+26) ✅
+- Manager dashboard: v13.4.12 visible ✅
+
+## [13.4.11] — 2026-07-30 — NASA Images Only (Video Days Skipped)
+
+### 🐛 FIX: NASA Video Days Now Skipped Entirely
+
+**User report:** "برای ناسا هم فقط عکس باید ارسال بشه!ویدیو نمیخواد!!!!!!!!!عکس خوب طبق فیلتر هامون!!!" ("For NASA too, only images should be sent! I don't want videos!!!!! Good image according to our filters!!!")
+
+**Root cause:** The NASA plugin's `fetch()` method returned the APOD item regardless of `media_type`. For video days (`media_type === "video"`), the `url` field is a YouTube watch URL — there's no direct image to send. The v13.4.10 fix tried to handle this by fetching the YouTube thumbnail via og:image from the APOD page, but the user explicitly does NOT want video content at all.
+
+**Fix:** Added a `media_type === "video"` check in the NASA plugin's `fetch()` method. When the APOD is a video:
+- Logs a clear `source.fetch_skip` event: "NASA APOD is a VIDEO today — skipping per user request (only images, no videos)"
+- Returns an empty array (`[]`)
+- The Tier V scheduler sees "Plugin returned no items" and marks the attempt as failed
+- After 2 attempts (within 6 hours), the admin is notified: "TIER V FAILED — Plugin nasa returned no items"
+- No video content is ever published to the channel
+
+**Result:** NASA posts are now ALWAYS images. On video days, no NASA post is published — the admin is notified that it was a video day and it was skipped. On image days, the 4-layer image guarantee from v13.4.10 ensures the image is always sent.
+
+**Files changed:**
+- `src/plugins/sources/nasa/index.ts` — Added `media_type === "video"` check in `fetch()` that returns empty array
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 485 passing (87+188+41+28+80+35+26) ✅
+- Manager dashboard: v13.4.11 visible ✅
+
 ## [13.4.10] — 2026-07-30 — NASA Image Guarantee (APOD Posts Always Have Image)
 
 ### 🐛 CRITICAL FIX: NASA APOD Posts Without Images
