@@ -108,8 +108,18 @@ export class GitHubPlugin implements Plugin {
     // Check cache first
     const cached = await this.deps.kv.getJson<readonly SourceItem[]>(CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) {
-      this.deps.logger.info("source.fetch_cache_hit", { plugin: "github", count: cached.length });
-      return cached;
+      // v13.4.8: Re-normalize cached items to apply any imageUrl changes.
+      // Previously, cached items had old avatar URLs that were never updated
+      // even after the normalize() method was changed to use opengraph URLs.
+      const reNormalized = cached.map((item) => {
+        const repoFullName = item.title ?? "";
+        if (repoFullName && !item.imageUrl?.includes("opengraph.githubassets.com")) {
+          return { ...item, imageUrl: `https://opengraph.githubassets.com/1/${repoFullName}` };
+        }
+        return item;
+      });
+      this.deps.logger.info("source.fetch_cache_hit", { plugin: "github", count: reNormalized.length });
+      return reNormalized;
     }
 
     // Build URL — repos created in last 30 days, sorted by stars
