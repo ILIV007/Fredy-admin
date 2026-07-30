@@ -134,10 +134,11 @@ export class TierVScheduler {
             willRetry: newAttemptCount < TIER_V_MAX_ATTEMPTS,
           });
 
-          // v13.3.12: If this was the last attempt, notify admin.
-          if (newAttemptCount >= TIER_V_MAX_ATTEMPTS) {
-            await this.notifyAdminOfFailure(entry, result.error ?? "unknown error", nowInTz).catch(() => {});
-          }
+          // v14.0.4: ALWAYS notify admin on failure (not just last attempt).
+          // User report: "گزارش این ارور هم برای ادمین ارسال نمیشه!!!"
+          // Previously, admin was only notified after MAX_ATTEMPTS (2) — meaning
+          // the first failure was silent. Now: notify on EVERY failure attempt.
+          await this.notifyAdminOfFailure(entry, result.error ?? "unknown error", nowInTz, newAttemptCount).catch(() => {});
         }
       } catch (error) {
         // Exception — increment attempt counter.
@@ -152,11 +153,9 @@ export class TierVScheduler {
           willRetry: newAttemptCount < TIER_V_MAX_ATTEMPTS,
         });
 
-        // If this was the last attempt, notify admin.
-        if (newAttemptCount >= TIER_V_MAX_ATTEMPTS) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          await this.notifyAdminOfFailure(entry, errMsg, nowInTz).catch(() => {});
-        }
+        // v14.0.4: ALWAYS notify admin on exception (not just last attempt).
+        const errMsg = error instanceof Error ? error.message : String(error);
+        await this.notifyAdminOfFailure(entry, errMsg, nowInTz, newAttemptCount).catch(() => {});
       }
     }
 
@@ -242,11 +241,14 @@ export class TierVScheduler {
     return pubResult;
   }
 
-  /** v13.3.12: Notify admin when a Tier V entry fails after all retry attempts. */
+  /** v13.3.12: Notify admin when a Tier V entry fails.
+   *  v14.0.4: Now notifies on EVERY failure attempt (not just last).
+   *  Added attemptCount parameter to show which attempt failed. */
   private async notifyAdminOfFailure(
     entry: TierVEntry,
     error: string,
     nowTime: string,
+    attemptCount: number = 1,
   ): Promise<void> {
     const container = this.deps.container;
     const adminId = Number(container.env.ADMIN_ID ?? "0");
@@ -254,6 +256,10 @@ export class TierVScheduler {
 
     const isNightMusic = entry.providerId === "night-music";
     const emoji = isNightMusic ? "🎵" : "🪐";
+    const isLastAttempt = attemptCount >= TIER_V_MAX_ATTEMPTS;
+    const actionText = isLastAttempt
+      ? "Skipped for tonight — will retry tomorrow."
+      : `Will retry (attempt ${attemptCount + 1}/${TIER_V_MAX_ATTEMPTS} on next tick).`;
 
     await container.tg.sendMessage(adminId, [
       ``,
@@ -265,8 +271,8 @@ export class TierVScheduler {
       `<blockquote>⏰ <b>Scheduled:</b> ${entry.time} (fixed)</blockquote>`,
       `<blockquote>🕐 <b>Failed at:</b> ${nowTime}</blockquote>`,
       `<blockquote>❌ <b>Error:</b> ${error}</blockquote>`,
-      `<blockquote>🔄 <b>Attempts:</b> ${TIER_V_MAX_ATTEMPTS}/${TIER_V_MAX_ATTEMPTS} (exhausted)</blockquote>`,
-      `<blockquote>⏭️ <b>Action:</b> Skipped for tonight — will retry tomorrow.</blockquote>`,
+      `<blockquote>🔄 <b>Attempt:</b> ${attemptCount}/${TIER_V_MAX_ATTEMPTS}${isLastAttempt ? " (exhausted)" : ""}</blockquote>`,
+      `<blockquote>⏭️ <b>Action:</b> ${actionText}</blockquote>`,
     ].join("\n"), { parse_mode: "HTML" }).catch(() => {});
   }
 

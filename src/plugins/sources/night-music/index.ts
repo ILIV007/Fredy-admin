@@ -428,7 +428,47 @@ export class NightMusicPlugin implements Plugin {
       message: `[NIGHT_MUSIC] QUALITY_FILTER: ${tracks.length} total → ${candidates.length} candidates (rejected: s1=${rejected.stage1} s2=${rejected.stage2} s3=${rejected.stage3} s4=${rejected.stage4} s6=${rejected.stage6} s8=${rejected.stage8})`,
     });
 
-    if (candidates.length === 0) return null;
+    if (candidates.length === 0) {
+      // v14.0.4: FALLBACK — if all tracks are rejected by dedup (Stage 6),
+      // pick the FIRST valid track (passes Stage 1-4) ignoring dedup.
+      // This ensures Night Music ALWAYS publishes — even if all recent
+      // popular tracks were already published in the last 180 days.
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        reason: "all_rejected_by_dedup_fallback",
+        totalTracks: tracks.length,
+        rejectedStage6: rejected.stage6,
+        message: `[NIGHT_MUSIC] FALLBACK: all ${tracks.length} tracks rejected by dedup — picking first valid track ignoring dedup`,
+      });
+
+      // Find the first track that passes Stage 1-4 (skip dedup Stage 6).
+      for (const track of tracks) {
+        if (!track.name || !track.artist_name) continue;
+        if (!track.audio && !track.audiodownload) continue;
+        if (track.audiodownload_allowed === false) continue;
+        const audioUrl = track.audiodownload ?? track.audio;
+        if (!audioUrl) continue;
+        const duration = track.duration ?? 0;
+        if (duration > 0 && (duration < MIN_DURATION_SEC || duration > MAX_DURATION_SEC)) continue;
+        if (BAD_TITLE_PATTERNS.some((re) => re.test(track.name))) continue;
+
+        // Found a valid track — use it as fallback.
+        const hasArtwork = !!track.album_image;
+        const score = this.computeScore(track, audioUrl, hasArtwork);
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music",
+          stage: "FALLBACK_TRACK",
+          song: track.name,
+          artist: track.artist_name,
+          score,
+          message: `[NIGHT_MUSIC] FALLBACK_TRACK: "${track.name}" by ${track.artist_name} (score ${score}) — selected ignoring dedup`,
+        });
+        return { track, audioUrl, score };
+      }
+
+      // If we STILL can't find a valid track (all fail Stage 1-4), return null.
+      return null;
+    }
 
     // Stage 9: Weighted random selection
     const selected = this.weightedRandom(candidates);
