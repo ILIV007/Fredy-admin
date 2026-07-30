@@ -8,7 +8,7 @@
  * JAMENDO_CLIENT_ID is read from Worker Secret (never hardcoded).
  *
  * Pipeline (v13.5.0 — 9 stages, artist cooldown removed):
- *   1. Fetch 200 tracks from Jamendo API (order=popularity_month, groupby=artist_id)
+ *   1. Fetch 200 tracks from Jamendo API (order=popularity_month)
  *   2. Stage 1: Reject invalid (missing title/artist/audio)
  *   3. Stage 2: Reject non-downloadable (audiodownload_allowed=false)
  *   4. Stage 3: Reject duration outside 2-10 min
@@ -314,7 +314,7 @@ export class NightMusicPlugin implements Plugin {
       plugin: "night-music",
       stage: "RSS_FETCH",
       url: JAMENDO_API,
-      message: `[NIGHT_MUSIC] RSS_FETCH: calling Jamendo API (limit=${FETCH_LIMIT}, order=popularity_month, groupby=artist_id)`,
+      message: `[NIGHT_MUSIC] RSS_FETCH: calling Jamendo API (limit=${FETCH_LIMIT}, order=popularity_month)`,
     });
 
     const controller = new AbortController();
@@ -402,9 +402,7 @@ export class NightMusicPlugin implements Plugin {
     // published in the last 30 days (artist cooldown). This prevented the same
     // artist from appearing twice within a month — but the user wants NO artist
     // limitation. Artists can now repeat freely.
-    //
-    // v14.0.9: Use loadPublishedSongs() — caches the KV list() result for
-    // reuse by selectFromHallOfFame() (saves 1 redundant kv.list call).
+    // v14.2.0: Use loadPublishedSongs() — caches the KV list() result.
     const publishedSongs = await this.loadPublishedSongs();
 
     this.deps.logger.info("source.fetch_success", {

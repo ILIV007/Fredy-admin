@@ -134,52 +134,7 @@ export class FinalPublisher {
   /** Debug info from last publish attempt (for error reporting). */
   public _lastPublishDebug: Record<string, unknown> | null = null;
 
-  /**
-   * v14.0.8: In-memory recently published set — bridges KV eventual consistency gap.
-   * When a post is published, its canonical ID is added here with a 5-minute TTL.
-   * ContentManager Stage 6 check queries KV (which may not have propagated yet),
-   * but FinalPublisher.publish() can check this Set before publishing.
-   *
-   * This prevents the race condition where:
-   * T0: Manual publish → KV write (takes up to 60s to propagate)
-   * T0+30s: Scheduler tick → Stage 6 KV check → misses (not propagated) → duplicate!
-   *
-   * Now: FinalPublisher records to this Set IMMEDIATELY after publish,
-   * and the scheduler checks this Set BEFORE calling publish.
-   */
-  private recentlyPublished = new Map<string, number>(); // canonicalId → timestamp
-  private static RECENT_PUBLISH_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-  constructor(private readonly deps: FinalPublisherDeps) {
-    // Clean up expired entries every 5 minutes.
-    setInterval(() => this.cleanupRecentPublishes(), 5 * 60 * 1000).unref?.();
-  }
-
-  /** v14.0.8: Check if content was recently published (in-memory, bypasses KV delay). */
-  isRecentlyPublished(canonicalId: string): boolean {
-    const ts = this.recentlyPublished.get(canonicalId);
-    if (!ts) return false;
-    if (Date.now() - ts > FinalPublisher.RECENT_PUBLISH_TTL_MS) {
-      this.recentlyPublished.delete(canonicalId);
-      return false;
-    }
-    return true;
-  }
-
-  /** v14.0.8: Record a publish in the in-memory set. */
-  private recordRecentPublish(canonicalId: string): void {
-    this.recentlyPublished.set(canonicalId, Date.now());
-  }
-
-  /** v14.0.8: Clean up expired entries. */
-  private cleanupRecentPublishes(): void {
-    const now = Date.now();
-    for (const [id, ts] of this.recentlyPublished) {
-      if (now - ts > FinalPublisher.RECENT_PUBLISH_TTL_MS) {
-        this.recentlyPublished.delete(id);
-      }
-    }
-  }
+  constructor(private readonly deps: FinalPublisherDeps) {}
 
   /** Full pipeline: ReadyContent → UX Layer → Telegram. */
   async publish(content: ReadyContent): Promise<PublishResult> {
@@ -555,21 +510,6 @@ export class FinalPublisher {
         });
       });
     }
-
-    // v14.0.8: Record in in-memory recently-published set (bridges KV eventual consistency).
-    // Extract canonical ID the same way duplicate-detector does.
-    try {
-      const rawItem = content.raw as import("../types/api").SourceItem | null;
-      const source = content.pluginId;
-      const url = content.sourceUrl;
-      // Simple canonical ID extraction (matching duplicate-detector logic).
-      const match = /([^/]+)\/([^/?#]+)$/i.exec(url);
-      if (match) {
-        this.recordRecentPublish(`${source}:${match[2]}`);
-      } else {
-        this.recordRecentPublish(`${source}:${url}`);
-      }
-    } catch { /* non-fatal */ }
 
     // v13.0.6: Record novelty score for Category H articles.
     // This tracks published hardware news so the same NEWS from a different
