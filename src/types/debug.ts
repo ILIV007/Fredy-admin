@@ -25,6 +25,7 @@ export type DebugEventName =
   | "source.fetch_skip"
   | "source.fetch_no_token"
   | "source.fetch_org_error"
+  | "source.fetch_warning"
   | "source.throttled"
   | "source.api_error"
   | "scheduler.tick"

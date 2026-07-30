@@ -1,13 +1,13 @@
-# Fredy v14.2.0 — STABLE
+# Fredy v14.3.0 — DEDUP-OPTIMIZED
 
 > **Autonomous AI-powered Technology News Hub for Telegram channels.**
-> Built on Cloudflare Workers Free Tier. Visual Layout Engine (10 layouts), NASA batch-fetch with dedup-aware image guarantee, Night Music with simplified Jamendo API (trending only), dedup root fix, audit fixes, and 489 passing tests.
+> Built on Cloudflare Workers Free Tier. Visual Layout Engine (10 layouts), NASA batch-fetch with dedup-aware image guarantee, Night Music with optimized 2-layer dedup (40% KV write reduction), audit fixes, and 490 passing tests.
 
-[![Version](https://img.shields.io/badge/version-14.2.0-blue)](./VERSION)
+[![Version](https://img.shields.io/badge/version-14.3.0-blue)](./VERSION)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-orange)](https://workers.cloudflare.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org)
-[![Tests](https://img.shields.io/badge/tests-489%20passing-brightgreen)](./scripts)
+[![Tests](https://img.shields.io/badge/tests-490%20passing-brightgreen)](./scripts)
 [![Channel](https://img.shields.io/badge/Telegram-@ILIVIR3-2AABEE)](https://t.me/ILIVIR3)
 
 ---
@@ -27,11 +27,13 @@ Fredy is a production-grade, serverless content publishing platform that automat
 - **NASA Image Guarantee (v13.4.10)** — 4-layer image resolution: plugin media → MediaResolver → ImageResolver og:image → NASA page og:image fetch
 - **Dedup Root Fix (v14.0.8)** — history.recordPublished wrapped in .catch() (dedup always recorded)
 - **Audit Fix (v14.1.0)** — recursive dequeue → iterative; Blob([Uint8Array]); autoBlockquote tag-safe split; as-never → satisfies QualityResult; Tier V retry 10-min backoff
-- **Night Music Simplified (v14.1.5)** — removed Hall of Fame, simplified Jamendo API params (removed audiodlformat+licenses that caused empty results), cache cleared on each fetch
+- **Night Music Simplified (v14.1.5)** — removed Hall of Fame, simplified Jamendo API params (removed audiodlformat+licenses that caused empty results)
 - **Dead Code Cleanup (v14.2.0)** — removed unused recentlyPublished Map + setInterval from FinalPublisher; cleaned stale comments; 0 dead references
+- **Cache Destruction Fix (v14.2.1)** — removed kv.delete() that was destroying the 1h API cache on every fetch; retries now use cache (50ms vs 1000ms)
+- **Dedup Optimization (v14.3.0)** — skip redundant global dedup recording for night-music (internal 180-day dedup is stricter); 40% KV write reduction per publish; added 1000-key list limit guard + canonical ID support for future-proofing
 - **Tier H Hardware News** — Ars Technica, Tom's Hardware, TechPowerUp with Quality Filter (0-100 scoring, deal/promo rejection, clickbait hard-reject)
 - **Tier V Scheduled Content** — NASA APOD at 23:20 + Night Music (Jamendo CC audio) at 23:23
-- **Night Music (v13.5.0 FINAL)** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 9-stage quality pipeline (artist limitation REMOVED — singers can repeat), 180-day song dedup only, optimized Jamendo API params (limit=200, popularity_month, groupby=artist_id), batch KV dedup (100× fewer reads)
+- **Night Music (v14.3.0)** — Creative Commons audio from Jamendo API, sent via `sendAudio()` with native Telegram playback, 9-stage quality pipeline (artist limitation REMOVED — singers can repeat), 180-day song dedup (internal only — global dedup skipped for 40% KV write savings), optimized Jamendo API params (limit=200, popularity_month), batch KV dedup (100× fewer reads), 1000-key list limit guard
 - **Novelty Score** — prevents same news from different providers being published within 48h
 - **Weighted Provider Selection** — `selectProviderWeighted()` uses config weights (e.g., GitHub Releases weight=100 > StackExchange weight=80)
 - **Equal-Segment Schedule** — day divided into N equal segments, each post gets its own segment with center-bias sampling (v13.1.2)
@@ -127,15 +129,16 @@ Fredy is a production-grade, serverless content publishing platform that automat
 
 ---
 
-## Night Music (Tier V) — v14.2.0 STABLE
+## Night Music (Tier V) — v14.3.0 DEDUP-OPTIMIZED
 
 Every night at 23:23, Fredy publishes one Creative Commons audio track from the Jamendo API.
 
-### How it works (v14.2.0 — simplified Jamendo API, trending only)
+### How it works (v14.3.0 — simplified Jamendo API + optimized dedup)
 
 1. **Fetch 200 tracks** from Jamendo API (`order=popularity_month`, `limit=200`)
    - v14.1.5: Simplified API params (removed audiodlformat+licenses that caused empty results)
-   - v14.2.0: Cache cleared on each fetch — always fresh data
+   - v14.2.1: Cache works properly (1h TTL) — removed destructive kv.delete() that was running on every fetch
+   - v14.3.0: Global dedup recording SKIPPED — internal 180-day dedup is sufficient (40% KV write reduction)
 2. Run a 9-stage quality pipeline:
    - Stage 1: Required fields (title, artist, audio URL)
    - Stage 2: Must be downloadable

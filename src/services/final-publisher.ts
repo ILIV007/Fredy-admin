@@ -362,10 +362,21 @@ export class FinalPublisher {
       if (dr?.ok && dr.result) {
         // PHASE 5: Record KV ONLY after successful upload.
         await this.deps.history.recordPublished(content, dr.result.message_id ?? 0, String(dr.result.chat?.id ?? channel)).catch(() => {});
-        if (this.deps.duplicateDetector) {
-          await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
-        }
-        // v13.3.4: Record Night Music KV (artist + song dedup) AFTER success.
+        // v14.3.0: SKIP global dedup recording for night-music — the plugin has
+        // its OWN internal dedup (fredy:music:song:<hash>, 180-day TTL) which
+        // is STRICTER than the global dedup (30-day TTL) and is checked BEFORE
+        // publish in selectTrack() Stage 6. Recording in both systems is
+        // redundant and wastes 2 KV writes per publish (url hash + content hash).
+        // The global dedup CHECK (content-manager.ts Stage 6) is a no-op for
+        // night-music because no records are ever written — this is fine, since
+        // the internal dedup catches duplicates first (180-day window >> 30-day).
+        // Cross-plugin dedup is irrelevant: Jamendo audio URLs are unique to
+        // this plugin and never appear in other plugins' content.
+        //
+        // if (this.deps.duplicateDetector) {
+        //   await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
+        // }
+        // v13.3.4: Record Night Music KV (song dedup, 180-day) AFTER success.
         if (this.deps.nightMusicPlugin?.recordPublished) {
           await this.deps.nightMusicPlugin.recordPublished(songName, artistName).catch(() => {});
         }

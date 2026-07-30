@@ -1,11 +1,16 @@
 /**
  * src/services/duplicate-detector.ts
  * v11.13.0: Complete refactor — two-layer dedup (Canonical ID + Content hash).
+ * v14.3.0: Night Music canonical ID support added (future-proofing for audit/
+ *          diagnose; global dedup RECORDING is skipped for night-music in
+ *          final-publisher.ts because the plugin has its own 180-day internal
+ *          dedup that's stricter than the 30-day global dedup).
  *
  * Layer 1: Canonical ID check (fast, stable, content-independent)
  *   - Uses provider + stable ID (e.g., "github:owner/repo", "hackernews:12345")
  *   - Immune to URL variations (trailing slash, query params)
  *   - Immune to AI rewrite changes
+ *   - v14.3.0: Night Music uses "night-music:<jamendoId>" (from metadata)
  *
  * Layer 2: Content hash check (fallback for items without stable ID)
  *   - SHA-1 of normalized URL + title (NOT body — body changes with AI rewrite)
@@ -14,10 +19,15 @@
  * Layer 3: URL check (cross-plugin detection)
  *   - Normalized URL (trailing slash removed, query params stripped)
  *
- * Storage: 3 KV entries per published item:
+ * Storage: 3 KV entries per published item (2 for night-music — canonical
+ * is extracted but not recorded since v14.3.0 skips recording entirely):
  *   fredy:dedup:canonical:<canonicalId>  → record
  *   fredy:dedup:hash:<hash>              → record
  *   fredy:dedup:url:<urlHash>            → record
+ *
+ * NOTE: Night Music items are NOT recorded here since v14.3.0. The plugin's
+ * internal dedup (fredy:music:song:<hash>, 180-day TTL) is sufficient.
+ * See night-music/index.ts loadPublishedSongs() docstring for full details.
  */
 
 import { dedupKey } from "../core/storage/keys";
@@ -406,6 +416,24 @@ export class DuplicateDetector {
     if (source === "xkcd") {
       const match = /xkcd\.com\/(\d+)/i.exec(url);
       if (match) return `xkcd:${match[1]}`;
+      return null;
+    }
+
+    // v14.3.0: Night Music — Jamendo track ID (most stable identifier).
+    // NOTE: As of v14.3.0, night-music items are NOT recorded in the global
+    // dedup (the plugin has its own 180-day internal dedup that's stricter).
+    // This canonical ID extraction exists for FUTURE-PROOFING:
+    //   - audit() and diagnose() methods can identify night-music items
+    //   - If pre-publish check() is ever re-enabled, night-music gets full
+    //     3-layer dedup (canonical + url + hash) automatically
+    //   - If cross-plugin dedup becomes relevant (e.g., a future jamendo-blog
+    //     plugin), the canonical ID layer will catch it
+    if (source === "night-music") {
+      const jamendoId = metadata["jamendoId"] as string | undefined;
+      if (jamendoId) return `night-music:${jamendoId}`;
+      // Fallback: extract track ID from audio URL query param.
+      const match = /trackid=(\d+)/i.exec(url);
+      if (match) return `night-music:${match[1]}`;
       return null;
     }
 

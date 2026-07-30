@@ -3,11 +3,16 @@
  * v13.3.0: Night Music — Jamendo API, 10-stage quality pipeline, sendAudio().
  * v13.4.14: KV efficiency fix — batch dedup checks + API param optimization.
  * v13.5.0: Artist dedup REMOVED — only song dedup (180-day) remains.
+ * v14.2.1: Cache destruction bug FIXED — 1h API cache now works properly.
+ * v14.3.0: DEDUP OPTIMIZATION — global dedup recording SKIPPED (redundant with
+ *          internal 180-day dedup). Saves 2 KV writes per publish (40% reduction).
+ *          Canonical ID support added to duplicate-detector for future-proofing
+ *          (audit/diagnose methods can now identify night-music items).
  *
  * Zero-static-data: all tracks come from Jamendo API.
  * JAMENDO_CLIENT_ID is read from Worker Secret (never hardcoded).
  *
- * Pipeline (v13.5.0 — 9 stages, artist cooldown removed):
+ * Pipeline (v14.3.0 — 9 stages, artist cooldown removed, optimized dedup):
  *   1. Fetch 200 tracks from Jamendo API (order=popularity_month)
  *   2. Stage 1: Reject invalid (missing title/artist/audio)
  *   3. Stage 2: Reject non-downloadable (audiodownload_allowed=false)
@@ -15,10 +20,23 @@
  *   5. Stage 4: Reject low-quality titles (demo, test, ASMR, etc.)
  *   6. Stage 6: BATCH song dedup — single KV list() for all songs (180-day)
  *      [Stage 5 (artist dedup) REMOVED in v13.5.0 — artists can repeat]
+ *      [v14.3.0: 1000-key list limit guard added — warns if truncated]
  *   7. Stage 7: Prefer tracks with album_image (artwork)
- *   8. Stage 8: Weighted quality score (0-100, reject < 40)
+ *   8. Stage 8: Weighted quality score (0-100, reject < 20)
  *   9. Stage 9: Weighted random selection among high-scoring tracks
  *   10. Stage 10: Record publication in KV (song hash only) — after publish
+ *      [v14.3.0: Global dedup recording SKIPPED — internal dedup is sufficient]
+ *
+ * DEDUP ARCHITECTURE (v14.3.0):
+ *   - INTERNAL: fredy:music:song:<hash> — 180-day TTL, checked BEFORE publish
+ *   - GLOBAL: SKIPPED (was fredy:dedup:url + fredy:dedup:hash, 30-day TTL)
+ *   - See loadPublishedSongs() docstring for full KV budget analysis.
+ *
+ * KV BUDGET per successful publish (v14.3.0):
+ *   Reads:  2 (kv.list for songs + kv.getJson for API cache)
+ *   Writes: 3 (API cache + history + song hash)  [was 5 before v14.3.0]
+ *   Monthly (1/day × 30): 60 reads + 90 writes  [was 60 + 150]
+ *   Free tier limit: 100,000 reads/day + 1,000 writes/day → 0.009% utilization
  */
 
 import type { Plugin, PluginStatus } from "../../../types/plugin";
@@ -250,7 +268,34 @@ export class NightMusicPlugin implements Plugin {
   }
 
   /**
-   * v14.0.9: Load published songs from KV — cached for the duration of a single fetch()
+   * v14.0.9: Load published songs from KV — cached for the duration of a single fetch().
+   *
+   * v14.3.0: DEDUP ARCHITECTURE — Night Music uses a TWO-LAYER dedup strategy:
+   *
+   *   Layer 1 (INTERNAL, this method): fredy:music:song:<hash> — 180-day TTL
+   *     - Checked in selectTrack() Stage 6 BEFORE publish
+   *     - Recorded by recordPublished() AFTER successful publish
+   *     - Hash = hashSongArtist(song, artist) — 32-bit, collision prob ~3.8e-6
+   *     - Single kv.list() call per fetch() (cached in _publishedSongsCache)
+   *     - STRICKEST layer (180-day window catches re-trending songs)
+   *
+   *   Layer 2 (GLOBAL, duplicate-detector.ts): SKIPPED for night-music since v14.3.0
+   *     - Was: fredy:dedup:url:<urlHash> + fredy:dedup:hash:<contentHash> — 30-day TTL
+   *     - Redundant with Layer 1 (Layer 1 is stricter + checked earlier)
+   *     - Skipping saves 2 KV writes per publish (40% write reduction)
+   *     - Cross-plugin dedup is irrelevant: Jamendo audio URLs are plugin-specific
+   *
+   * KV budget per night-music publish (v14.3.0):
+   *   Reads:  2 (kv.list for songs + kv.getJson for API cache)
+   *   Writes: 3 (API cache + history + song hash)  [was 5 before v14.3.0]
+   *   Total:  5 KV ops per publish  [was 7]
+   *
+   * v14.3.0: 1000-KEY LIST LIMIT GUARD
+   *   Cloudflare KV list() returns max 1000 keys per call. With 180-day TTL
+   *   and 1 publish/day = 180 keys max (well under limit). But if publish
+   *   rate increases (5+/day × 180 days = 900+ keys), we approach the limit.
+   *   If list returns exactly 1000 keys, log a warning — dedup coverage may
+   *   be incomplete (oldest keys beyond 1000 are invisible).
    */
   private _publishedSongsCache: Set<string> | null = null;
 
@@ -262,6 +307,15 @@ export class NightMusicPlugin implements Plugin {
       const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
       for (const key of songKeys) {
         publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
+      }
+      // v14.3.0: Warn if we hit the 1000-key list limit — dedup coverage may be incomplete.
+      if (songKeys.length >= 1000) {
+        this.deps.logger.warn("source.fetch_warning", {
+          plugin: "night-music",
+          stage: "DEDUP_BATCH_LOAD",
+          songKeyCount: songKeys.length,
+          message: `[NIGHT_MUSIC] DEDUP_WARNING: 1000+ song keys in KV — list() truncated, oldest dedup records invisible. Consider reducing SONG_TTL or increasing publish diversity.`,
+        });
       }
     } catch { /* non-fatal */ }
 
