@@ -128,6 +128,10 @@ export class NightMusicPlugin implements Plugin {
   // ────────────────────────────────────────────────────────────
 
   async fetch(): Promise<readonly SourceItem[]> {
+    // v14.0.9: Clear the published songs cache at the start of each fetch()
+    // so the next fetch() gets fresh data from KV.
+    this._publishedSongsCache = null;
+
     const clientId = this.deps.env.JAMENDO_CLIENT_ID;
     if (!clientId) {
       this.deps.logger.warn("source.fetch_error", {
@@ -232,6 +236,27 @@ export class NightMusicPlugin implements Plugin {
   }
 
   /**
+   * v14.0.9: Load published songs from KV — cached for the duration of a single fetch()
+   * call to avoid redundant kv.list() calls between selectTrack and selectFromHallOfFame.
+   */
+  private _publishedSongsCache: Set<string> | null = null;
+
+  private async loadPublishedSongs(): Promise<Set<string>> {
+    if (this._publishedSongsCache) return this._publishedSongsCache;
+
+    const publishedSongs = new Set<string>();
+    try {
+      const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
+      for (const key of songKeys) {
+        publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
+      }
+    } catch { /* non-fatal */ }
+
+    this._publishedSongsCache = publishedSongs;
+    return publishedSongs;
+  }
+
+  /**
    * v14.0.7: Nuclear fallback wrapper — called from ALL failure paths in fetch().
    * Logs the reason, then calls selectFromHallOfFame().
    * Returns [item] if successful, [] if Hall of Fame is empty (should NEVER happen).
@@ -275,14 +300,10 @@ export class NightMusicPlugin implements Plugin {
   private async selectFromHallOfFame(): Promise<SourceItem | null> {
     if (HALL_OF_FAME.length === 0) return null;
 
-    // Load published songs for dedup.
-    const publishedSongs = new Set<string>();
-    try {
-      const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
-      for (const key of songKeys) {
-        publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
-      }
-    } catch { /* non-fatal */ }
+    // v14.0.9: OPTIMIZATION — reuse the publishedSongs Set from selectTrack
+    // if available, instead of calling kv.list() a second time.
+    // This saves 1 KV list() call per fetch (~1 read/day).
+    const publishedSongs = await this.loadPublishedSongs();
 
     // Shuffle Hall of Fame and find first unpublished.
     const shuffled = [...HALL_OF_FAME].sort(() => Math.random() - 0.5);
@@ -490,19 +511,9 @@ export class NightMusicPlugin implements Plugin {
     // artist from appearing twice within a month — but the user wants NO artist
     // limitation. Artists can now repeat freely.
     //
-    // Only SONG dedup (Stage 6, 180-day) remains — the same song won't repeat
-    // within 6 months, but the same artist can appear multiple times.
-    //
-    // KV savings: 1 fewer list() call per fetch (no artist list needed).
-    const publishedSongs = new Set<string>();
-
-    try {
-      // v13.4.14: limit=1000 for songs (180-day TTL, max ~180 songs, 1000 is KV max)
-      const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
-      for (const key of songKeys) {
-        publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
-      }
-    } catch { /* non-fatal — treat as empty */ }
+    // v14.0.9: Use loadPublishedSongs() — caches the KV list() result for
+    // reuse by selectFromHallOfFame() (saves 1 redundant kv.list call).
+    const publishedSongs = await this.loadPublishedSongs();
 
     this.deps.logger.info("source.fetch_success", {
       plugin: "night-music",

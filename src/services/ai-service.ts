@@ -58,42 +58,35 @@ export class AIService {
   constructor(private readonly deps: AIServiceDeps) {}
 
   /**
+   * v14.0.9: In-memory layout history — avoids KV read/write per AI generation.
+   * Previously: 1 KV read + 1 KV write per generation (~28 ops/day).
+   * Now: 0 KV ops — history stays in memory for the Worker isolate lifetime.
+   * The Worker isolate persists across requests, so this is effective.
+   */
+  private layoutHistory: string[] = [];
+  private static LAYOUT_HISTORY_MAX = 5;
+
+  /**
    * v14.0.0: Layout Engine — choose a layout for this post.
-   * Selects a layout based on category + history (avoids consecutive repeats).
-   * Returns the layout letter (A-J) or undefined for categories that don't use layouts.
+   * v14.0.9: Uses in-memory history instead of KV — saves ~28 KV ops/day.
    */
   private async chooseLayout(category: string): Promise<string | undefined> {
-    // v14.0.0: Category C (NASA, jokes) and night-music don't use layouts — they're minimal.
+    // Category C (NASA, jokes) and night-music don't use layouts.
     if (category === "C") return undefined;
     if (category === "night-music") return undefined;
 
-    // v14.0.0: Category H always uses LAYOUT I (Hardware Review).
+    // Category H always uses LAYOUT I (Hardware Review).
     if (category === "H") return "I";
-
-    // v14.0.0: For categories A and B, rotate layouts to prevent repetition.
-    // Load recent layouts from KV (lightweight — 1 read per generation).
-    const LAYOUT_HISTORY_KEY = "fredy:ai:layout-history";
-    const LAYOUT_HISTORY_TTL = 7 * 24 * 3600; // 7 days
-    const LAYOUT_HISTORY_MAX = 5; // Track last 5 layouts
 
     // Category-appropriate layouts.
     const categoryLayouts: Record<string, string[]> = {
-      A: ["A", "C", "E", "F", "G", "J"], // Breaking News, Compare, Deep Dive, Quick Facts, Feature Spotlight, Minimal
-      B: ["A", "B", "D", "H", "J"], // Breaking News, Timeline, Quick Read, Community Story, Minimal
+      A: ["A", "C", "E", "F", "G", "J"],
+      B: ["A", "B", "D", "H", "J"],
     };
     const available = categoryLayouts[category] ?? ["A", "B", "D", "J"];
 
-    // Load recent layouts from KV.
-    let recentLayouts: string[] = [];
-    if (this.deps.kv) {
-      try {
-        const stored = await this.deps.kv.getJson<string[]>(LAYOUT_HISTORY_KEY);
-        recentLayouts = Array.isArray(stored) ? stored.slice(-LAYOUT_HISTORY_MAX) : [];
-      } catch { /* non-fatal */ }
-    }
-
-    // Filter out the most recent layout (avoid immediate repeat).
-    const lastLayout = recentLayouts[recentLayouts.length - 1];
+    // v14.0.9: Use in-memory layout history (no KV).
+    const lastLayout = this.layoutHistory[this.layoutHistory.length - 1];
     let candidates = available;
     if (lastLayout && available.length > 1) {
       candidates = available.filter(l => l !== lastLayout);
@@ -102,13 +95,8 @@ export class AIService {
     // Pick a random layout from the candidates.
     const chosen = candidates[Math.floor(Math.random() * candidates.length)] ?? available[0]!;
 
-    // Save to history.
-    if (this.deps.kv) {
-      try {
-        const updated = [...recentLayouts, chosen].slice(-LAYOUT_HISTORY_MAX);
-        await this.deps.kv.setJson(LAYOUT_HISTORY_KEY, updated, LAYOUT_HISTORY_TTL);
-      } catch { /* non-fatal */ }
-    }
+    // v14.0.9: Save to in-memory history (no KV write).
+    this.layoutHistory = [...this.layoutHistory, chosen].slice(-AIService.LAYOUT_HISTORY_MAX);
 
     return chosen;
   }
