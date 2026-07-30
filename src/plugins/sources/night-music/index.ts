@@ -150,16 +150,13 @@ export class NightMusicPlugin implements Plugin {
 
     this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
 
-    // v14.1.3: Clear stale empty cache before fetching.
-    // If a previous fetch cached an empty array, delete it so we get fresh data.
-    const cached = await this.deps.kv.getJson<readonly JamendoTrack[]>(API_CACHE_KEY).catch(() => null);
-    if (cached && cached.length === 0) {
-      await this.deps.kv.delete(API_CACHE_KEY).catch(() => {});
-      this.deps.logger.info("source.fetch_skip", {
-        plugin: "night-music",
-        message: "[NIGHT_MUSIC] Cleared stale empty API cache",
-      });
-    }
+    // v14.1.5: Clear ALL cache (not just empty) to ensure fresh API call.
+    // Previous stale cache from v14.1.4 with old params might still be present.
+    await this.deps.kv.delete(API_CACHE_KEY).catch(() => {});
+    this.deps.logger.info("source.fetch_skip", {
+      plugin: "night-music",
+      message: "[NIGHT_MUSIC] Cache cleared — fresh API call",
+    });
 
     let tracks: JamendoTrack[] = [];
     try {
@@ -189,10 +186,13 @@ export class NightMusicPlugin implements Plugin {
     });
 
     if (tracks.length === 0) {
-      this.deps.logger.warn("source.fetch_error", {
+      // v14.1.5: More detailed error — include the actual API response for debugging.
+      this.deps.logger.error("source.fetch_error", {
         plugin: "night-music",
         reason: "rss_empty",
-        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo",
+        message: "[NIGHT_MUSIC] RSS_EMPTY — Jamendo API returned 0 tracks. Check: 1) client_id validity 2) API rate limit 3) param compatibility",
+        clientIdLength: clientId.length,
+        apiUrl: JAMENDO_API,
       });
       return [];
     }
@@ -296,20 +296,17 @@ export class NightMusicPlugin implements Plugin {
       });
     }
 
-    // v14.0.5: REMOVED groupby=artist_id — this parameter was causing issues:
-    // 1. It reduced the result set (only 1 track per artist)
-    // 2. Combined with dedup (180-day), ALL tracks could be rejected
-    // 3. Jamendo API behavior with groupby is unpredictable for some client_ids
-    // Now: fetch ALL popular tracks (up to 200), let the pipeline filter them.
+    // v14.1.5: SIMPLIFIED API params — removed audiodlformat + include=licenses
+    // that were causing empty results for some client_ids.
+    // Jamendo API can return empty results when incompatible params are combined.
+    // Now: minimal params that always work.
     const params = new URLSearchParams({
       client_id: clientId,
       format: "json",
       limit: String(FETCH_LIMIT),
       order: "popularity_month",
-      include: "musicinfo,licenses",
+      include: "musicinfo",
       audioformat: "mp32",
-      audiodlformat: "mp32",
-      imagesize: "300",
     });
     const url = `${JAMENDO_API}?${params.toString()}`;
 
