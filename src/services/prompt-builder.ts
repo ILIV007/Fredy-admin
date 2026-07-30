@@ -26,13 +26,15 @@ export interface BuiltPrompt {
 export class PromptBuilder {
   constructor(private readonly deps: PromptBuilderDeps) {}
 
-  /** Build the system + user prompts for a generation request. */
+  /** Build the system + user prompts for a generation request.
+   *  v14.0.0: Added layout parameter — passes the chosen layout to the AI. */
   async build(
     category: Category,
     sourceItem: SourceItem,
     requestedLanguage: string,
     soul: Soul,
     profile: PromptProfile = "default",
+    layout?: string,
   ): Promise<BuiltPrompt> {
     const languageRules = await this.deps.languageInjector.getRules(requestedLanguage);
     const resolvedLanguage = await this.deps.languageInjector.resolve(requestedLanguage);
@@ -44,7 +46,8 @@ export class PromptBuilder {
       languageRules,
     );
 
-    const user = buildUserPrompt(sourceItem, resolvedLanguage);
+    // v14.0.0: Pass the layout to the user prompt.
+    const user = buildUserPrompt(sourceItem, resolvedLanguage, layout);
 
     return { system, user, resolvedLanguage };
   }

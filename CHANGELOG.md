@@ -2,6 +2,114 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [14.0.0] — 2026-07-30 — Visual Layout Engine (Major AI Content Upgrade)
+
+### 🚀 MAJOR: Visual Layout Engine — 10 Layouts + Visual Rhythm + Smart Blockquote
+
+**User request:** Complete visual layout engine upgrade — every post should feel handcrafted with its own visual identity, pacing, and composition.
+
+**This is a MAJOR version bump (v14.0.0)** — the AI presentation layer is completely rewritten. All existing architecture (scheduler, plugins, dedup, strategy, publishing) remains unchanged.
+
+### Phase 1 — Layout Engine (10 Layouts)
+
+Created 10 visual layouts. The AI receives the chosen layout and must follow its structure:
+
+| Layout | Name | Structure |
+|--------|------|-----------|
+| A | Breaking News | Headline → intro → > Highlight → explanation → > Bottom Line |
+| B | Timeline | Headline → context → > What changed → result → > Future |
+| C | Compare | Headline → previous → > New state → impact → > Verdict |
+| D | Quick Read | Headline → one sentence → > stat → another → > Done |
+| E | Deep Dive | Headline → problem → > Solution → dev impact → > Summary |
+| F | Quick Facts | Headline → intro → • Fact → • Fact → • Fact → final |
+| G | Feature Spotlight | Headline → feature → > Benefits → usage → > Opinion |
+| H | Community Story | Headline → setup → > twist → resolution → > Takeaway |
+| I | Hardware Review | Headline → specs → > Benchmark → impact → > Recommendation |
+| J | Minimal | Headline → two paragraphs → > highlight → Done |
+
+### Phase 2 — Visual Rhythm Engine
+
+- Vary paragraph lengths (very short, medium, long)
+- Mix element types (paragraph, blockquote, list, code, italic, bold)
+- Never 3+ paragraphs of same length in a row
+- At least 3 different visual element types per post
+
+### Phase 3 — Smart Blockquote Engine
+
+8 blockquote styles (KEY HIGHLIGHT, KEY STAT, WHY IT MATTERS, WARNING, DEVELOPER TIP, BOTTOM LINE, DEFINITION, DIRECT QUOTE). 2-4 per post, distributed naturally (not all at end).
+
+### Phase 4 — Paragraph Rhythm
+
+Mix very short (1 sentence), medium (2-3), and long (4-5) paragraphs. Creates visual rhythm instead of monotonous equal-length blocks.
+
+### Phase 5 — Smart Lists
+
+Micro lists (• bullets) for readability. 3-5 items, <10 words each. Label line before list. Only when they improve readability.
+
+### Phase 6 — Typography Rules
+
+Intentional emphasis — bold for key terms, italic for emphasis/concepts, code for commands/paths, strikethrough for corrections, spoiler for surprises. "If everything is bold, nothing is bold."
+
+### Phase 7 — Category Personalities
+
+| Category | Personality | Preferred Layouts |
+|----------|-------------|-------------------|
+| A (Developer) | Technical, clean, feature-focused | A, C, E, F, G |
+| B (Tech News) | Narrative, journalistic, timeline-friendly | A, B, D, H |
+| C (Support) | Minimal, elegant | J (always) |
+| H (Hardware) | Benchmark, comparison, buying advice | I (always) |
+
+### Phase 8 — Layout History (Anti-Repetition)
+
+- KV key: `fredy:ai:layout-history` (7-day TTL, tracks last 5 layouts)
+- Filters out the most recent layout (avoids immediate repeat)
+- Random selection from remaining candidates
+- Category-specific layout pools
+- Lightweight: 1 KV read + 1 KV write per generation
+
+### Phase 9 — AI Prompt Refactor
+
+Complete rewrite of `BASE_SYSTEM_PROMPT`:
+- Added `LAYOUT_ENGINE` section (10 layouts with structure)
+- Added `VISUAL_RHYTHM` section (paragraph length mix + element variety)
+- Added `SMART_BLOCKQUOTE` section (8 styles + placement rules)
+- Added `TYPOGRAPHY_RULES` section (intentional emphasis)
+- Added `SMART_LISTS` section (micro lists)
+- Added `layoutUsed` to JSON output format
+- Updated `buildUserPrompt()` to accept layout parameter
+- Updated `PromptBuilder.build()` to pass layout through
+
+### Phase 10 — Compatibility Audit
+
+| Component | Status |
+|-----------|--------|
+| formatBody() (ux-layer.ts) | ✅ Added bullet list support (• and - → formatted) |
+| Telegram HTML conversion | ✅ All formats work (bold, italic, spoiler, strike, code, blockquote, collapsible, lists) |
+| Night Music | ✅ Unchanged (bypasses AI) |
+| NASA | ✅ Unchanged (bypasses AI) |
+| Tier H | ✅ Inherits Layout I (Hardware Review) |
+| Scheduler | ✅ No changes |
+| Strategy Engine | ✅ No changes |
+| Dedup | ✅ No changes |
+| Queue | ✅ No changes |
+| Publishing Pipeline | ✅ No changes |
+| Plugins | ✅ No API/manifest changes |
+| KV | ✅ +1 read + 1 write per generation (layout history) |
+| Performance | ✅ Prompt growth reasonable, CPU unchanged |
+
+### Files Changed
+
+- `src/core/ai/prompt-templates.ts` — Complete rewrite (Layout Engine, Visual Rhythm, Smart Blockquote, Typography, Smart Lists, category personalities, layout parameter)
+- `src/services/prompt-builder.ts` — Added layout parameter to `build()`
+- `src/services/ai-service.ts` — Added `chooseLayout()` method with KV-based history
+- `src/services/ux-layer.ts` — Added bullet list support to `formatBody()`
+
+### Verification
+
+- TypeScript: 0 errors (src/) ✅
+- Tests: 486 passing (87+189+41+28+80+35+26) ✅
+- Manager dashboard: v14.0.0 · LAYOUT-ENGINE ✅
+
 ## [13.5.4] — 2026-07-30 — Creative Blockquote Guide (8 patterns, 2-4 per post, varied placement)
 
 ### 🎨 ENHANCEMENT: Rich Creative Blockquote Usage

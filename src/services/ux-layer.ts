@@ -284,6 +284,34 @@ export class UXLayerImpl implements UXLayer {
     let finalHtml = finalResult.join("\n");
     finalHtml = finalHtml.replace(/__FREDY_CODE_(\d+)__/g, (_, i: string) => codeSegments[Number(i)] ?? "");
 
+    // v14.0.0: Convert bullet lists (• or - at line start) to formatted list items.
+    // Telegram HTML doesn't support <ul><li>, so we use the • character with bold label.
+    // Pattern: lines starting with "• " or "- " become "• <content>"
+    // Consecutive bullet lines are grouped with no empty line between them.
+    const listLines = finalHtml.split("\n");
+    const listResult: string[] = [];
+    let inList = false;
+    for (const line of listLines) {
+      // Check if line starts with bullet (• or - followed by space)
+      const bulletMatch = line.match(/^(?:•|\-)\s+(.+)$/);
+      if (bulletMatch) {
+        const content = bulletMatch[1]!;
+        // If we were not in a list, start one (just add the first bullet)
+        if (!inList) {
+          inList = true;
+        }
+        listResult.push(`• ${content}`);
+      } else {
+        // Non-bullet line — if we were in a list, just continue normally
+        if (inList && line.trim() === "") {
+          // Empty line after list — end the list group
+          inList = false;
+        }
+        listResult.push(line);
+      }
+    }
+    finalHtml = listResult.join("\n");
+
     return finalHtml;
   }
 
