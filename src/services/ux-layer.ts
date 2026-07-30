@@ -130,10 +130,25 @@ export class UXLayerImpl implements UXLayer {
     return this.buildFullTextParts(hook, truncatedBody, sourceUrl, emoji, displaySource);
   }
 
-  /** Build the full text parts (helper used by assembleFullText). */
+  /** Build the full text parts (helper used by assembleFullText).
+   *  v14.0.1: Fixed headline duplication — if hook appears ANYWHERE in the body
+   *  (not just at the start), skip adding it as a separate bold line.
+   *  Previously, if the AI put the headline at the start of the body text
+   *  with different formatting (e.g., **bold** in body but plain in headline),
+   *  the startsWith check failed and the headline was duplicated. */
   private buildFullTextParts(hook: string, body: string, sourceUrl: string, emoji: string, displaySource: string): string {
     const parts: string[] = [];
-    if (hook && body && !body.startsWith(hook)) {
+    // v14.0.1: Normalize both hook and body for comparison (strip markdown + whitespace).
+    const normalizeForCompare = (s: string): string => s.replace(/[*_`>#~|]/g, "").trim().toLowerCase();
+    const hookNorm = normalizeForCompare(hook);
+    const bodyNorm = normalizeForCompare(body);
+    const bodyFirstLine = normalizeForCompare(body.split("\n")[0] ?? "");
+
+    // v14.0.1: Skip hook if it appears at the start of the body OR is the first line.
+    const hookInBody = hook && body && hookNorm.length > 0 &&
+      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+
+    if (hook && body && !hookInBody) {
       parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
@@ -144,7 +159,14 @@ export class UXLayerImpl implements UXLayer {
 
   /** Build the hook block (used for overhead calculation). */
   private buildHookBlock(hook: string, body: string): string {
-    if (hook && body && !body.startsWith(hook)) {
+    // v14.0.1: Use same normalization logic as buildFullTextParts.
+    const normalizeForCompare = (s: string): string => s.replace(/[*_`>#~|]/g, "").trim().toLowerCase();
+    const hookNorm = normalizeForCompare(hook);
+    const bodyNorm = normalizeForCompare(body);
+    const bodyFirstLine = normalizeForCompare(body.split("\n")[0] ?? "");
+    const hookInBody = hook && body && hookNorm.length > 0 &&
+      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+    if (hook && body && !hookInBody) {
       return `<b>${escapeHtml(hook)}</b>\n\n`;
     }
     return "";

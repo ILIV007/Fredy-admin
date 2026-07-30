@@ -2,6 +2,56 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [14.0.1] — 2026-07-30 — Layout Engine Critical Fix + Headline Duplication Fix
+
+### 🐛 CRITICAL FIX: Layout Engine Not Activating (Root Cause)
+
+**User report:** "تغییرات هنوز اعمال نشدن!!!!پست ها هنوز مثل فرمت v13ارسال میشن!!!!" ("Changes still not applied! Posts still sent in v13 format!")
+
+**Root cause:** In `ai-service.ts` line 126, `chooseLayout()` was called with `request.source` (the plugin name like "github", "devto") instead of `request.category` (the category letter "A", "B", "H"). This meant the layout engine's category checks (`if (category === "C")`, `if (category === "H")`) NEVER matched — "github" !== "H" — and the code always fell through to the default layout pool. The Layout Engine was effectively disabled for ALL posts.
+
+**Fix:** Changed `this.chooseLayout(request.source)` → `this.chooseLayout(request.category)`.
+
+**Result:** Now the Layout Engine correctly activates for all Tier S/A/B/H posts:
+- Category A → layouts from pool [A, C, E, F, G, J]
+- Category B → layouts from pool [A, B, D, H, J]
+- Category H → always LAYOUT I (Hardware Review)
+- Category C → no layout (minimal, as before)
+- Tier V (NASA, Night Music) → no layout (unchanged)
+
+### 🐛 FIX: Headline Duplication (Topic Written Twice)
+
+**User report:** "بعضی اوقات هم تاپیک ها دوبار نوشته میشن!!!!" ("Sometimes topics are written twice!")
+
+**Root cause:** In `ux-layer.ts`, the `buildFullTextParts()` method checked `!body.startsWith(hook)` to decide whether to add the headline as a separate bold line. But if the AI put the headline at the start of the body with different formatting (e.g., `**Headline**` in body but plain `Headline` in the headline field), the `startsWith` check failed (because `**Headline**` !== `Headline`) and the headline was duplicated.
+
+**Fix:** Added normalized comparison that strips markdown characters (`*_`>#~|`) and compares lowercase:
+- `bodyNorm.startsWith(hookNorm)` — body starts with headline (normalized)
+- `bodyFirstLine === hookNorm` — first line of body equals headline
+- `bodyFirstLine.includes(hookNorm)` — first line contains the headline
+
+Applied to both `buildFullTextParts()` and `buildHookBlock()`.
+
+### 📊 All Tiers Use Layout Engine (Except V)
+
+| Tier | Layout Engine | Notes |
+|------|---------------|-------|
+| S (Category A) | ✅ Active | Pool: A, C, E, F, G, J |
+| A (Category A) | ✅ Active | Same pool as S |
+| B (Category B) | ✅ Active | Pool: A, B, D, H, J |
+| H (Category H) | ✅ Active | Always LAYOUT I (Hardware Review) |
+| C (Category C) | ✅ Minimal | LAYOUT J (Minimal) — no layout instruction |
+| V (NASA, Night Music) | ❌ Skipped | Bypasses AI entirely — unchanged |
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 487 passing (87+190+41+28+80+35+26) ✅
+- Manager dashboard: v14.0.1 · LAYOUT-FIX ✅
+
+**Files changed:**
+- `src/services/ai-service.ts` — Fixed `chooseLayout(request.category)` (was `request.source`)
+- `src/services/ux-layer.ts` — Fixed headline duplication with normalized comparison
+
 ## [14.0.0] — 2026-07-30 — Visual Layout Engine (Major AI Content Upgrade)
 
 ### 🚀 MAJOR: Visual Layout Engine — 10 Layouts + Visual Rhythm + Smart Blockquote

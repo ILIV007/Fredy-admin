@@ -1929,7 +1929,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:var(
 .spark-bar .spark-tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);padding:3px 6px;border-radius:4px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .15s;pointer-events:none;margin-bottom:4px;z-index:10}
 .spark-bar:hover .spark-tip{opacity:1}
 </style></head><body>
-<div class="sidebar" id="sidebar"><div class="sidebar-header"><div class="logo">🤖</div><div><h1>Fredy</h1><div class="ver">v14.0.0 · LAYOUT-ENGINE</div></div></div><div class="sidebar-nav" id="nav"></div></div>
+<div class="sidebar" id="sidebar"><div class="sidebar-header"><div class="logo">🤖</div><div><h1>Fredy</h1><div class="ver">v14.0.1 · LAYOUT-FIX</div></div></div><div class="sidebar-nav" id="nav"></div></div>
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
 <script>
 const TOKEN="${token}";const API="/Manager/api/";

@@ -123,7 +123,10 @@ export class AIService {
     const aiConfig = settings.ai;
 
     // v14.0.0: Choose a layout for this post (Layout Engine).
-    const layout = await this.chooseLayout(request.source);
+    // v14.0.1: FIX — was passing request.source (plugin name like "github")
+    // instead of request.category (A/B/C/H). This meant the layout engine
+    // never matched any category and always fell through to the default pool.
+    const layout = await this.chooseLayout(request.category);
 
     // Step 1: build the prompt.
     const prompt = await this.deps.promptBuilder.build(
