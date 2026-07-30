@@ -71,7 +71,7 @@ const MIN_DURATION_SEC = 120; // 2 min
 const MAX_DURATION_SEC = 600; // 10 min (v13.3.4: was 480=8min, raised to 600=10min per spec)
 
 // Stage 8: Quality score threshold
-const MIN_QUALITY_SCORE = 40; // v13.3.2: lowered from 80 — most CC tracks don't have artwork
+const MIN_QUALITY_SCORE = 20; // v14.0.5: lowered from 40 — base score is 20 (downloadable+base), so any valid track passes
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -236,7 +236,7 @@ export class NightMusicPlugin implements Plugin {
 
   private async fetchJamendoTracks(clientId: string): Promise<JamendoTrack[]> {
     // v13.4.14: Check API response cache first (1h TTL, ToU compliant).
-    // This prevents duplicate API calls when Tier V retries within the same night.
+    // v14.0.5: Also delete stale empty cache entries.
     const cached = await this.deps.kv.getJson<readonly JamendoTrack[]>(API_CACHE_KEY).catch(() => null);
     if (cached && cached.length > 0) {
       this.deps.logger.info("source.fetch_cache_hit", {
@@ -246,18 +246,20 @@ export class NightMusicPlugin implements Plugin {
       });
       return [...cached];
     }
+    // v14.0.5: If cache exists but is empty (stale from a failed fetch), delete it.
+    if (cached && cached.length === 0) {
+      await this.deps.kv.delete(API_CACHE_KEY).catch(() => {});
+      this.deps.logger.info("source.fetch_skip", {
+        plugin: "night-music",
+        message: "[NIGHT_MUSIC] API_CACHE: deleted stale empty cache entry",
+      });
+    }
 
-    // v13.4.14: Optimized API parameters:
-    //   - limit=200 (was 100) — Jamendo API max, more candidates
-    //   - order=popularity_month (was popularity_week) — more stable charts
-    //   - groupby=artist_id — deduplicates tracks by artist (1 track per artist)
-    //     This prevents the same artist from appearing 5× in results, giving us
-    //     more unique artists to choose from (better variety).
-    //   - include=licenses,musicinfo,stats (was just musicinfo) — CC license URL
-    //     + tags + stats counters for better quality scoring
-    //   - audioformat=mp32 (unchanged) — VBR good quality
-    //   - audiodlformat=mp32 — explicit download format
-    //   - imagesize=300 — album artwork at 300px (reasonable size)
+    // v14.0.5: REMOVED groupby=artist_id — this parameter was causing issues:
+    // 1. It reduced the result set (only 1 track per artist)
+    // 2. Combined with dedup (180-day), ALL tracks could be rejected
+    // 3. Jamendo API behavior with groupby is unpredictable for some client_ids
+    // Now: fetch ALL popular tracks (up to 200), let the pipeline filter them.
     const params = new URLSearchParams({
       client_id: clientId,
       format: "json",
@@ -267,7 +269,6 @@ export class NightMusicPlugin implements Plugin {
       audioformat: "mp32",
       audiodlformat: "mp32",
       imagesize: "300",
-      groupby: "artist_id",
     });
     const url = `${JAMENDO_API}?${params.toString()}`;
 
@@ -317,8 +318,11 @@ export class NightMusicPlugin implements Plugin {
       const tracks = [...(data.results ?? [])];
 
       // v13.4.14: Cache the API response for 1h (ToU compliant — short-lived operational cache).
-      // This saves an API call when Tier V retries within the same night.
-      await this.deps.kv.setJson(API_CACHE_KEY, tracks, API_CACHE_TTL_SECONDS).catch(() => {});
+      // v14.0.5: Only cache if tracks.length > 0 — don't cache empty results
+      // (would cause all subsequent fetches within 1h to return empty too).
+      if (tracks.length > 0) {
+        await this.deps.kv.setJson(API_CACHE_KEY, tracks, API_CACHE_TTL_SECONDS).catch(() => {});
+      }
 
       // Log first track sample for debugging
       if (tracks.length > 0) {
@@ -518,8 +522,10 @@ export class NightMusicPlugin implements Plugin {
     // Complete metadata: +10
     if (track.album_name && track.musicinfo?.tags && track.musicinfo.tags.length > 0) score += 10;
 
-    // Remaining bonus: +10 (base for passing all stages)
-    score += 10;
+    // v14.0.5: Base bonus increased to 20 (was 10) — ensures minimum score
+    // is 20 (downloadable + base) which meets MIN_QUALITY_SCORE.
+    // Without this, tracks without artwork/duration/metadata could score below threshold.
+    score += 20;
 
     return Math.min(100, score);
   }
