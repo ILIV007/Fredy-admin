@@ -135,7 +135,12 @@ export class DuplicateDetector {
     readonly raw?: unknown;
   }): Promise<void> {
     // v13.1.5: Extract ORIGINAL title from raw SourceItem for content hash.
-    // This ensures the hash matches what check() computes at pipeline Stage 6.
+    // v14.0.8: FIX — normalize the title the SAME WAY check() does.
+    // Previously, recordPublished used rawItem.title (unmodified), but check()
+    // receives a ContentItem whose title has been through normalizeTitle()
+    // (collapseWhitespace + slice 500). If the RSS title had extra whitespace,
+    // the hashes didn't match → hash layer (Layer 3) silently failed.
+    // Now: apply normalizeForDedup to both record and check paths consistently.
     const rawItem = content.raw as SourceItem | null;
     const originalTitle = rawItem?.title ?? content.headline ?? content.id;
 
@@ -143,7 +148,7 @@ export class DuplicateDetector {
       id: content.id,
       pluginId: content.pluginId,
       url: content.sourceUrl,
-      title: originalTitle, // v13.1.5: Use ORIGINAL title, not AI headline
+      title: originalTitle, // normalizeForDedup is applied inside computeContentHash
       body: "",
       source: content.pluginId,
       raw: rawItem,
