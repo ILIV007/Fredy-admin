@@ -191,8 +191,9 @@ RULE: Do NOT bold everything. Only bold MEANINGFUL technical terms. If everythin
 /**
  * v14.0.0: Smart Lists — micro lists for readability.
  */
-const SMART_LISTS = `=== SMART LISTS (v14.0.0) ===
+const SMART_LISTS = `=== SMART LISTS (v14.0.3) ===
 Instead of long explanations, generate micro lists when appropriate.
+Lists are automatically converted to blockquotes by the system — so they appear as visually distinct quoted sections.
 
 GOOD (micro list):
 Why developers care:
@@ -206,7 +207,8 @@ RULES:
 - 3-5 items per list — never more than 5.
 - Only use lists when they IMPROVE readability — don't force lists.
 - Never use lists for everything — mix with paragraphs.
-- Put a label line before the list (e.g., "Key features:", "Why it matters:").`;
+- Put a label line before the list (e.g., "Key features:", "Why it matters:").
+- The system auto-converts bullet lists to blockquotes for cleaner formatting.`;
 
 /**
  * The base system prompt — applies to ALL categories and profiles.
@@ -314,7 +316,7 @@ Write a concise, factual post. Mention specific product names, model numbers, an
 
 Use **bold** for product names (e.g., **RTX 5090**, **Ryzen 9 9950X**).
 Use *italic* for specs and benchmark numbers (e.g., *32GB VRAM*, *+18% performance*).
-Use > blockquote for key specs, benchmark results, and buying recommendations.
+Use > blockquote for supplementary details (previous gen specs, additional context).
 Use • bullet lists for spec sheets when appropriate.`,
 };
 

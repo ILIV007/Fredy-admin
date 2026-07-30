@@ -306,35 +306,104 @@ export class UXLayerImpl implements UXLayer {
     let finalHtml = finalResult.join("\n");
     finalHtml = finalHtml.replace(/__FREDY_CODE_(\d+)__/g, (_, i: string) => codeSegments[Number(i)] ?? "");
 
-    // v14.0.0: Convert bullet lists (• or - at line start) to formatted list items.
-    // Telegram HTML doesn't support <ul><li>, so we use the • character with bold label.
-    // Pattern: lines starting with "• " or "- " become "• <content>"
-    // Consecutive bullet lines are grouped with no empty line between them.
-    const listLines = finalHtml.split("\n");
-    const listResult: string[] = [];
-    let inList = false;
-    for (const line of listLines) {
-      // Check if line starts with bullet (• or - followed by space)
-      const bulletMatch = line.match(/^(?:•|\-)\s+(.+)$/);
-      if (bulletMatch) {
-        const content = bulletMatch[1]!;
-        // If we were not in a list, start one (just add the first bullet)
-        if (!inList) {
-          inList = true;
+    // v14.0.3: Convert bullet lists (• or - at line start) to BLOCKQUOTE for cleaner formatting.
+    // v14.0.4: FIX — protect <pre> code blocks and existing <blockquote> tags from corruption.
+    const bulletLines = finalHtml.split("\n");
+    const bulletResult: string[] = [];
+    let inBulletList = false;
+    let bulletBuffer: string[] = [];
+    let insidePreBlock = false; // v14.0.4: Track if we're inside a <pre> code block.
+    for (const line of bulletLines) {
+      // v14.0.4: Track <pre> blocks — don't convert bullets inside code.
+      if (line.includes("<pre>")) insidePreBlock = true;
+      if (line.includes("</pre>")) insidePreBlock = false;
+
+      // v14.0.4: Skip lines that are already inside a <blockquote> tag.
+      const isInsideBlockquote = line.startsWith("<blockquote");
+
+      if (!insidePreBlock && !isInsideBlockquote) {
+        const bulletMatch = line.match(/^(?:•|\-)\s+(.+)$/);
+        if (bulletMatch) {
+          const content = bulletMatch[1]!;
+          if (!inBulletList) { inBulletList = true; bulletBuffer = []; }
+          bulletBuffer.push(content);
+          continue;
         }
-        listResult.push(`• ${content}`);
-      } else {
-        // Non-bullet line — if we were in a list, just continue normally
-        if (inList && line.trim() === "") {
-          // Empty line after list — end the list group
-          inList = false;
-        }
-        listResult.push(line);
       }
+      // Non-bullet line (or inside pre/blockquote) — close any open bullet list.
+      if (inBulletList) {
+        bulletResult.push(`<blockquote>${bulletBuffer.map(c => `• ${c}`).join("\n")}</blockquote>`);
+        inBulletList = false; bulletBuffer = [];
+      }
+      bulletResult.push(line);
     }
-    finalHtml = listResult.join("\n");
+    if (inBulletList && bulletBuffer.length > 0) {
+      bulletResult.push(`<blockquote>${bulletBuffer.map(c => `• ${c}`).join("\n")}</blockquote>`);
+    }
+    finalHtml = bulletResult.join("\n");
+
+    // v14.0.3: AUTO-BLOCKQUOTE for variety — when there are 3+ paragraphs,
+    // convert one middle paragraph to a blockquote for visual rhythm.
+    // User request: "وقتی که بیشتر از 3 پاراگراف داریم بهتره که ایجنت یک پاراگراف تبدیل به qoute کنه برای تنوع!"
+    // This runs AFTER all other formatting, so it only affects plain paragraphs
+    // that haven't already been converted to blockquotes.
+    finalHtml = this.autoBlockquoteForVariety(finalHtml);
 
     return finalHtml;
+  }
+
+  /**
+   * v14.0.3: AUTO-BLOCKQUOTE for variety — when there are 3+ paragraphs,
+   * convert one MIDDLE paragraph to a blockquote for visual rhythm.
+   *
+   * Rules:
+   * - Only runs when there are 3+ "block elements" (paragraphs separated by blank lines)
+   * - Skips elements that are already blockquotes or code blocks
+   * - Picks a MIDDLE paragraph (never the first or last)
+   * - Only converts ONE paragraph per post (for subtle variety, not overuse)
+   * - If all middle paragraphs are already blockquotes, does nothing
+   *
+   * This ensures visual rhythm even when the AI doesn't use blockquotes.
+   */
+  private autoBlockquoteForVariety(html: string): string {
+    // Split by double-newline (paragraph boundaries).
+    // Keep track of the separators to reconstruct.
+    const blocks = html.split(/\n\n+/);
+    if (blocks.length < 3) return html; // Need at least 3 blocks.
+
+    // Find candidate blocks (non-empty, not already a blockquote/code/pre).
+    const candidates: number[] = [];
+    for (let i = 1; i < blocks.length - 1; i++) {
+      const block = blocks[i]!.trim();
+      if (!block) continue;
+      // Skip if already a blockquote.
+      if (block.startsWith("<blockquote")) continue;
+      // Skip if it's a code block.
+      if (block.startsWith("<pre>")) continue;
+      // Skip if it's a single line that's too short (looks like a label, not a paragraph).
+      if (!block.includes("\n") && block.length < 40) continue;
+      candidates.push(i);
+    }
+
+    if (candidates.length === 0) return html; // No suitable candidates.
+
+    // Pick a middle candidate (prefer the one closest to the center).
+    const center = Math.floor(blocks.length / 2);
+    let bestIdx = candidates[0]!;
+    let bestDist = Math.abs(bestIdx - center);
+    for (const idx of candidates) {
+      const dist = Math.abs(idx - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = idx;
+      }
+    }
+
+    // Convert the selected block to a blockquote.
+    const blockContent = blocks[bestIdx]!.trim();
+    blocks[bestIdx] = `<blockquote>${blockContent}</blockquote>`;
+
+    return blocks.join("\n\n");
   }
 
   /** Assemble a shorter caption for image posts.
@@ -365,10 +434,18 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Build caption parts (helper).
-   *  v11.6.0: Uses displaySource for the footer label. */
+   *  v11.6.0: Uses displaySource for the footer label.
+   *  v14.0.4: Fixed headline duplication — same normalized comparison as buildFullTextParts. */
   private buildCaptionParts(hook: string, body: string, sourceUrl: string, emoji: string, displaySource: string): string {
     const parts: string[] = [];
-    if (hook && body && !body.startsWith(hook)) {
+    // v14.0.4: Use normalized comparison (same as buildFullTextParts).
+    const normalizeForCompare = (s: string): string => s.replace(/[*_`>#~|]/g, "").trim().toLowerCase();
+    const hookNorm = normalizeForCompare(hook);
+    const bodyNorm = normalizeForCompare(body);
+    const bodyFirstLine = normalizeForCompare(body.split("\n")[0] ?? "");
+    const hookInBody = hook && body && hookNorm.length > 0 &&
+      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+    if (hook && body && !hookInBody) {
       parts.push(`<b>${escapeHtml(hook)}</b>`);
       parts.push("");
     }
