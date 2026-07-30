@@ -381,9 +381,19 @@ export class DuplicateDetector {
     }
 
     // NASA — date-based (unique per day).
+    // v13.5.1: FIX — reversed the regex priority. Now tries `apYYMMDD` FIRST
+    // (the v13.4.10 URL format: https://apod.nasa.gov/apod/ap240729.html),
+    // then falls back to the `?date=YYYY-MM-DD` query param format.
+    // Previously, the `?date=` regex was tried first, which meant a URL like
+    // `apod.nasa.gov/apod/ap250101.html?date=2025-01-01` yielded `nasa:2025-01-01`
+    // instead of `nasa:250101`. This caused the same APOD to have different
+    // canonical IDs depending on whether the URL had a query param, breaking
+    // dedup (same APOD could be republished).
     if (source === "nasa") {
-      const match = /apod.*date=([^&]+)/i.exec(url) || /ap(\d{6})/i.exec(url);
-      if (match) return `nasa:${match[1]}`;
+      const apMatch = /ap(\d{6})/i.exec(url);
+      if (apMatch) return `nasa:${apMatch[1]}`;
+      const dateMatch = /apod.*date=([^&]+)/i.exec(url);
+      if (dateMatch) return `nasa:${dateMatch[1]}`;
       return null;
     }
 

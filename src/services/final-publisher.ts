@@ -333,16 +333,29 @@ export class FinalPublisher {
 
       const tgApiUrl = `https://api.telegram.org/bot${token}/sendAudio`;
 
+      // v13.5.1: FIX — preserve the real network error instead of overwriting it.
+      // Previously, when fetch() threw, .catch() returned a plain object
+      // { ok:false, description }. Then (uploadResult as Response).json() was
+      // called on this plain object — .json is undefined, calling it throws
+      // TypeError, and the outer .catch() overwrote the real error with
+      // "Failed to parse Telegram response". Now: check if uploadResult is a
+      // real Response before calling .json().
       const uploadResult = await fetch(tgApiUrl, {
         method: "POST",
         body: formData,
       }).catch((e: unknown) => {
-        return { ok: false, description: e instanceof Error ? e.message : String(e) };
-      });
+        return { ok: false, description: e instanceof Error ? e.message : String(e), _networkError: true };
+      }) as Response & { ok: boolean; description?: string; _networkError?: boolean };
 
-      const dr = await (uploadResult as Response).json().catch(() => ({
-        ok: false, description: "Failed to parse Telegram response",
-      })) as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+      let dr: { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+      if (uploadResult._networkError) {
+        // Network error (DNS, timeout, etc.) — preserve the real description.
+        dr = { ok: false, description: uploadResult.description ?? "Network error" };
+      } else {
+        dr = await uploadResult.json().catch(() => ({
+          ok: false, description: "Failed to parse Telegram response",
+        })) as { ok: boolean; result?: { message_id?: number; chat?: { id?: number } }; description?: string };
+      }
 
       if (dr?.ok && dr.result) {
         // PHASE 5: Record KV ONLY after successful upload.
@@ -456,7 +469,9 @@ export class FinalPublisher {
       });
 
       // Record failure in history.
-      await this.deps.history.recordFailed(content, error);
+      // v13.5.1: Added .catch() — previously uncaught, could mask the original
+      // publish error if recordFailed threw.
+      await this.deps.history.recordFailed(content, error).catch(() => {});
 
       return {
         ok: false,
@@ -850,7 +865,10 @@ export class FinalPublisher {
 
         // v13.4.10: Try the <img> tag inside the page (APOD pages have
         // <img src="..."> for the main image). This is a last resort.
-        const imgMatch = /<img\s+[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i.exec(html);
+        // v13.5.1: Fixed regex — now accepts query strings after the extension
+        // (e.g., image.jpg?v=1). Previously required the extension immediately
+        // before the closing quote, missing URLs with query params.
+        const imgMatch = /<img\s+[^>]*src=["']([^"']+\.(?:jpg|jpeg|png|webp)(?:\?[^"']*)?)["']/i.exec(html);
         if (imgMatch?.[1]) {
           const absolute = new URL(imgMatch[1], pageUrl).href;
           if (this.isValidCoverUrl(absolute)) return absolute;

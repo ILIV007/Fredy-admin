@@ -618,6 +618,11 @@ export class SchedulerService {
 
       // v13.3.11: If we have a preferred provider, only use queued content
       // from that exact provider — not from a random other provider.
+      // v13.5.1: CRITICAL FIX — re-enqueue the wrong-provider item instead of
+      // destroying it. Previously, `continue` silently dropped the dequeued item
+      // (dequeue is destructive — queue.shift()). Up to 5 valid queued posts per
+      // slot were silently lost. Now: re-enqueue the item so it stays in the
+      // queue for a future slot that wants its provider.
       if (preferredProvider && queued.content.pluginId !== preferredProvider) {
         this.deps.logger.info("scheduler.skip", {
           slotIndex: slot.index,
@@ -625,9 +630,11 @@ export class SchedulerService {
           reason: "wrong_provider_in_queue",
           queuedProvider: queued.content.pluginId,
           preferredProvider: preferredProvider,
-          message: `Queued content is from "${queued.content.pluginId}" but plan assigned "${preferredProvider}" — skipping queue, trying fresh fetch`,
+          message: `Queued content is from "${queued.content.pluginId}" but plan assigned "${preferredProvider}" — re-enqueueing, trying fresh fetch`,
         });
-        continue; // Skip this queued item — wrong provider.
+        // v13.5.1: Re-enqueue the item so it's not lost.
+        await this.deps.contentQueue.enqueue(queued.content).catch(() => {});
+        continue; // Try the next queued item (or break if queue is empty).
       }
 
       if (queuedLang === expectedLang || queuedLang === settings.language.default) {
@@ -898,13 +905,9 @@ export class SchedulerService {
           });
           // v9.3.1: Record in dedup store ONLY after successful publish.
           // v12.1.8: FinalPublisher.publish() now records dedup internally
-          // (line 297-303), so this call is REDUNDANT. Keeping it as a
-          // safety net in case FinalPublisher's recording fails.
-          if (this.deps.duplicateDetector) {
-            // Only record if FinalPublisher didn't already (check by looking at result)
-            // Actually, just let FinalPublisher handle it — remove this redundant call.
-            // await this.deps.duplicateDetector.recordPublished(content).catch(() => {});
-          }
+          // (line 297-303), so this call is REDUNDANT.
+          // v13.5.1: Removed the dead `if (this.deps.duplicateDetector) {}` block
+          // that contained only a commented-out call. FinalPublisher handles dedup.
         }
 
         // Reset failure counter.

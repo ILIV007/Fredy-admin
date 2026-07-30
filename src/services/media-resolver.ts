@@ -286,7 +286,7 @@ function isUsableImageUrl(url: string): boolean {
   // v8.1.1: Also accept URLs that contain image-like path segments.
   // Many news sites use URLs like /assets/images/... or /photo/... without
   // a file extension. These are often valid images.
-  if (lower.match(/\/(image|images|photo|photos|picture|pictures|img|media|thumbnail|thumbnail|asset|assets|cdn)\//)) return true;
+  if (lower.match(/\/(image|images|photo|photos|picture|pictures|img|media|thumbnail|asset|assets|cdn)\//)) return true;
   // v8.1.1: Also accept URLs with image-related query parameters.
   if (lower.includes("format=") || lower.includes("type=image") || lower.includes("width=")) return true;
   // Default: reject (preserves safety — article URLs won't leak through).

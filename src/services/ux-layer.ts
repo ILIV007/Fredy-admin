@@ -11,6 +11,16 @@
  *   <blockquote>🌀 &#64;ILIVIR3</blockquote>
  *
  * For short posts (body < 200 chars), hook and body are combined into one paragraph.
+ *
+ * v13.5.2: Telegram formatting features supported in formatBody():
+ *   - **bold** → <b>bold</b>
+ *   - *italic* → <i>italic</i>
+ *   - ||spoiler|| → <span class="tg-spoiler">spoiler</span>
+ *   - ~~strikethrough~~ → <s>strikethrough</s>
+ *   - `inline code` → <code>inline code</code>
+ *   - ```code block``` → <pre><code>code block</code></pre>
+ *   - > quote → <blockquote>quote</blockquote>
+ *   - >! collapsible → <blockquote expandable="true">collapsible</blockquote>
  */
 
 import type { ReadyContent, FinalPost } from "../types/content";
@@ -160,8 +170,11 @@ export class UXLayerImpl implements UXLayer {
   }
 
   /** Convert AI markdown to Telegram HTML.
+   *  v13.5.2: Full Telegram formatting support:
    *  **bold** → <b>bold</b>
    *  *italic* → <i>italic</i>
+   *  ||spoiler|| → <span class="tg-spoiler">spoiler</span>
+   *  ~~strikethrough~~ → <s>strikethrough</s>
    *  `inline code` → <code>inline code</code>
    *  ```code block``` → <pre><code>code block</code></pre>
    *  > quote → <blockquote>quote</blockquote>
@@ -200,6 +213,16 @@ export class UXLayerImpl implements UXLayer {
 
     // 4. Convert *italic* to <i>italic</i> (single asterisks, not part of **).
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<i>$1</i>");
+
+    // v13.5.2: Convert ||spoiler|| to <span class="tg-spoiler">spoiler</span>.
+    // Telegram supports spoiler tags for hiding text until tapped.
+    // Must come AFTER escapeHtml (so | chars are literal) but BEFORE the
+    // blockquote processing (which splits by newlines).
+    html = html.replace(/\|\|(.+?)\|\|/g, '<span class="tg-spoiler">$1</span>');
+
+    // v13.5.2: Convert ~~strikethrough~~ to <s>strikethrough</s>.
+    // Telegram supports strikethrough for corrections/updates.
+    html = html.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
     // 5. Convert >! collapsible quotes to <blockquote expandable="true">.
     const lines = html.split("\n");

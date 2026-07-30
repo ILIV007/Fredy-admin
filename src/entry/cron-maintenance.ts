@@ -160,10 +160,18 @@ async function runDailyMaintenance(container: Container, env: Env): Promise<void
 /**
  * Remove daily-plan KV entries older than yesterday.
  * Keeps today + yesterday for debugging/auditing.
+ * v13.5.1: FIX — was only keeping today (dateStr >= today). Now correctly
+ * computes yesterday's date and keeps both today + yesterday.
  */
 async function cleanupOldPlans(container: Container, today: string): Promise<number> {
   let cleaned = 0;
   try {
+    // v13.5.1: Compute yesterday's date for the retention check.
+    // today format: "YYYY-MM-DD" — parse and subtract 1 day.
+    const todayDate = new Date(today + "T00:00:00Z");
+    const yesterdayDate = new Date(todayDate.getTime() - 24 * 3600 * 1000);
+    const yesterday = yesterdayDate.toISOString().split("T")[0]!;
+
     // List all keys with the plan prefixes.
     for (const prefix of PLAN_PREFIXES) {
       const keys = await container.kv.list(prefix).catch(() => []);
@@ -171,9 +179,9 @@ async function cleanupOldPlans(container: Container, today: string): Promise<num
         // Extract the date from the key: "fredy:strategy:plan:2026-07-20" → "2026-07-20"
         const dateStr = key.split(":").pop();
         if (!dateStr || dateStr.length !== 10) continue;
-        // Keep today and yesterday (dateStr >= today means today or future).
-        if (dateStr >= today) continue;
-        // Delete old plans.
+        // v13.5.1: Keep today AND yesterday (dateStr >= yesterday).
+        if (dateStr >= yesterday) continue;
+        // Delete old plans (older than yesterday).
         await container.kv.delete(key).catch(() => {});
         cleaned++;
       }

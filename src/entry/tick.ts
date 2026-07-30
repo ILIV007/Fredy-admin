@@ -245,11 +245,14 @@ async function runTickWork(
     // Previously, every tick (including manual /internal/tick calls) wrote
     // 2 KV entries even when nothing happened. Now we check if any meaningful
     // work happened before writing.
+    // v13.5.1: FIX — removed `l.includes("cleanup")` from the check because
+    // "cleanup done" is ALWAYS pushed (line 239), making didWork always true.
+    // This defeated the v13.4.4 optimization — every tick wrote 2 KV entries.
     const didWork = log.some(l =>
       l.includes("slot fired") || l.includes("slot skipped") ||
       l.includes("generating") || l.includes("providers refreshed") ||
       l.includes("providers failed") || l.includes("error") ||
-      l.includes("published") || l.includes("cleanup")
+      l.includes("published")
     );
 
     if (didWork) {
