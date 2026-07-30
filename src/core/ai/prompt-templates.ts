@@ -23,45 +23,48 @@ export type PromptProfile = "default" | "concise" | "detailed";
  * The AI must choose ONE layout per post and structure the content accordingly.
  * Layouts are rotated to prevent visual repetition.
  */
-const LAYOUT_ENGINE = `=== LAYOUT ENGINE (v14.0.0) ===
+const LAYOUT_ENGINE = `=== LAYOUT ENGINE (v14.0.2) ===
 Before writing, CHOOSE ONE layout. The system will tell you which layout to use (passed as "layout" in the user prompt). Follow that layout's structure exactly.
 
+IMPORTANT: Blockquotes (> ) are for SUPPLEMENTARY content in the MIDDLE of the post — NEVER at the end. The last element is ALWAYS a regular paragraph.
+
 LAYOUT A — Breaking News:
-Headline → Short intro → > Key Highlight → Explanation → > Bottom Line
+Headline → Short intro → > Supplementary context → Explanation → Final paragraph
 
 LAYOUT B — Timeline:
-Headline → Context → > What changed → Result → > Future outlook
+Headline → Context → > Background detail → What changed → Result → Final paragraph
 
 LAYOUT C — Compare:
-Headline → Previous state → > New state → Impact → > Verdict
+Headline → Previous state → > Comparison note → New state → Impact → Final paragraph
 
 LAYOUT D — Quick Read (mobile-friendly, very short):
-Headline → One sentence → > Important stat → Another sentence → > Done
+Headline → One sentence → > Extra detail → Another sentence → Final sentence
 
 LAYOUT E — Deep Dive (technical):
-Headline → Problem → > Solution → Developer impact → > Summary
+Headline → Problem → > Technical note → Solution → Developer impact → Final paragraph
 
 LAYOUT F — Quick Facts:
 Headline → Short intro → • Fact → • Fact → • Fact → Final sentence
 
 LAYOUT G — Feature Spotlight:
-Headline → Feature → > Benefits → Practical usage → > Final opinion
+Headline → Feature → > Additional info → Benefits → Practical usage → Final paragraph
 
 LAYOUT H — Community Story (narrative, for Reddit/HN/StackOverflow):
-Headline → Setup → > The twist → Resolution → > Takeaway
+Headline → Setup → > Context detail → The twist → Resolution → Final paragraph
 
 LAYOUT I — Hardware Review (Tier H):
-Headline → Specs → > Benchmark → Real-world impact → > Buying recommendation
+Headline → Specs → > Previous gen comparison → Benchmark → Real-world impact → Final paragraph
 
 LAYOUT J — Minimal:
-Headline → Two short paragraphs → > One highlight → Done
+Headline → Short paragraph → > Supplementary note → Final short paragraph
 
 RULES:
-- Follow the chosen layout's STRUCTURE exactly (the arrows ↓ indicate section flow).
-- Use > blockquotes where the layout specifies them.
+- Follow the chosen layout's STRUCTURE exactly.
+- Blockquotes (> ) go in the MIDDLE — NEVER as the last element.
+- The LAST element is ALWAYS a regular paragraph (NOT a blockquote).
 - Use • bullet lists where the layout specifies them (LAYOUT F).
-- Adapt the content to fit the layout — don't force content that doesn't fit.
-- If the layout has fewer sections than you need, merge sections. If more, expand.`;
+- Use 1-2 blockquotes per post (NEVER more than 2).
+- Adapt the content to fit the layout — don't force content that doesn't fit.`;
 
 /**
  * v14.0.0: Visual Rhythm Engine — vary paragraph lengths and element types.
@@ -99,45 +102,54 @@ Each post should have at least 3 different visual element types:
 - **bold** key term`;
 
 /**
- * v14.0.0: Smart Blockquote Engine — 8 styles, distributed naturally.
+ * v14.0.2: Smart Blockquote Engine — quotes for SUPPLEMENTARY content only.
+ * NO summary/takeaway/conclusion quotes. NO emoji conclusions.
  */
-const SMART_BLOCKQUOTE = `=== SMART BLOCKQUOTE ENGINE (v14.0.0) ===
-Blockquotes (> at line start) are the MOST powerful Telegram feature. Use 2-4 per post.
+const SMART_BLOCKQUOTE = `=== SMART BLOCKQUOTE ENGINE (v14.0.2) ===
+Blockquotes (> at line start) are for SUPPLEMENTARY and OPTIONAL content — NOT for conclusions, takeaways, or summaries.
 
-8 BLOCKQUOTE STYLES (mix them — don't use the same style twice in a row):
+MANDATORY: Use at least ONE blockquote per post.
 
-1. KEY HIGHLIGHT — the single most important fact:
-   > The new framework runs 3x faster than its predecessor
+WHAT TO PUT IN BLOCKQUOTES (supplementary/optional content):
+- Background context that's helpful but not essential
+- Additional details, options, or alternatives
+- Historical context or "for context" information
+- Secondary technical notes that supplement the main point
+- Extra examples or edge cases
+- "For those interested:" type supplementary info
+- Comparison data (previous version specs, etc.)
 
-2. KEY STAT — important numbers for visual separation:
-   > 2.3M downloads in the first week
+WHAT NOT TO PUT IN BLOCKQUOTES:
+- ❌ NO conclusions or takeaways ("Bottom line: ...")
+- ❌ NO summaries ("In summary: ...")
+- ❌ NO practical tips as conclusions ("Tip: use this command")
+- ❌ NO emoji conclusions (💡, ⚠️, ✅ as summary markers)
+- ❌ NO "why it matters" as a final takeaway
+- ❌ NO "worth upgrading" type verdicts
+- ❌ NO emojis at the start of blockquotes (no 💡, ⚠️, ✅, 🎯, etc.)
 
-3. WHY IT MATTERS — impact explanation (can be multi-line):
-   > Why it matters:
-   > Lower latency
-   > Less memory
-   > Better DX
+BLOCKQUOTE RULES:
+- Use > at line start for blockquotes.
+- Place blockquotes in the MIDDLE of the post — NOT at the end.
+- The LAST element of a post should always be a regular paragraph, NEVER a blockquote.
+- Use 1-2 blockquotes per post (NOT more).
+- Keep blockquotes SHORT (1-3 lines max).
+- Blockquotes contain EXTRA info — if you remove them, the post still makes sense.
 
-4. WARNING — important cautions with ⚠️:
-   > ⚠️ Breaking change: legacyMode removed in v3
+EXAMPLES OF GOOD BLOCKQUOTE USAGE:
+> Previous versions required manual configuration — this is now automatic.
 
-5. DEVELOPER TIP — practical advice:
-   > Migration only takes one command: \`bun upgrade\`
+> The library also supports WebAssembly targets as an experimental option.
 
-6. BOTTOM LINE — 1-line summary with 💡:
-   > 💡 Worth upgrading — zero breaking changes for most users
+> For context: the old API was deprecated in v2.0 and scheduled for removal.
 
-7. DEFINITION — term + definition:
-   > WASM = portable binary instruction format for stack-based VMs
+> An alternative approach using \`worker_threads\` is documented in the wiki.
 
-8. DIRECT QUOTE — real quotes from the source:
-   > "This changes everything" — Jane Doe, CTO
-
-PLACEMENT RULES:
-- NEVER put all blockquotes at the end.
-- Distribute naturally: beginning, middle, near-end.
-- The layout specifies WHERE blockquotes go — follow it.
-- Mix styles: don't use 2 "KEY HIGHLIGHT" in the same post.`;
+EXAMPLES OF BAD BLOCKQUOTE USAGE (DO NOT DO THESE):
+> 💡 Bottom line: this is worth upgrading.          ← NO conclusion/emoji
+> ⚠️ Breaking change: migrate before upgrading.      ← NO emoji warning as conclusion
+> Worth upgrading — zero breaking changes.            ← NO verdict/takeaway
+> Why it matters: faster builds, smaller bundles.    ← NO "why it matters" summary`;
 
 /**
  * v14.0.0: Typography Rules — intentional emphasis.
@@ -296,7 +308,7 @@ PERSONALITY: Benchmark, comparison, specifications, buying advice.
 
 PREFERRED LAYOUT: I (Hardware Review) — always use this layout for Category H.
 
-Structure: Headline → Specs → > Benchmark → Real-world impact → > Buying recommendation
+Structure: Headline → Specs → > Previous gen comparison → Benchmark → Real-world impact → Final paragraph
 
 Write a concise, factual post. Mention specific product names, model numbers, and benchmarks. No rumor, no speculation. If it's a review, summarize the key finding. If it's a launch, state what was launched and the headline spec.
 
