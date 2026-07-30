@@ -35,6 +35,13 @@ const TIER_V_SENT_TTL = 48 * 3600; // 48 hours
 const TIER_V_ATTEMPT_PREFIX = "fredy:tierV:attempt"; // v13.3.12: retry tracking
 const TIER_V_ATTEMPT_TTL = 6 * 3600; // 6 hours — enough for 2 attempts in one night
 const TIER_V_MAX_ATTEMPTS = 2; // v13.3.12: max 2 attempts per entry per night
+// v14.1.0: Minimum minutes between attempt 1 and attempt 2.
+// v14.1.1: Changed from 60 to 10 minutes — Tier V fires at 23:20/23:23,
+// quiet hours start at 00:00. A 60-min gap would push attempt 2 past midnight
+// into quiet hours, preventing the retry entirely. 10 min is enough for
+// transient API failures (Jamendo rate limit, network blip) while keeping
+// both attempts before quiet hours.
+const TIER_V_RETRY_MIN_GAP_MINUTES = 10;
 
 export interface TierVSchedulerDeps {
   readonly container: Container;
@@ -91,10 +98,33 @@ export class TierVScheduler {
       // v13.4.1: Use tierVDate for attempt tracking too.
       const attemptKey = `${TIER_V_ATTEMPT_PREFIX}:${tierVDate}:${entry.id}`;
       const attemptStr = await this.deps.container.kv.get(attemptKey).catch(() => null);
-      const attemptCount = attemptStr ? parseInt(attemptStr, 10) : 0;
+      // v14.1.0: Parse "count:timestamp" format (or legacy "count" format).
+      // attemptStr = "1:1700000000000" means 1 attempt at timestamp T.
+      let attemptCount = 0;
+      let lastAttemptTime = 0;
+      if (attemptStr) {
+        const parts = attemptStr.split(":");
+        attemptCount = parseInt(parts[0] ?? "0", 10) || 0;
+        lastAttemptTime = parts[1] ? parseInt(parts[1], 10) || 0 : 0;
+      }
       if (attemptCount >= TIER_V_MAX_ATTEMPTS) {
         // Already tried max times — skip silently (admin was already notified).
         continue;
+      }
+      // v14.1.0: Retry backoff — don't retry too quickly.
+      // If this is attempt 2+, wait at least TIER_V_RETRY_MIN_GAP_MINUTES since attempt 1.
+      if (attemptCount > 0 && lastAttemptTime > 0) {
+        const minutesSinceLastAttempt = Math.floor((now - lastAttemptTime) / (60 * 1000));
+        if (minutesSinceLastAttempt < TIER_V_RETRY_MIN_GAP_MINUTES) {
+          this.deps.container.logger.info("tierV.publish_start", {
+            entryId: entry.id,
+            attempt: attemptCount + 1,
+            minutesSinceLastAttempt,
+            minGap: TIER_V_RETRY_MIN_GAP_MINUTES,
+            message: `Tier V retry skipped — only ${minutesSinceLastAttempt}min since last attempt (need ${TIER_V_RETRY_MIN_GAP_MINUTES}min)`,
+          });
+          continue; // Skip this tick — retry too soon.
+        }
       }
 
       // Due! Fetch content from the provider and publish.
@@ -124,7 +154,8 @@ export class TierVScheduler {
         } else {
           // Failed — increment attempt counter.
           const newAttemptCount = attemptCount + 1;
-          await this.deps.container.kv.set(attemptKey, String(newAttemptCount), TIER_V_ATTEMPT_TTL).catch(() => {});
+          // v14.1.0: Store "count:timestamp" for retry backoff tracking.
+          await this.deps.container.kv.set(attemptKey, `${newAttemptCount}:${now}`, TIER_V_ATTEMPT_TTL).catch(() => {});
 
           this.deps.container.logger.warn("tierV.publish_failed", {
             entryId: entry.id,
@@ -143,7 +174,8 @@ export class TierVScheduler {
       } catch (error) {
         // Exception — increment attempt counter.
         const newAttemptCount = attemptCount + 1;
-        await this.deps.container.kv.set(attemptKey, String(newAttemptCount), TIER_V_ATTEMPT_TTL).catch(() => {});
+        // v14.1.0: Store "count:timestamp" for retry backoff tracking.
+        await this.deps.container.kv.set(attemptKey, `${newAttemptCount}:${now}`, TIER_V_ATTEMPT_TTL).catch(() => {});
 
         this.deps.container.logger.error("tierV.publish_error", {
           entryId: entry.id,

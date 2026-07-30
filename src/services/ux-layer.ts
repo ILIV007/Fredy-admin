@@ -356,19 +356,43 @@ export class UXLayerImpl implements UXLayer {
    * v14.0.3: AUTO-BLOCKQUOTE for variety — when there are 3+ paragraphs,
    * convert one MIDDLE paragraph to a blockquote for visual rhythm.
    *
+   * v14.1.0: CRITICAL FIX — don't split inside <blockquote> or <pre> tags.
+   * Previously, html.split(/\n\n+/) would break multi-line blockquotes
+   * and code blocks, creating invalid HTML that Telegram rejects.
+   * Now: use a line-by-line parser that tracks tag depth.
+   *
    * Rules:
    * - Only runs when there are 3+ "block elements" (paragraphs separated by blank lines)
    * - Skips elements that are already blockquotes or code blocks
    * - Picks a MIDDLE paragraph (never the first or last)
    * - Only converts ONE paragraph per post (for subtle variety, not overuse)
    * - If all middle paragraphs are already blockquotes, does nothing
-   *
-   * This ensures visual rhythm even when the AI doesn't use blockquotes.
    */
   private autoBlockquoteForVariety(html: string): string {
-    // Split by double-newline (paragraph boundaries).
-    // Keep track of the separators to reconstruct.
-    const blocks = html.split(/\n\n+/);
+    // v14.1.0: Smart split — don't break inside <blockquote> or <pre> tags.
+    const blocks: string[] = [];
+    let current = "";
+    let insideTag = false;
+
+    for (const line of html.split("\n")) {
+      if (line.startsWith("<blockquote") || line.startsWith("<pre>")) {
+        insideTag = true;
+      }
+      if (line.trim() === "" && !insideTag) {
+        // Blank line outside tags — block boundary.
+        if (current.trim()) {
+          blocks.push(current.trim());
+          current = "";
+        }
+      } else {
+        current += (current ? "\n" : "") + line;
+      }
+      if (line.includes("</blockquote>") || line.includes("</pre>")) {
+        insideTag = false;
+      }
+    }
+    if (current.trim()) blocks.push(current.trim());
+
     if (blocks.length < 3) return html; // Need at least 3 blocks.
 
     // Find candidate blocks (non-empty, not already a blockquote/code/pre).
@@ -376,16 +400,13 @@ export class UXLayerImpl implements UXLayer {
     for (let i = 1; i < blocks.length - 1; i++) {
       const block = blocks[i]!.trim();
       if (!block) continue;
-      // Skip if already a blockquote.
       if (block.startsWith("<blockquote")) continue;
-      // Skip if it's a code block.
       if (block.startsWith("<pre>")) continue;
-      // Skip if it's a single line that's too short (looks like a label, not a paragraph).
       if (!block.includes("\n") && block.length < 40) continue;
       candidates.push(i);
     }
 
-    if (candidates.length === 0) return html; // No suitable candidates.
+    if (candidates.length === 0) return html;
 
     // Pick a middle candidate (prefer the one closest to the center).
     const center = Math.floor(blocks.length / 2);

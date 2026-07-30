@@ -364,7 +364,9 @@ export class FinalPublisher {
       formData.append("performer", artistName);
       // v13.3.4: Filename = "Artist - Song.mp3"
       const safeFilename = `${artistName.replace(/[^a-zA-Z0-9]/g, "_")} - ${songName.replace(/[^a-zA-Z0-9]/g, "_")}.mp3`;
-      formData.append("audio", new Blob([audioBlob], { type: "audio/mpeg" }), safeFilename);
+      // v14.1.0: FIX — use Uint8Array instead of ArrayBuffer for Blob creation.
+      // Some Cloudflare Workers runtimes don't handle new Blob([ArrayBuffer]) correctly.
+      formData.append("audio", new Blob([new Uint8Array(audioBlob)], { type: "audio/mpeg" }), safeFilename);
 
       const token = this.deps.botToken?.() ?? "";
       if (!token) {
@@ -423,7 +425,7 @@ export class FinalPublisher {
           adminFormData.append("parse_mode", "HTML");
           adminFormData.append("title", songName);
           adminFormData.append("performer", artistName);
-          adminFormData.append("audio", new Blob([audioBlob], { type: "audio/mpeg" }), safeFilename);
+          adminFormData.append("audio", new Blob([new Uint8Array(audioBlob)], { type: "audio/mpeg" }), safeFilename);
           await fetch(`https://api.telegram.org/bot${adminToken}/sendAudio`, {
             method: "POST",
             body: adminFormData,

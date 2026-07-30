@@ -290,90 +290,170 @@ export class NightMusicPlugin implements Plugin {
 
   /**
    * v14.0.6: Nuclear fallback — select a random song from Hall of Fame.
-   * Used when Jamendo API fails or all tracks are rejected.
-   * Checks song dedup (180-day KV) — skips already-published songs.
-   * If ALL Hall of Fame songs are published, picks a random one anyway.
-   *
-   * Returns a SourceItem with a Jamendo search URL (not direct audio URL).
-   * The FinalPublisher will handle this as a text-only post (no audio download).
+   * v14.1.1: CRITICAL FIX — must return a REAL audio URL, not text-only.
+   * User: "بات اصلا نباید از پروایدر موزیک پست بدون اهنگ برگردونه!"
+   * Now: searches Jamendo API for the Hall of Fame song to get a real audio URL.
+   * If the search finds a matching track, uses its audiodownload URL.
+   * If the search fails, tries the next Hall of Fame entry.
+   * Only returns null if ALL Hall of Fame entries fail the search.
    */
   private async selectFromHallOfFame(): Promise<SourceItem | null> {
     if (HALL_OF_FAME.length === 0) return null;
 
-    // v14.0.9: OPTIMIZATION — reuse the publishedSongs Set from selectTrack
-    // if available, instead of calling kv.list() a second time.
-    // This saves 1 KV list() call per fetch (~1 read/day).
+    const clientId = this.deps.env.JAMENDO_CLIENT_ID ?? "";
+    if (!clientId) return null; // Can't search Jamendo without client ID.
+
     const publishedSongs = await this.loadPublishedSongs();
 
-    // Shuffle Hall of Fame and find first unpublished.
+    // Shuffle Hall of Fame.
     const shuffled = [...HALL_OF_FAME].sort(() => Math.random() - 0.5);
-    let selected: { song: string; artist: string } | null = null;
 
+    // Try each Hall of Fame entry until we find one with a real audio URL.
     for (const entry of shuffled) {
       const songHash = this.hashSongArtist(entry.song, entry.artist);
-      if (!publishedSongs.has(songHash)) {
-        selected = { song: entry.song, artist: entry.artist };
-        break;
+      // Skip if already published (unless ALL are published — handled below).
+      if (publishedSongs.has(songHash)) continue;
+
+      // Search Jamendo API for this song.
+      try {
+        const searchUrl = `${JAMENDO_API}?client_id=${clientId}&format=json&limit=1&audioformat=mp32&name=${encodeURIComponent(entry.song)}&artist_name=${encodeURIComponent(entry.artist)}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const res = await fetch(searchUrl, {
+          headers: { "User-Agent": "FredyBot/1.0" },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) continue; // Try next entry.
+        const data = await res.json() as JamendoResponse;
+        if (data.headers.status !== "success" || !data.results || data.results.length === 0) continue;
+
+        const track = data.results[0]!;
+        const audioUrl = track.audiodownload ?? track.audio;
+        if (!audioUrl) continue; // No audio URL — try next.
+
+        // Found a real track with audio!
+        const text = this.buildMessage(track.name ?? entry.song, track.artist_name ?? entry.artist);
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music",
+          stage: "HALL_OF_FAME_FOUND",
+          song: track.name,
+          artist: track.artist_name,
+          audioUrl: audioUrl.slice(0, 80),
+          message: `[NIGHT_MUSIC] HALL_OF_FAME_FOUND: "${track.name}" by ${track.artist_name} — real audio URL obtained`,
+        });
+
+        return {
+          id: `night-music-${songHash}`,
+          source: this.metadata.id,
+          category: this.metadata.category,
+          title: `${track.name ?? entry.song} — ${track.artist_name ?? entry.artist}`,
+          body: text,
+          url: audioUrl,
+          language: "en",
+          publishedAt: Date.now(),
+          media: {
+            type: "audio",
+            url: audioUrl,
+            alt: track.name ?? entry.song,
+          },
+          metadata: {
+            song: track.name ?? entry.song,
+            artist: track.artist_name ?? entry.artist,
+            audioUrl,
+            albumImage: track.album_image,
+            score: 50,
+            jamendoId: track.id ?? `hof-${songHash}`,
+            hallOfFame: true,
+          },
+          displayIcon: this.metadata.displayIcon ?? "🎵",
+          displaySource: this.metadata.displaySource ?? "Night Music",
+          fetchedAt: Date.now(),
+        };
+      } catch {
+        // Search failed — try next entry.
+        continue;
       }
     }
 
-    // If ALL Hall of Fame songs are published, pick a random one.
-    if (!selected) {
-      const random = shuffled[0]!;
-      selected = { song: random.song, artist: random.artist };
-      this.deps.logger.warn("source.fetch_error", {
-        plugin: "night-music",
-        reason: "hall_of_fame_all_published",
-        message: `[NIGHT_MUSIC] HALL_OF_FAME: all ${HALL_OF_FAME.length} songs published — reusing "${random.song}" by ${random.artist}`,
-      });
-    }
-
-    if (!selected) return null;
-
-    const { song, artist } = selected;
-    const text = this.buildMessage(song, artist);
-    const songHash = this.hashSongArtist(song, artist);
-
-    // v14.0.6: Use Jamendo search URL as the audio URL — FinalPublisher will
-    // try to download from it. If it fails, the post will be sent as text-only.
-    // The search URL format: https://api.jamendo.com/v3.0/tracks/?name=SONG&artist_name=ARTIST&client_id=xxx&audioformat=mp32
-    const searchUrl = `https://api.jamendo.com/v3.0/tracks/?name=${encodeURIComponent(song)}&artist_name=${encodeURIComponent(artist)}&client_id=${this.deps.env.JAMENDO_CLIENT_ID ?? ""}&format=json&limit=1&audioformat=mp32`;
-
-    this.deps.logger.info("source.fetch_success", {
+    // v14.1.1: If all unpublished entries failed search, try published ones.
+    // (reuse is better than no post at all — the user wants audio, not silence)
+    this.deps.logger.warn("source.fetch_error", {
       plugin: "night-music",
-      stage: "HALL_OF_FAME_SELECTED",
-      song,
-      artist,
-      message: `[NIGHT_MUSIC] HALL_OF_FAME_SELECTED: "${song}" by ${artist}`,
+      reason: "hall_of_fame_all_search_failed",
+      message: `[NIGHT_MUSIC] HALL_OF_FAME: all unpublished entries failed Jamendo search — trying published entries`,
     });
 
-    return {
-      id: `night-music-${songHash}`,
-      source: this.metadata.id,
-      category: this.metadata.category,
-      title: `${song} — ${artist}`,
-      body: text,
-      url: searchUrl,
-      language: "en",
-      publishedAt: Date.now(),
-      media: {
-        type: "audio",
-        url: searchUrl,
-        alt: song,
-      },
-      metadata: {
-        song,
-        artist,
-        audioUrl: searchUrl,
-        albumImage: undefined,
-        score: 50,
-        jamendoId: `hof-${songHash}`,
-        hallOfFame: true,
-      },
-      displayIcon: this.metadata.displayIcon ?? "🎵",
-      displaySource: this.metadata.displaySource ?? "Night Music",
-      fetchedAt: Date.now(),
-    };
+    for (const entry of shuffled) {
+      try {
+        const searchUrl = `${JAMENDO_API}?client_id=${clientId}&format=json&limit=1&audioformat=mp32&name=${encodeURIComponent(entry.song)}&artist_name=${encodeURIComponent(entry.artist)}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const res = await fetch(searchUrl, {
+          headers: { "User-Agent": "FredyBot/1.0" },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!res.ok) continue;
+        const data = await res.json() as JamendoResponse;
+        if (data.headers.status !== "success" || !data.results || data.results.length === 0) continue;
+
+        const track = data.results[0]!;
+        const audioUrl = track.audiodownload ?? track.audio;
+        if (!audioUrl) continue;
+
+        const songHash = this.hashSongArtist(entry.song, entry.artist);
+        const text = this.buildMessage(track.name ?? entry.song, track.artist_name ?? entry.artist);
+        this.deps.logger.info("source.fetch_success", {
+          plugin: "night-music",
+          stage: "HALL_OF_FAME_REUSE",
+          song: track.name,
+          artist: track.artist_name,
+          message: `[NIGHT_MUSIC] HALL_OF_FAME_REUSE: reusing "${track.name}" by ${track.artist_name} (already published but search succeeded)`,
+        });
+
+        return {
+          id: `night-music-${songHash}`,
+          source: this.metadata.id,
+          category: this.metadata.category,
+          title: `${track.name ?? entry.song} — ${track.artist_name ?? entry.artist}`,
+          body: text,
+          url: audioUrl,
+          language: "en",
+          publishedAt: Date.now(),
+          media: {
+            type: "audio",
+            url: audioUrl,
+            alt: track.name ?? entry.song,
+          },
+          metadata: {
+            song: track.name ?? entry.song,
+            artist: track.artist_name ?? entry.artist,
+            audioUrl,
+            albumImage: track.album_image,
+            score: 50,
+            jamendoId: track.id ?? `hof-${songHash}`,
+            hallOfFame: true,
+          },
+          displayIcon: this.metadata.displayIcon ?? "🎵",
+          displaySource: this.metadata.displaySource ?? "Night Music",
+          fetchedAt: Date.now(),
+        };
+      } catch {
+        continue;
+      }
+    }
+
+    // v14.1.1: Only return null if EVERY Hall of Fame entry failed search.
+    // This is extremely unlikely (300+ songs × Jamendo API success rate).
+    this.deps.logger.error("source.fetch_error", {
+      plugin: "night-music",
+      reason: "hall_of_fame_all_search_failed_completely",
+      message: `[NIGHT_MUSIC] HALL_OF_FAME: ALL ${HALL_OF_FAME.length} entries failed Jamendo search — this should NEVER happen.`,
+    });
+    return null;
   }
 
   // ────────────────────────────────────────────────────────────

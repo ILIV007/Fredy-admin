@@ -18,6 +18,7 @@ import type {
   RejectionReason,
   StandardPost,
 } from "../types/content";
+import type { QualityResult } from "../types/quality";
 import type { FredySettings } from "../types/config";
 import type { PluginManager } from "./plugin-manager";
 import type { ContentValidator } from "./content-validator";
@@ -300,8 +301,9 @@ export class ContentManager {
             overallScore: 95, // High score — NASA content is always good
             dimensionScores: [],
             hardReject: false,
+            hardRejectReason: undefined,
             minScore: settings.ai.qualityThreshold,
-          } as never,
+          } satisfies QualityResult,
           "nasa-direct",
           "none",
           0,
@@ -343,8 +345,9 @@ export class ContentManager {
             overallScore: 95, // High score — curated Hall of Fame
             dimensionScores: [],
             hardReject: false,
+            hardRejectReason: undefined,
             minScore: settings.ai.qualityThreshold,
-          } as never,
+          } satisfies QualityResult,
           "night-music-direct",
           "none",
           0,
@@ -400,7 +403,7 @@ export class ContentManager {
         const readyContent = await this.deps.formatter.buildReadyContent(
           resolvedItem,
           fallbackContent,
-          fallbackQuality as never,
+          fallbackQuality satisfies QualityResult,
           "format-only",
           "none",
           0,

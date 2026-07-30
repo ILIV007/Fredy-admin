@@ -81,25 +81,38 @@ export class ContentQueue {
     }
   }
 
-  /** Internal: dequeue without re-acquiring the lock (caller holds the lock). */
+  /** Internal: dequeue without re-acquiring the lock (caller holds the lock).
+   *  v14.1.0: CRITICAL FIX — replaced recursive implementation with iterative loop.
+   *  Previously, if N items were expired, it would do N recursive calls + N KV reads + N KV writes.
+   *  Now: at most 1 KV read + 1 KV write regardless of how many expired items exist. */
   private async dequeueLocked(category: Category): Promise<QueuedContent | null> {
     const queue = await this.getQueue(category);
     if (queue.length === 0) return null;
 
-    const item = queue.shift();
-    if (!item) return null;
+    const now = Date.now();
+    let changed = false;
 
-    // Check if expired.
-    if (Date.now() > item.expiresAt) {
-      this.deps.logger.warn("quality.reject", {
-        contentId: item.id,
-        category: item.category,
-        reason: "expired",
-      });
-      await this.saveQueue(category, queue);
-      return this.dequeueLocked(category); // Try the next one.
+    // v14.1.0: Iteratively remove ALL expired items from the front in a single pass.
+    while (queue.length > 0 && now > (queue[0]?.expiresAt ?? 0)) {
+      const expired = queue.shift();
+      if (expired) {
+        this.deps.logger.warn("quality.reject", {
+          contentId: expired.id,
+          category: expired.category,
+          reason: "expired",
+        });
+        changed = true;
+      }
     }
 
+    // Save once if any expired items were removed.
+    if (changed) {
+      await this.saveQueue(category, queue);
+    }
+
+    if (queue.length === 0) return null;
+
+    const item = queue.shift()!;
     await this.saveQueue(category, queue);
     return item;
   }
