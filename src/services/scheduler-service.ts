@@ -1325,21 +1325,38 @@ export class SchedulerService {
     // sentText + sentMediaUrl from PublishResult (captured inside FinalPublisher).
     // This ensures the admin PM receives an identical copy, not a re-transformed
     // version that might differ slightly.
-    if (pubResult.ok && pubResult.sentText) {
-      const mediaUrl = pubResult.sentMediaUrl;
-      if (mediaUrl) {
+    // v13.5.3: CRITICAL FIX — if sentText is empty/undefined, fall back to
+    // content.text or content.headline. Previously, when sentText was empty
+    // (e.g., after stripBareUrls removed all bare URLs and left only HTML tags
+    // that Telegram rendered as empty), the entire admin PM notification was
+    // SKIPPED — the post went to the channel but NOT to the admin.
+    // Now: always send SOMETHING to the admin PM.
+    if (pubResult.ok) {
+      // v13.5.3: Determine the text to send — prefer sentText, fall back to content.
+      const sentText = pubResult.sentText ?? content.text ?? content.headline ?? "";
+      const mediaUrl = pubResult.sentMediaUrl ?? null;
+
+      if (mediaUrl && sentText) {
         // Photo post — send the same photo + caption to admin PM.
-        await this.deps.tg.sendPhoto(adminId, mediaUrl, pubResult.sentText, {
+        await this.deps.tg.sendPhoto(adminId, mediaUrl, sentText, {
           parse_mode: "HTML",
         }).catch(() => {});
-      } else {
-        // Text-only post — send the same text to admin PM.
+      } else if (sentText) {
+        // Text-only post (with link preview) — send the same text to admin PM.
         // v12.1.1: Add link_preview_options so admin PM shows the same preview as the channel.
+        // v13.5.3: ALWAYS enable link preview for admin PM (is_disabled: false, show_above_text: true)
+        // so the admin sees the same rich preview the channel shows. Previously,
+        // smart mode could disable the preview for some providers — but the admin
+        // should ALWAYS see the preview to know what the channel post looks like.
         const settings = await this.deps.settings();
         const previewMode = settings.telegram.linkPreviewMode ?? "smart";
         const pluginId = content.pluginId ?? "";
-        const previewOpts = this.resolvePreviewOptionsForAdmin(previewMode, pluginId);
-        await this.deps.tg.sendMessage(adminId, pubResult.sentText, {
+        // v13.5.3: Force-enable preview for link-preview posts (no media).
+        // The admin needs to see the link preview to verify the post looks correct.
+        const previewOpts = mediaUrl
+          ? this.resolvePreviewOptionsForAdmin(previewMode, pluginId)
+          : { is_disabled: false, show_above_text: true };
+        await this.deps.tg.sendMessage(adminId, sentText, {
           parse_mode: "HTML",
           link_preview_options: previewOpts,
         }).catch(() => {});

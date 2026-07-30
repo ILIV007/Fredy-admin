@@ -2,6 +2,59 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.5.3] — 2026-07-30 — Admin PM Fix for Link-Preview Posts + Formatting Rules Adjusted
+
+### 🐛 CRITICAL FIX: Link-Preview Posts Not Sent to Admin PM
+
+**User report:** "پست های گیت هاب(گیت هاب ساده و پراویدر خالی گیت هاب) پست هایی که عکس ندارن و در حالت لینک پرویو هستن برای کاربر ادمین ارسال نمیکنه!!!و یکراست در چنل ارسال میکنه!!!پست ها با پرویو باید برای ادمین هم ارسال بشن دقیقا مثل پست های کانال!" ("GitHub posts (simple github and empty github provider) that don't have images and are in link-preview mode are NOT sent to the admin! They go directly to the channel! Posts with preview must be sent to admin too, exactly like channel posts!")
+
+**Root cause:** In `notifyAdminPm()` (scheduler-service.ts line 1328), the condition was:
+```typescript
+if (pubResult.ok && pubResult.sentText) {
+```
+When `pubResult.sentText` was empty or undefined (which happens when `stripBareUrls` removes all bare URLs and leaves only HTML tags, or when the text is very short), the entire admin PM notification block was **SKIPPED**. The post went to the channel successfully, but the admin received NOTHING — no formatted post, only the summary report.
+
+**Fix:**
+1. Changed condition from `if (pubResult.ok && pubResult.sentText)` to `if (pubResult.ok)` — always send to admin on success
+2. Added fallback chain: `sentText ?? content.text ?? content.headline ?? ""` — if sentText is empty, use the original content text
+3. Force-enable link preview for text-only (link-preview) posts: `{ is_disabled: false, show_above_text: true }` — the admin must ALWAYS see the link preview to verify the post looks correct
+
+**Result:** All posts — including GitHub link-preview posts without images — are now sent to the admin PM with the same link preview the channel shows.
+
+### 🎨 FIX: Formatting Rules Adjusted (User Request)
+
+**User request:** "لازم هم نیست که بات بصورت اجباری از چند مارک دان استفاده بکنه!اجبار فقط برای استفاده از بولد و qoute در پست ها هست و بقییه اختیاری و ازاد هستن!!!" ("No need for the bot to mandatorily use multiple markdowns! Only bold and quote are mandatory, the rest are optional and free!")
+
+**Change:** Updated AI prompt templates (prompt-templates.ts):
+- **bold** → MANDATORY (every post must have at least one bold term)
+- **> blockquote (quote)** → MANDATORY (every post must have at least one blockquote)
+- *italic* → OPTIONAL
+- >! collapsible → OPTIONAL
+- ||spoiler|| → OPTIONAL
+- ~~strikethrough~~ → OPTIONAL
+- `code` / ```code blocks``` → OPTIONAL (use when content has code)
+- Removed: "USE FORMATTING GENEROUSLY — every post should have at least 2 different formatting types"
+- Added: "Do NOT force formatting that doesn't fit the content — if a post is pure news with no code, don't add fake code blocks."
+
+Updated all category-specific formatting instructions (A/B/C/H) to mark bold + blockquote as MANDATORY and rest as OPTIONAL.
+
+### ✅ Code Block Formatting Verified
+
+Verified `formatBody()` in ux-layer.ts correctly handles:
+- ` ```code block``` ` → `<pre><code>code block</code></pre>` (multi-line, HTML-escaped)
+- `` `inline code` `` → `<code>inline code</code>` (single line, HTML-escaped)
+- Code is extracted BEFORE escapeHtml so content survives untouched
+- Placeholders restored at the end
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 490 passing (87+193+41+28+80+35+26) ✅
+- Manager dashboard: v13.5.3 · ADMIN-FIX ✅
+
+**Files changed:**
+- `src/services/scheduler-service.ts` — notifyAdminPm fix (always send to admin + fallback text + force preview)
+- `src/core/ai/prompt-templates.ts` — Formatting rules: bold+blockquote MANDATORY, rest OPTIONAL
+
 ## [13.5.2] — 2026-07-30 — Rich Telegram Formatting (spoiler, strikethrough, italic, blockquote, code)
 
 ### 🎨 ENHANCEMENT: Full Telegram Formatting Features

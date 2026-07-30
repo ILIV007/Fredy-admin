@@ -33,18 +33,18 @@ HARD RULES:
 7. NEVER include source URLs in text — system adds them automatically.
 8. RESPECT the soul.md personality injected below.
 
-FORMATTING (v13.5.2 — use ALL Telegram formatting features):
-- **bold** for important terms/tool names (first mention only).
-- *italic* for emphasis, technical terms, or secondary mentions of a tool/concept.
-- > at line start for blockquotes — use for key quotes, important warnings, step-by-step instructions, or notable highlights. Wrap each paragraph/step in its own > block.
-- >! for collapsible quotes (paragraphs >3 lines that are supplementary detail — reader can expand).
-- ||spoiler|| for plot reveals, surprise endings, Easter eggs, or content that's more fun when discovered by tapping.
-- ~~strikethrough~~ for corrections, outdated info, or "was X, now Y" comparisons.
-- Triple backticks for code blocks. Single backticks for inline code/paths/commands/file names.
+FORMATTING (v13.5.3 — bold + blockquote MANDATORY, rest OPTIONAL):
+- **bold** for important terms/tool names (first mention only). MANDATORY — every post must have at least one bold term.
+- > at line start for blockquotes — use for key quotes, important warnings, step-by-step instructions, or notable highlights. MANDATORY — every post must have at least one blockquote.
+- *italic* for emphasis, technical terms — OPTIONAL, use when appropriate.
+- >! for collapsible quotes (paragraphs >3 lines supplementary detail) — OPTIONAL.
+- ||spoiler|| for plot reveals, surprises — OPTIONAL, use sparingly.
+- ~~strikethrough~~ for corrections, "was X, now Y" — OPTIONAL, use when relevant.
+- Triple backticks for code blocks. Single backticks for inline code/paths/commands. OPTIONAL, use when content has code.
 - Do NOT use markdown headings (#) or links [text](url) — Telegram doesn't render them.
 - Code blocks: include the COMPLETE command (e.g. \`npm install express\`, never bare \`npm install\`).
 - Short paragraphs (2-4 sentences). Line breaks between paragraphs.
-- USE FORMATTING GENEROUSLY — a post with only bold is boring. Mix bold, italic, blockquotes, and code where appropriate. Every post should have at least 2 different formatting types.
+- Do NOT force formatting that doesn't fit the content — if a post is pure news with no code, don't add fake code blocks.
 
 OUTPUT FORMAT:
 Return a single JSON object:
@@ -64,26 +64,24 @@ const CATEGORY_PROMPTS: Readonly<Record<Category, string>> = {
 Write a clear, engaging post about the source content. Explain what it is, why it matters, and how developers can use it. Include version numbers and tool names. 2-4 paragraphs for substantial content, 1-2 for simple items.
 
 FORMATTING FOR CATEGORY A (developer content):
-- Use \`inline code\` for package names, commands, file paths, function names, and config keys.
-- Use \`\`\`code blocks\`\`\` for multi-line code examples, config snippets, or terminal commands.
-- Use **bold** for the tool/framework name (first mention).
-- Use *italic* for technical concepts or secondary terms.
-- Use > blockquotes for key takeaways, warnings, or important notes.
-- Use >! collapsible for long supplementary detail (background, history, deep explanation).
-- Example: "Install with \`npm install express\`. Then create an **app** instance: \`\`\`const app = express()\`\`\`"
-- Developer posts SHOULD have code formatting — bare text without code blocks looks unprofessional.`,
+- **bold** for the tool/framework name (first mention) — MANDATORY.
+- > blockquote for key takeaways, warnings, or important notes — MANDATORY.
+- \`inline code\` for package names, commands, file paths, function names — OPTIONAL (use when content has code).
+- \`\`\`code blocks\`\`\` for multi-line code examples — OPTIONAL (use when content has multi-line code).
+- *italic* for technical concepts — OPTIONAL.
+- >! collapsible for supplementary detail — OPTIONAL.
+- Example: "Install with \`npm install express\`. Then create an **app** instance: \`\`\`const app = express()\`\`\`"`,
 
   B: `CATEGORY B — Technology News (only tech news, no politics, no general news)
 
 Write a factual news post. What happened, why it matters. 2-3 paragraphs. No speculation, no rumor. If the content is political or gossip, set aiConfidence below 40.
 
 FORMATTING FOR CATEGORY B (tech news):
-- Use **bold** for company/product names (first mention).
-- Use *italic* for emphasis on key points or quotes.
-- Use > blockquotes for direct quotes from executives, official statements, or notable claims.
-- Use >! collapsible for background context or historical detail that's supplementary.
-- Use ~~strikethrough~~ for "was X, now Y" changes (e.g., ~~Windows 10~~ Windows 11).
-- Tech news posts should have at least one blockquote for a key quote or takeaway.`,
+- **bold** for company/product names (first mention) — MANDATORY.
+- > blockquote for key takeaways, important points, or notable claims — MANDATORY.
+- *italic* for emphasis — OPTIONAL.
+- >! collapsible for background context — OPTIONAL.
+- ~~strikethrough~~ for "was X, now Y" changes — OPTIONAL.`,
 
   C: `CATEGORY C — Support Content (NASA APOD, jokes, quotes, dev facts)
 
@@ -108,12 +106,11 @@ HARD RULE: total text must be ≤150 chars. If you can't fit it in 2 lines, cut 
 Write a concise, factual post about the hardware/tech headline. What's new, why it matters to developers and tech enthusiasts. Mention specific product names, model numbers, and benchmarks if available. 2-3 paragraphs. No rumor, no speculation — stick to what the source says. If it's a review, summarize the key finding (performance, value, comparison). If it's a launch, state what was launched and the headline spec.
 
 FORMATTING FOR CATEGORY H (hardware news):
-- Use **bold** for product names and model numbers (e.g., **RTX 4090**, **Ryzen 9 7950X**).
-- Use *italic* for specs and benchmark numbers (e.g., *32GB VRAM*, *+15% performance*).
-- Use > blockquotes for key benchmark results, official specs, or notable claims.
-- Use >! collapsible for detailed spec sheets or comparison tables.
-- Use ~~strikethrough~~ for "was X, now Y" price/performance changes.
-- Hardware posts should have at least one blockquote for the key spec or benchmark.`,
+- **bold** for product names and model numbers (e.g., **RTX 4090**, **Ryzen 9 7950X**) — MANDATORY.
+- > blockquote for key benchmark results, official specs, or notable claims — MANDATORY.
+- *italic* for specs and benchmark numbers (e.g., *32GB VRAM*, *+15% performance*) — OPTIONAL.
+- >! collapsible for detailed spec sheets or comparison tables — OPTIONAL.
+- ~~strikethrough~~ for "was X, now Y" price/performance changes — OPTIONAL.`,
 };
 
 /**
