@@ -132,13 +132,21 @@ export class NightMusicPlugin implements Plugin {
 
     const clientId = this.deps.env.JAMENDO_CLIENT_ID;
     if (!clientId) {
-      this.deps.logger.warn("source.fetch_error", {
+      // v14.1.4: More detailed error message so admin knows exactly what to fix.
+      this.deps.logger.error("source.fetch_error", {
         plugin: "night-music",
         reason: "missing_jamendo_client_id",
-        message: "[NIGHT_MUSIC] JAMENDO_CLIENT_ID not configured — skipping",
+        message: "[NIGHT_MUSIC] JAMENDO_CLIENT_ID not set in Worker Secrets. Set it with: wrangler secret put JAMENDO_CLIENT_ID. Get one at https://developer.jamendo.com/v3.0",
       });
       return [];
     }
+
+    // v14.1.4: Log that client ID is present — helps debugging.
+    this.deps.logger.info("source.fetch_start", {
+      plugin: "night-music",
+      clientIdPresent: true,
+      clientIdLength: clientId.length,
+    });
 
     this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
 

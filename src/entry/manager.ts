@@ -636,9 +636,32 @@ export async function managerHandler(
   const pluginMatch = apiPath.match(/^test\/plugin\/([\w-]+)$/);
   if (pluginMatch && request.method === "POST") {
     try {
-      const items = await container.plugins.fetchFrom(pluginMatch[1]!);
-      return json({ ok: true, itemCount: items.length, items: items.slice(0, 3).map(i => ({ id: i.id, title: i.title, url: i.url })) });
-    } catch (error) { return json({ ok: false, error: errMsg(error) }, 500); }
+      const pluginId = pluginMatch[1]!;
+      const t0 = Date.now();
+      // v14.1.4: Enhanced plugin test report — includes env checks and detailed error info.
+      const envCheck: Record<string, boolean> = {
+        JAMENDO_CLIENT_ID: !!env.JAMENDO_CLIENT_ID,
+        NASA_API_KEY: !!env.NASA_API_KEY,
+        GITHUB_TOKEN: !!env.GITHUB_TOKEN,
+      };
+      const items = await container.plugins.fetchFrom(pluginId);
+      const durationMs = Date.now() - t0;
+      // v14.1.4: If 0 items, include diagnostic info.
+      const diagnostic = items.length === 0 ? {
+        envCheck,
+        message: `Plugin "${pluginId}" returned 0 items. ` + (
+          pluginId === "night-music" && !env.JAMENDO_CLIENT_ID
+            ? "JAMENDO_CLIENT_ID is NOT set. Set it with: wrangler secret put JAMENDO_CLIENT_ID"
+            : pluginId === "night-music"
+              ? "JAMENDO_CLIENT_ID is set but no tracks passed the quality pipeline. Check logs for DEDUP_BATCH and QUALITY_FILTER stages."
+              : "Check plugin logs for errors."
+        ),
+      } : undefined;
+      return json({ ok: true, itemCount: items.length, durationMs, items: items.slice(0, 3).map(i => ({ id: i.id, title: i.title, url: i.url })), diagnostic });
+    } catch (error) {
+      const durationMs = Date.now();
+      return json({ ok: false, error: errMsg(error), durationMs, envCheck: { JAMENDO_CLIENT_ID: !!env.JAMENDO_CLIENT_ID, NASA_API_KEY: !!env.NASA_API_KEY, GITHUB_TOKEN: !!env.GITHUB_TOKEN } }, 500);
+    }
   }
 
   // ── Toggle plugin enable/disable ──
@@ -1929,7 +1952,7 @@ pre{background:var(--surface2);border:1px solid var(--border);border-radius:var(
 .spark-bar .spark-tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);padding:3px 6px;border-radius:4px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .15s;pointer-events:none;margin-bottom:4px;z-index:10}
 .spark-bar:hover .spark-tip{opacity:1}
 </style></head><body>
-<div class="sidebar" id="sidebar"><div class="sidebar-header"><div class="logo">🤖</div><div><h1>Fredy</h1><div class="ver">v14.1.3 · TRENDING-ONLY</div></div></div><div class="sidebar-nav" id="nav"></div></div>
+<div class="sidebar" id="sidebar"><div class="sidebar-header"><div class="logo">🤖</div><div><h1>Fredy</h1><div class="ver">v14.1.4 · DEBUG-ENHANCED</div></div></div><div class="sidebar-nav" id="nav"></div></div>
 <div class="main" id="main"><div class="topbar"><button onclick="toggleSidebar()">☰</button><h2 id="page-title">Dashboard</h2><div style="margin-left:auto;display:flex;gap:8px"><button onclick="refresh()" class="btn btn-ghost btn-sm">🔄 Refresh</button></div></div><div class="content" id="content"></div></div>
 <script>
 const TOKEN="${token}";const API="/Manager/api/";
@@ -2381,7 +2404,7 @@ async function testAllPlugins(){
   toast("Test all complete");
 }
 
-async function testPlugin(id){toast("Testing "+id+"...");const d=await api("test/plugin/"+id,"POST");toast(d.ok?"✅ "+id+": "+d.itemCount+" items":"❌ "+id+": "+d.error);}
+async function testPlugin(id){toast("Testing "+id+"...");const d=await api("test/plugin/"+id,"POST");if(d.ok){if(d.itemCount>0){toast("✅ "+id+": "+d.itemCount+" items ("+d.durationMs+"ms)");}else{let msg="❌ "+id+": 0 items ("+d.durationMs+"ms)";if(d.diagnostic){msg+="\\n"+d.diagnostic.message;if(d.diagnostic.envCheck){msg+="\\nEnv: "+Object.entries(d.diagnostic.envCheck).map(([k,v])=>k+": "+(v?"✓":"✗")).join(", ");}}alert(msg);}}else{toast("❌ "+id+": "+d.error);}}
 async function togglePlugin(id){const d=await api("plugin/"+id+"/toggle","POST");toast(d.ok?(d.enabled?"✅ "+id+" enabled":"🔴 "+id+" disabled"):"❌ Failed");loadPlugins();}
 
 async function loadQueue(){
