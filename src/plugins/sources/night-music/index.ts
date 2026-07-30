@@ -135,7 +135,9 @@ export class NightMusicPlugin implements Plugin {
         reason: "missing_jamendo_client_id",
         message: "[NIGHT_MUSIC] JAMENDO_CLIENT_ID not configured — skipping",
       });
-      return [];
+      // v14.0.7: Even without client ID, try nuclear fallback (Hall of Fame).
+      // Hall of Fame doesn't need JAMENDO_CLIENT_ID — it uses a search URL.
+      return await this.nuclearFallback("missing_client_id");
     }
 
     this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
@@ -156,9 +158,10 @@ export class NightMusicPlugin implements Plugin {
         this.deps.logger.error("source.fetch_error", {
           plugin: "night-music",
           error: retryError instanceof Error ? retryError.message : String(retryError),
-          message: "[NIGHT_MUSIC] RSS_FETCH retry failed — skipping tonight",
+          message: "[NIGHT_MUSIC] RSS_FETCH retry failed — trying nuclear fallback",
         });
-        return [];
+        // v14.0.7: Don't return [] — try nuclear fallback!
+        return await this.nuclearFallback("api_fetch_failed");
       }
     }
 
@@ -172,37 +175,17 @@ export class NightMusicPlugin implements Plugin {
       this.deps.logger.warn("source.fetch_error", {
         plugin: "night-music",
         reason: "rss_empty",
-        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo",
+        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo, trying nuclear fallback",
       });
-      return [];
+      // v14.0.7: Don't return [] — try nuclear fallback!
+      return await this.nuclearFallback("api_returned_empty");
     }
 
-    // Run 10-stage quality pipeline
+    // Run quality pipeline
     const selected = await this.selectTrack(tracks);
     if (!selected) {
-      // v14.0.6: NUCLEAR FALLBACK — if selectTrack returns null (all tracks
-      // rejected by ALL stages including fallback), use Hall of Fame directly.
-      // This is the absolute last resort — pick a random Hall of Fame song
-      // and construct a minimal SourceItem without Jamendo API audio URL.
-      // The post will be text-only (song + artist in mono) — no audio.
-      // This ensures Night Music ALWAYS publishes SOMETHING.
-      this.deps.logger.warn("source.fetch_error", {
-        plugin: "night-music",
-        reason: "nuclear_fallback_hall_of_fame",
-        message: "[NIGHT_MUSIC] NUCLEAR_FALLBACK: selectTrack returned null — using Hall of Fame directly",
-      });
-
-      const hallOfFameSelected = await this.selectFromHallOfFame();
-      if (hallOfFameSelected) {
-        return [hallOfFameSelected];
-      }
-
-      this.deps.logger.error("source.fetch_error", {
-        plugin: "night-music",
-        reason: "all_fallbacks_failed",
-        message: "[NIGHT_MUSIC] ALL FALLBACKS FAILED — even Hall of Fame is empty. This should NEVER happen.",
-      });
-      return [];
+      // v14.0.7: Nuclear fallback — selectTrack returned null.
+      return await this.nuclearFallback("select_track_null");
     }
 
     this.deps.logger.info("source.fetch_success", {
@@ -246,6 +229,38 @@ export class NightMusicPlugin implements Plugin {
     };
 
     return [item];
+  }
+
+  /**
+   * v14.0.7: Nuclear fallback wrapper — called from ALL failure paths in fetch().
+   * Logs the reason, then calls selectFromHallOfFame().
+   * Returns [item] if successful, [] if Hall of Fame is empty (should NEVER happen).
+   */
+  private async nuclearFallback(reason: string): Promise<readonly SourceItem[]> {
+    this.deps.logger.warn("source.fetch_error", {
+      plugin: "night-music",
+      reason: `nuclear_fallback_${reason}`,
+      message: `[NIGHT_MUSIC] NUCLEAR_FALLBACK (${reason}): using Hall of Fame directly`,
+    });
+
+    const item = await this.selectFromHallOfFame();
+    if (item) {
+      this.deps.logger.info("source.fetch_success", {
+        plugin: "night-music",
+        stage: "NUCLEAR_FALLBACK_SUCCESS",
+        song: (item.metadata as Record<string, unknown>)?.song,
+        artist: (item.metadata as Record<string, unknown>)?.artist,
+        message: `[NIGHT_MUSIC] NUCLEAR_FALLBACK_SUCCESS: Hall of Fame song selected`,
+      });
+      return [item];
+    }
+
+    this.deps.logger.error("source.fetch_error", {
+      plugin: "night-music",
+      reason: "nuclear_fallback_failed",
+      message: "[NIGHT_MUSIC] NUCLEAR_FALLBACK FAILED — Hall of Fame is empty. This should NEVER happen.",
+    });
+    return [];
   }
 
   /**
