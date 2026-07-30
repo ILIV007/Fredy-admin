@@ -29,7 +29,6 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { nightMusicManifest } from "./manifest";
-import { HALL_OF_FAME } from "./hall-of-fame";
 export { nightMusicManifest } from "./manifest";
 
 // ────────────────────────────────────────────────────────────
@@ -129,7 +128,6 @@ export class NightMusicPlugin implements Plugin {
 
   async fetch(): Promise<readonly SourceItem[]> {
     // v14.0.9: Clear the published songs cache at the start of each fetch()
-    // so the next fetch() gets fresh data from KV.
     this._publishedSongsCache = null;
 
     const clientId = this.deps.env.JAMENDO_CLIENT_ID;
@@ -139,18 +137,26 @@ export class NightMusicPlugin implements Plugin {
         reason: "missing_jamendo_client_id",
         message: "[NIGHT_MUSIC] JAMENDO_CLIENT_ID not configured — skipping",
       });
-      // v14.0.7: Even without client ID, try nuclear fallback (Hall of Fame).
-      // Hall of Fame doesn't need JAMENDO_CLIENT_ID — it uses a search URL.
-      return await this.nuclearFallback("missing_client_id");
+      return [];
     }
 
     this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
+
+    // v14.1.3: Clear stale empty cache before fetching.
+    // If a previous fetch cached an empty array, delete it so we get fresh data.
+    const cached = await this.deps.kv.getJson<readonly JamendoTrack[]>(API_CACHE_KEY).catch(() => null);
+    if (cached && cached.length === 0) {
+      await this.deps.kv.delete(API_CACHE_KEY).catch(() => {});
+      this.deps.logger.info("source.fetch_skip", {
+        plugin: "night-music",
+        message: "[NIGHT_MUSIC] Cleared stale empty API cache",
+      });
+    }
 
     let tracks: JamendoTrack[] = [];
     try {
       tracks = await this.fetchJamendoTracks(clientId);
     } catch (error) {
-      // Retry once
       this.deps.logger.warn("source.fetch_error", {
         plugin: "night-music",
         error: error instanceof Error ? error.message : String(error),
@@ -162,10 +168,9 @@ export class NightMusicPlugin implements Plugin {
         this.deps.logger.error("source.fetch_error", {
           plugin: "night-music",
           error: retryError instanceof Error ? retryError.message : String(retryError),
-          message: "[NIGHT_MUSIC] RSS_FETCH retry failed — trying nuclear fallback",
+          message: "[NIGHT_MUSIC] RSS_FETCH retry failed — skipping tonight",
         });
-        // v14.0.7: Don't return [] — try nuclear fallback!
-        return await this.nuclearFallback("api_fetch_failed");
+        return [];
       }
     }
 
@@ -179,17 +184,20 @@ export class NightMusicPlugin implements Plugin {
       this.deps.logger.warn("source.fetch_error", {
         plugin: "night-music",
         reason: "rss_empty",
-        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo, trying nuclear fallback",
+        message: "[NIGHT_MUSIC] RSS_EMPTY — no tracks from Jamendo",
       });
-      // v14.0.7: Don't return [] — try nuclear fallback!
-      return await this.nuclearFallback("api_returned_empty");
+      return [];
     }
 
     // Run quality pipeline
     const selected = await this.selectTrack(tracks);
     if (!selected) {
-      // v14.0.7: Nuclear fallback — selectTrack returned null.
-      return await this.nuclearFallback("select_track_null");
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        reason: "no_valid_track_after_pipeline",
+        message: "[NIGHT_MUSIC] QUALITY_FILTER: no valid track after pipeline — skipping tonight",
+      });
+      return [];
     }
 
     this.deps.logger.info("source.fetch_success", {
@@ -237,7 +245,6 @@ export class NightMusicPlugin implements Plugin {
 
   /**
    * v14.0.9: Load published songs from KV — cached for the duration of a single fetch()
-   * call to avoid redundant kv.list() calls between selectTrack and selectFromHallOfFame.
    */
   private _publishedSongsCache: Set<string> | null = null;
 
@@ -254,149 +261,6 @@ export class NightMusicPlugin implements Plugin {
 
     this._publishedSongsCache = publishedSongs;
     return publishedSongs;
-  }
-
-  /**
-   * v14.0.7: Nuclear fallback wrapper — called from ALL failure paths in fetch().
-   * Logs the reason, then calls selectFromHallOfFame().
-   * Returns [item] if successful, [] if Hall of Fame is empty (should NEVER happen).
-   */
-  private async nuclearFallback(reason: string): Promise<readonly SourceItem[]> {
-    this.deps.logger.warn("source.fetch_error", {
-      plugin: "night-music",
-      reason: `nuclear_fallback_${reason}`,
-      message: `[NIGHT_MUSIC] NUCLEAR_FALLBACK (${reason}): using Hall of Fame directly`,
-    });
-
-    const item = await this.selectFromHallOfFame();
-    if (item) {
-      this.deps.logger.info("source.fetch_success", {
-        plugin: "night-music",
-        stage: "NUCLEAR_FALLBACK_SUCCESS",
-        song: (item.metadata as Record<string, unknown>)?.song,
-        artist: (item.metadata as Record<string, unknown>)?.artist,
-        message: `[NIGHT_MUSIC] NUCLEAR_FALLBACK_SUCCESS: Hall of Fame song selected`,
-      });
-      return [item];
-    }
-
-    this.deps.logger.error("source.fetch_error", {
-      plugin: "night-music",
-      reason: "nuclear_fallback_failed",
-      message: "[NIGHT_MUSIC] NUCLEAR_FALLBACK FAILED — Hall of Fame is empty. This should NEVER happen.",
-    });
-    return [];
-  }
-
-  /**
-   * v14.0.6: Nuclear fallback — select a random song from Hall of Fame.
-   * v14.1.1: Must return REAL audio URL (not text-only).
-   * v14.1.2: CRITICAL FIX — limit to 5 search attempts max (was looping 300+).
-   * Previously, if Jamendo API was slow/down, it would try ALL 300+ Hall of Fame
-   * entries with individual API calls, taking 7+ seconds and timing out.
-   * Now: tries only 5 random entries. If none found, returns null.
-   * 5 attempts × 10s timeout = max 50s — but Cloudflare 30s limit means
-   * we'll only get ~2-3 attempts before timeout anyway.
-   * With FETCH_TIMEOUT_MS = 10s, 5 attempts = max 50s, but Worker kills at 30s.
-   * So in practice: ~2-3 attempts before Worker timeout. This is fine —
-   * if the first 2-3 don't find anything, the API is likely down entirely.
-   */
-  private async selectFromHallOfFame(): Promise<SourceItem | null> {
-    if (HALL_OF_FAME.length === 0) return null;
-
-    const clientId = this.deps.env.JAMENDO_CLIENT_ID ?? "";
-    if (!clientId) return null;
-
-    const publishedSongs = await this.loadPublishedSongs();
-
-    // v14.1.2: Shuffle and take only first 5 entries to try.
-    const shuffled = [...HALL_OF_FAME].sort(() => Math.random() - 0.5);
-    const maxAttempts = 5; // v14.1.2: limit API calls to prevent timeout
-    const candidates = shuffled.filter(e => {
-      const hash = this.hashSongArtist(e.song, e.artist);
-      return !publishedSongs.has(hash);
-    });
-    // If no unpublished candidates, use all (reuse).
-    const toTry = candidates.length > 0 ? candidates.slice(0, maxAttempts) : shuffled.slice(0, maxAttempts);
-
-    this.deps.logger.info("source.fetch_start", {
-      plugin: "night-music",
-      stage: "HALL_OF_FAME_SEARCH",
-      attempts: toTry.length,
-      unpublishedCandidates: candidates.length,
-      message: `[NIGHT_MUSIC] HALL_OF_FAME: trying ${toTry.length} entries (max ${maxAttempts})`,
-    });
-
-    for (const entry of toTry) {
-      try {
-        const searchUrl = `${JAMENDO_API}?client_id=${clientId}&format=json&limit=1&audioformat=mp32&name=${encodeURIComponent(entry.song)}&artist_name=${encodeURIComponent(entry.artist)}`;
-        // v14.1.2: Reduced timeout to 5s (was 10s) — 5 attempts × 5s = 25s max.
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(searchUrl, {
-          headers: { "User-Agent": "FredyBot/1.0" },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        if (!res.ok) continue;
-        const data = await res.json() as JamendoResponse;
-        if (data.headers.status !== "success" || !data.results || data.results.length === 0) continue;
-
-        const track = data.results[0]!;
-        const audioUrl = track.audiodownload ?? track.audio;
-        if (!audioUrl) continue;
-
-        // Found a real track with audio!
-        const songHash = this.hashSongArtist(entry.song, entry.artist);
-        const text = this.buildMessage(track.name ?? entry.song, track.artist_name ?? entry.artist);
-        this.deps.logger.info("source.fetch_success", {
-          plugin: "night-music",
-          stage: "HALL_OF_FAME_FOUND",
-          song: track.name,
-          artist: track.artist_name,
-          message: `[NIGHT_MUSIC] HALL_OF_FAME_FOUND: "${track.name}" by ${track.artist_name} — real audio URL obtained`,
-        });
-
-        return {
-          id: `night-music-${songHash}`,
-          source: this.metadata.id,
-          category: this.metadata.category,
-          title: `${track.name ?? entry.song} — ${track.artist_name ?? entry.artist}`,
-          body: text,
-          url: audioUrl,
-          language: "en",
-          publishedAt: Date.now(),
-          media: {
-            type: "audio",
-            url: audioUrl,
-            alt: track.name ?? entry.song,
-          },
-          metadata: {
-            song: track.name ?? entry.song,
-            artist: track.artist_name ?? entry.artist,
-            audioUrl,
-            albumImage: track.album_image,
-            score: 50,
-            jamendoId: track.id ?? `hof-${songHash}`,
-            hallOfFame: true,
-          },
-          displayIcon: this.metadata.displayIcon ?? "🎵",
-          displaySource: this.metadata.displaySource ?? "Night Music",
-          fetchedAt: Date.now(),
-        };
-      } catch {
-        continue; // Timeout or error — try next entry.
-      }
-    }
-
-    this.deps.logger.error("source.fetch_error", {
-      plugin: "night-music",
-      reason: "hall_of_fame_search_failed",
-      attempts: toTry.length,
-      message: `[NIGHT_MUSIC] HALL_OF_FAME: all ${toTry.length} attempts failed Jamendo search`,
-    });
-    return null;
   }
 
   // ────────────────────────────────────────────────────────────
