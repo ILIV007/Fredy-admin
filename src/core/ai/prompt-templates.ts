@@ -33,9 +33,9 @@ HARD RULES:
 7. NEVER include source URLs in text — system adds them automatically.
 8. RESPECT the soul.md personality injected below.
 
-FORMATTING (v13.5.3 — bold + blockquote MANDATORY, rest OPTIONAL):
+FORMATTING (v13.5.4 — bold + blockquote MANDATORY, rest OPTIONAL):
 - **bold** for important terms/tool names (first mention only). MANDATORY — every post must have at least one bold term.
-- > at line start for blockquotes — use for key quotes, important warnings, step-by-step instructions, or notable highlights. MANDATORY — every post must have at least one blockquote.
+- > at line start for blockquotes — MANDATORY. USE CREATIVELY — not just one quote at the end!
 - *italic* for emphasis, technical terms — OPTIONAL, use when appropriate.
 - >! for collapsible quotes (paragraphs >3 lines supplementary detail) — OPTIONAL.
 - ||spoiler|| for plot reveals, surprises — OPTIONAL, use sparingly.
@@ -45,6 +45,54 @@ FORMATTING (v13.5.3 — bold + blockquote MANDATORY, rest OPTIONAL):
 - Code blocks: include the COMPLETE command (e.g. \`npm install express\`, never bare \`npm install\`).
 - Short paragraphs (2-4 sentences). Line breaks between paragraphs.
 - Do NOT force formatting that doesn't fit the content — if a post is pure news with no code, don't add fake code blocks.
+
+BLOCKQUOTE CREATIVITY GUIDE (v13.5.4 — use blockquotes RICHLY and VARIED):
+Blockquotes (> at line start) are the MOST powerful Telegram formatting feature. Don't just use ONE at the end — use MULTIPLE throughout the post for different purposes:
+
+1. KEY HIGHLIGHT — wrap the single most important sentence/fact in a blockquote to make it stand out:
+   > The new framework runs 3x faster than its predecessor
+
+2. DIRECT QUOTE — when the source has a quote from a person/company, wrap it:
+   > "We believe this will fundamentally change how developers approach concurrency" — Jane Doe, CTO
+
+3. WHY IT MATTERS — a short blockquote explaining the impact/relevance:
+   > This matters because it eliminates the need for manual memory management in 90% of use cases
+
+4. KEY STAT / NUMBER — wrap important numbers/stats for visual separation:
+   > 2.3 million downloads in the first week
+   > 47% performance improvement over v2
+
+5. COMPARISON — wrap a "before vs after" or "X vs Y" comparison:
+   > v2: 120ms response time | v3: 40ms response time
+
+6. DEFINITION — wrap a term + definition for clarity:
+   > WebAssembly (Wasm): a binary instruction format for a stack-based virtual machine
+
+7. WARNING / CAUTION — wrap important warnings:
+   > ⚠️ Breaking change: the \`legacyMode\` option is removed in v3 — migrate to \`compatMode\` before upgrading
+
+8. SUMMARY / TAKEAWAY — a 1-line summary at the end (in addition to other blockquotes above):
+   > 💡 Bottom line: faster builds, smaller bundles, zero config changes needed
+
+RULE: Aim for 2-4 blockquotes per post (for A/B/H categories). Place them at different points — not all at the end. Mix the types (highlight, quote, stat, warning, summary) to keep the post visually rich and scannable.
+
+EXAMPLE POST (Category A — shows creative blockquote use):
+**Bun 1.2** just shipped with a 40% faster SQLite driver.
+
+The team rewrote the native bindings using \`sqlite3_prepare_v2\` directly, bypassing the old abstraction layer:
+
+\`\`\`bun
+const db = new Database(":memory:")
+db.exec("CREATE TABLE users (id INTEGER, name TEXT)")
+\`\`\`
+
+> Benchmark: 450k inserts/sec on M2 — up from 280k in v1.1
+
+This is huge for serverless — cold starts with SQLite are now under 2ms.
+
+> ⚠️ The \`db.query()\` API changed — the second argument is now an object, not an array
+
+> 💡 Upgrade with \`bun upgrade\` — existing code using \`db.prepare()\` is unaffected
 
 OUTPUT FORMAT:
 Return a single JSON object:
@@ -65,7 +113,11 @@ Write a clear, engaging post about the source content. Explain what it is, why i
 
 FORMATTING FOR CATEGORY A (developer content):
 - **bold** for the tool/framework name (first mention) — MANDATORY.
-- > blockquote for key takeaways, warnings, or important notes — MANDATORY.
+- > blockquote — MANDATORY. Use 2-4 blockquotes creatively:
+  * Wrap the KEY FEATURE or headline stat: > 3x faster cold starts
+  * Wrap a CODE TIP or usage hint: > Tip: use \`bun add\` instead of \`npm install\` for 10x speed
+  * Wrap a BREAKING CHANGE or warning: > ⚠️ v3 drops Node 16 support
+  * Wrap the BOTTOM LINE summary at the end: > 💡 Zero-config migration from v2
 - \`inline code\` for package names, commands, file paths, function names — OPTIONAL (use when content has code).
 - \`\`\`code blocks\`\`\` for multi-line code examples — OPTIONAL (use when content has multi-line code).
 - *italic* for technical concepts — OPTIONAL.
@@ -78,7 +130,11 @@ Write a factual news post. What happened, why it matters. 2-3 paragraphs. No spe
 
 FORMATTING FOR CATEGORY B (tech news):
 - **bold** for company/product names (first mention) — MANDATORY.
-- > blockquote for key takeaways, important points, or notable claims — MANDATORY.
+- > blockquote — MANDATORY. Use 2-3 blockquotes creatively:
+  * Wrap the KEY FACT or headline number: > Acquired for $1.2 billion
+  * Wrap a DIRECT QUOTE from the source: > "This positions us as the market leader" — CEO
+  * Wrap the WHY IT MATTERS impact: > This reshapes the cloud computing landscape for SMBs
+  * Wrap a TIMELINE or deadline: > Effective March 2026 — existing users grandfathered for 12 months
 - *italic* for emphasis — OPTIONAL.
 - >! collapsible for background context — OPTIONAL.
 - ~~strikethrough~~ for "was X, now Y" changes — OPTIONAL.`,
@@ -96,7 +152,7 @@ For NASA APOD (image-first posts):
 
 For jokes: setup + punchline. 1-2 sentences max. No explanation. Use *italic* for punchline emphasis.
 For quotes: the quote in > blockquote + author (em-dash). 1 line.
-For dev facts: the fact + 1 sentence of context. 2 lines max.
+For dev facts: the fact in > blockquote + 1 sentence of context. 2 lines max.
 
 HARD RULE: total text must be ≤150 chars. If you can't fit it in 2 lines, cut more.`,
 
@@ -107,7 +163,11 @@ Write a concise, factual post about the hardware/tech headline. What's new, why 
 
 FORMATTING FOR CATEGORY H (hardware news):
 - **bold** for product names and model numbers (e.g., **RTX 4090**, **Ryzen 9 7950X**) — MANDATORY.
-- > blockquote for key benchmark results, official specs, or notable claims — MANDATORY.
+- > blockquote — MANDATORY. Use 2-4 blockquotes creatively:
+  * Wrap the KEY SPEC: > 24GB GDDR6X | 16,384 CUDA cores | 450W TDP
+  * Wrap the BENCHMARK result: > +18% over RTX 4090 in 4K gaming | 12% faster in Blender
+  * Wrap the PRICE/AVAILABILITY: > $1,599 MSRP — available January 30
+  * Wrap the VERDICT/summary: > 💡 Best gaming GPU money can buy — if you can find one
 - *italic* for specs and benchmark numbers (e.g., *32GB VRAM*, *+15% performance*) — OPTIONAL.
 - >! collapsible for detailed spec sheets or comparison tables — OPTIONAL.
 - ~~strikethrough~~ for "was X, now Y" price/performance changes — OPTIONAL.`,

@@ -2,6 +2,65 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [13.5.4] — 2026-07-30 — Creative Blockquote Guide (8 patterns, 2-4 per post, varied placement)
+
+### 🎨 ENHANCEMENT: Rich Creative Blockquote Usage
+
+**User request:** "استفاده بات از qoute در پست ها محدوده!!!بات باید با خلاقیت از این فیوچر استفاده بکنه!!!چکابی کامل انجام بده و بصورت ریشه ایی بررسی و فیکس بکن!" ("The bot's use of quote in posts is limited! The bot should use this feature creatively! Do a full check and fix it root-cause!")
+
+**Root cause:** The AI prompt only said "use blockquotes for key quotes, warnings, steps" — this was too vague. The AI fell into a repetitive pattern: always putting ONE blockquote at the END for the summary/takeaway. No variety, no creativity, no mid-post highlights.
+
+**Fix — Comprehensive Blockquote Creativity Guide added to BASE_SYSTEM_PROMPT:**
+
+8 creative blockquote use patterns with examples:
+
+1. **KEY HIGHLIGHT** — wrap the single most important sentence/fact
+   `> The new framework runs 3x faster than its predecessor`
+
+2. **DIRECT QUOTE** — wrap quotes from people/companies
+   `> "We believe this will change how developers approach concurrency" — Jane Doe, CTO`
+
+3. **WHY IT MATTERS** — wrap the impact/relevance explanation
+   `> This matters because it eliminates manual memory management in 90% of use cases`
+
+4. **KEY STAT / NUMBER** — wrap important numbers for visual separation
+   `> 2.3 million downloads in the first week`
+
+5. **COMPARISON** — wrap "before vs after" or "X vs Y"
+   `> v2: 120ms response time | v3: 40ms response time`
+
+6. **DEFINITION** — wrap a term + definition for clarity
+   `> WebAssembly (Wasm): a binary instruction format for a stack-based virtual machine`
+
+7. **WARNING / CAUTION** — wrap important warnings with ⚠️ emoji
+   `> ⚠️ Breaking change: the \`legacyMode\` option is removed in v3`
+
+8. **SUMMARY / TAKEAWAY** — a 1-line summary at the end with 💡 emoji
+   `> 💡 Bottom line: faster builds, smaller bundles, zero config changes needed`
+
+**Key rules added:**
+- Aim for **2-4 blockquotes per post** (for A/B/H categories)
+- Place them at **different points** — not all at the end
+- **Mix the types** (highlight, quote, stat, warning, summary) to keep the post visually rich and scannable
+- Added a full **EXAMPLE POST** showing creative blockquote placement (benchmark, warning, tip)
+
+**Category-specific blockquote guidance:**
+
+- **Category A (Developer):** KEY FEATURE, CODE TIP, BREAKING CHANGE, BOTTOM LINE
+- **Category B (Tech News):** KEY FACT, DIRECT QUOTE, WHY IT MATTERS, TIMELINE
+- **Category C (Support):** quotes in blockquote + dev facts in blockquote
+- **Category H (Hardware):** KEY SPEC, BENCHMARK, PRICE/AVAILABILITY, VERDICT
+
+**Result:** Posts now use blockquotes creatively — multiple per post, at different points, with varied purposes. The visual rhythm is: paragraph → highlight → paragraph → stat → paragraph → warning → paragraph → summary.
+
+**Files changed:**
+- `src/core/ai/prompt-templates.ts` — Added BLOCKQUOTE CREATIVITY GUIDE (8 patterns + example), updated all category prompts with specific blockquote use cases
+
+**Verification:**
+- TypeScript: 0 errors (src/) ✅
+- Tests: 486 passing (87+189+41+28+80+35+26) ✅
+- Manager dashboard: v13.5.4 · CREATIVE-QUOTE ✅
+
 ## [13.5.3] — 2026-07-30 — Admin PM Fix for Link-Preview Posts + Formatting Rules Adjusted
 
 ### 🐛 CRITICAL FIX: Link-Preview Posts Not Sent to Admin PM
