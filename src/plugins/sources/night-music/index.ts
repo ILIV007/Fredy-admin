@@ -132,7 +132,6 @@ export class NightMusicPlugin implements Plugin {
 
     const clientId = this.deps.env.JAMENDO_CLIENT_ID;
     if (!clientId) {
-      // v14.1.4: More detailed error message so admin knows exactly what to fix.
       this.deps.logger.error("source.fetch_error", {
         plugin: "night-music",
         reason: "missing_jamendo_client_id",
@@ -141,22 +140,21 @@ export class NightMusicPlugin implements Plugin {
       return [];
     }
 
-    // v14.1.4: Log that client ID is present — helps debugging.
     this.deps.logger.info("source.fetch_start", {
       plugin: "night-music",
       clientIdPresent: true,
       clientIdLength: clientId.length,
     });
 
-    this.deps.logger.info("source.fetch_start", { plugin: "night-music" });
-
-    // v14.1.5: Clear ALL cache (not just empty) to ensure fresh API call.
-    // Previous stale cache from v14.1.4 with old params might still be present.
-    await this.deps.kv.delete(API_CACHE_KEY).catch(() => {});
-    this.deps.logger.info("source.fetch_skip", {
-      plugin: "night-music",
-      message: "[NIGHT_MUSIC] Cache cleared — fresh API call",
-    });
+    // v14.2.1: CRITICAL FIX — removed kv.delete(API_CACHE_KEY) that was running
+    // on EVERY fetch. This was destroying the 1-hour cache, forcing a fresh API
+    // call every time. The first call (cold Jamendo connection) often failed
+    // in ~100ms, but the retry (warm connection) succeeded.
+    // Now: cache is only deleted inside fetchJamendoTracks() when it's stale (empty).
+    // This means:
+    //   1st call (no cache): API call → if fails, return [] → retry in 10min
+    //   2nd call (no cache): API call → succeeds → cache stored for 1h
+    //   3rd call (cache valid): use cache → fast (~50ms) → no API call needed
 
     let tracks: JamendoTrack[] = [];
     try {
