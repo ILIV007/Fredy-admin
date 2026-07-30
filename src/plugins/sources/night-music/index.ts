@@ -29,6 +29,7 @@ import type { Env } from "../../../types/env";
 import type { KVStore } from "../../../services/kv-store";
 import type { PluginLogger } from "../../../services/plugin-logger";
 import { nightMusicManifest } from "./manifest";
+import { HALL_OF_FAME } from "./hall-of-fame";
 export { nightMusicManifest } from "./manifest";
 
 // ────────────────────────────────────────────────────────────
@@ -179,10 +180,27 @@ export class NightMusicPlugin implements Plugin {
     // Run 10-stage quality pipeline
     const selected = await this.selectTrack(tracks);
     if (!selected) {
+      // v14.0.6: NUCLEAR FALLBACK — if selectTrack returns null (all tracks
+      // rejected by ALL stages including fallback), use Hall of Fame directly.
+      // This is the absolute last resort — pick a random Hall of Fame song
+      // and construct a minimal SourceItem without Jamendo API audio URL.
+      // The post will be text-only (song + artist in mono) — no audio.
+      // This ensures Night Music ALWAYS publishes SOMETHING.
       this.deps.logger.warn("source.fetch_error", {
         plugin: "night-music",
-        reason: "no_valid_track_after_pipeline",
-        message: "[NIGHT_MUSIC] QUALITY_FILTER: no valid track after 10-stage pipeline — skipping tonight",
+        reason: "nuclear_fallback_hall_of_fame",
+        message: "[NIGHT_MUSIC] NUCLEAR_FALLBACK: selectTrack returned null — using Hall of Fame directly",
+      });
+
+      const hallOfFameSelected = await this.selectFromHallOfFame();
+      if (hallOfFameSelected) {
+        return [hallOfFameSelected];
+      }
+
+      this.deps.logger.error("source.fetch_error", {
+        plugin: "night-music",
+        reason: "all_fallbacks_failed",
+        message: "[NIGHT_MUSIC] ALL FALLBACKS FAILED — even Hall of Fame is empty. This should NEVER happen.",
       });
       return [];
     }
@@ -228,6 +246,98 @@ export class NightMusicPlugin implements Plugin {
     };
 
     return [item];
+  }
+
+  /**
+   * v14.0.6: Nuclear fallback — select a random song from Hall of Fame.
+   * Used when Jamendo API fails or all tracks are rejected.
+   * Checks song dedup (180-day KV) — skips already-published songs.
+   * If ALL Hall of Fame songs are published, picks a random one anyway.
+   *
+   * Returns a SourceItem with a Jamendo search URL (not direct audio URL).
+   * The FinalPublisher will handle this as a text-only post (no audio download).
+   */
+  private async selectFromHallOfFame(): Promise<SourceItem | null> {
+    if (HALL_OF_FAME.length === 0) return null;
+
+    // Load published songs for dedup.
+    const publishedSongs = new Set<string>();
+    try {
+      const songKeys = await this.deps.kv.list(DEDUP_SONG_PREFIX, 1000);
+      for (const key of songKeys) {
+        publishedSongs.add(key.slice(DEDUP_SONG_PREFIX.length));
+      }
+    } catch { /* non-fatal */ }
+
+    // Shuffle Hall of Fame and find first unpublished.
+    const shuffled = [...HALL_OF_FAME].sort(() => Math.random() - 0.5);
+    let selected: { song: string; artist: string } | null = null;
+
+    for (const entry of shuffled) {
+      const songHash = this.hashSongArtist(entry.song, entry.artist);
+      if (!publishedSongs.has(songHash)) {
+        selected = { song: entry.song, artist: entry.artist };
+        break;
+      }
+    }
+
+    // If ALL Hall of Fame songs are published, pick a random one.
+    if (!selected) {
+      const random = shuffled[0]!;
+      selected = { song: random.song, artist: random.artist };
+      this.deps.logger.warn("source.fetch_error", {
+        plugin: "night-music",
+        reason: "hall_of_fame_all_published",
+        message: `[NIGHT_MUSIC] HALL_OF_FAME: all ${HALL_OF_FAME.length} songs published — reusing "${random.song}" by ${random.artist}`,
+      });
+    }
+
+    if (!selected) return null;
+
+    const { song, artist } = selected;
+    const text = this.buildMessage(song, artist);
+    const songHash = this.hashSongArtist(song, artist);
+
+    // v14.0.6: Use Jamendo search URL as the audio URL — FinalPublisher will
+    // try to download from it. If it fails, the post will be sent as text-only.
+    // The search URL format: https://api.jamendo.com/v3.0/tracks/?name=SONG&artist_name=ARTIST&client_id=xxx&audioformat=mp32
+    const searchUrl = `https://api.jamendo.com/v3.0/tracks/?name=${encodeURIComponent(song)}&artist_name=${encodeURIComponent(artist)}&client_id=${this.deps.env.JAMENDO_CLIENT_ID ?? ""}&format=json&limit=1&audioformat=mp32`;
+
+    this.deps.logger.info("source.fetch_success", {
+      plugin: "night-music",
+      stage: "HALL_OF_FAME_SELECTED",
+      song,
+      artist,
+      message: `[NIGHT_MUSIC] HALL_OF_FAME_SELECTED: "${song}" by ${artist}`,
+    });
+
+    return {
+      id: `night-music-${songHash}`,
+      source: this.metadata.id,
+      category: this.metadata.category,
+      title: `${song} — ${artist}`,
+      body: text,
+      url: searchUrl,
+      language: "en",
+      publishedAt: Date.now(),
+      media: {
+        type: "audio",
+        url: searchUrl,
+        alt: song,
+      },
+      metadata: {
+        song,
+        artist,
+        audioUrl: searchUrl,
+        albumImage: undefined,
+        score: 50,
+        jamendoId: `hof-${songHash}`,
+        hallOfFame: true,
+      },
+      displayIcon: this.metadata.displayIcon ?? "🎵",
+      displaySource: this.metadata.displaySource ?? "Night Music",
+      fetchedAt: Date.now(),
+    };
   }
 
   // ────────────────────────────────────────────────────────────
