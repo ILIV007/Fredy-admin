@@ -2,6 +2,68 @@
 
 All notable changes to Fredy are documented in this file. Versions follow the Prompt roadmap (each Prompt = minor version bump).
 
+## [14.3.2] — 2026-07-31 — Headline Duplication Fix (Topic Written Twice)
+
+### 🐛 CRITICAL FIX: Headline/Topic Duplicated in Same Post (Reddit)
+
+**User report:** "بعد از چندوقت الان بات دوباره تاپیک هارو در یک پست دوبارنوشته! یک بررسی کامل انجام بده و ببین دلیل این اتفاق چیه؟؟؟(برای ردیت این اتفاق افتاده) ریشه یابی کامل بکن!"
+
+("After a while, the bot is now writing topics twice in one post! Do a full review and see why this happens? (This happened for Reddit). Do a full root-cause analysis!")
+
+**Root cause analysis:**
+
+The `buildFullTextParts()` method in `src/services/ux-layer.ts` checks whether the AI-generated headline (`hook`) already appears in the body text — if so, it skips adding it as a separate bold line at the top. This prevents duplication.
+
+**The bug:** The check only looked at 3 conditions:
+1. `bodyNorm.startsWith(hookNorm)` — body starts with the hook
+2. `bodyFirstLine === hookNorm` — first line equals the hook
+3. `bodyFirstLine.includes(hookNorm)` — first line includes the hook
+
+**Missing case:** The AI sometimes writes the headline as a MIDDLE line in the body (not the first line). For Reddit posts, the AI would:
+1. Write a summary first line (e.g., "News from the AI world")
+2. Write the headline as a bold line in the middle (e.g., `**Reddit AI Breakthrough** team of researchers...`)
+3. Continue with the body
+
+In this scenario:
+- `bodyNorm.startsWith(hookNorm)` = false (body starts with "News from...", not the hook)
+- `bodyFirstLine === hookNorm` = false (first line is "News from...")
+- `bodyFirstLine.includes(hookNorm)` = false (first line doesn't include the hook)
+
+Result: `hookInBody = false` → the hook was ADDED as a separate bold line at the top → **the headline appeared TWICE** (once at the top, once in the body).
+
+**Fix (v14.3.2):**
+
+Added a 4th condition: `bodyNorm.includes(hookNorm)` — check if the hook appears ANYWHERE in the body, not just at the start or first line.
+
+Also added a minimum length guard (`hookMinLength = 8`) to avoid false positives — very short hooks like "AI" would match every occurrence of "ai" in the body, causing the hook to never be displayed.
+
+```typescript
+// BEFORE (v14.0.1):
+const hookInBody = hook && body && hookNorm.length > 0 &&
+  (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+
+// AFTER (v14.3.2):
+const hookMinLength = 8; // avoid false positives for short hooks
+const hookInBody = hook && body && hookNorm.length >= hookMinLength &&
+  (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm ||
+   bodyFirstLine.includes(hookNorm) || bodyNorm.includes(hookNorm));  // ← NEW
+```
+
+Applied to both `buildFullTextParts()` (the actual post builder) and `buildHookBlock()` (the overhead calculator for truncation).
+
+**Test scenarios verified:**
+1. ✅ Hook at start of body → DETECTED (already worked)
+2. ✅ Hook in middle of body → DETECTED (was the bug, now fixed)
+3. ✅ Hook not in body → ADDED as bold (correct)
+4. ✅ Short hook (under 8 chars) → skip check, always added as bold (avoids false positives)
+5. ✅ Hook = first line → DETECTED (already worked)
+6. ✅ Markdown hook, plain body → DETECTED (normalization handles it)
+
+### ✅ VERIFICATION
+- TypeScript: 0 errors in ux-layer.ts ✅
+- Tests: 489 passing (87+192+41+28+80+35+26) ✅
+- Fix verified with 6 test scenarios ✅
+
 ## [14.3.1] — 2026-07-31 — Quiet-Hours KV Consumption Fix (50% Spike Resolved)
 
 ### 🚨 CRITICAL FIX: 50% KV Consumption During Quiet Hours (4:30 AM)

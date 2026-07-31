@@ -135,7 +135,13 @@ export class UXLayerImpl implements UXLayer {
    *  (not just at the start), skip adding it as a separate bold line.
    *  Previously, if the AI put the headline at the start of the body text
    *  with different formatting (e.g., **bold** in body but plain in headline),
-   *  the startsWith check failed and the headline was duplicated. */
+   *  the startsWith check failed and the headline was duplicated.
+   *  v14.3.2: CRITICAL FIX — hookInBody now checks if hook appears ANYWHERE
+   *  in the body (bodyNorm.includes(hookNorm)), not just at the start or first
+   *  line. Previously, if AI put the headline as a middle line in the body
+   *  (not the first line), the check failed and the headline was duplicated.
+   *  This caused "topic written twice in one post" for Reddit posts where
+   *  AI wrote a summary first line, then the headline, then the body. */
   private buildFullTextParts(hook: string, body: string, sourceUrl: string, emoji: string, displaySource: string): string {
     const parts: string[] = [];
     // v14.0.1: Normalize both hook and body for comparison (strip markdown + whitespace).
@@ -144,9 +150,15 @@ export class UXLayerImpl implements UXLayer {
     const bodyNorm = normalizeForCompare(body);
     const bodyFirstLine = normalizeForCompare(body.split("\n")[0] ?? "");
 
-    // v14.0.1: Skip hook if it appears at the start of the body OR is the first line.
-    const hookInBody = hook && body && hookNorm.length > 0 &&
-      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+    // v14.3.2: Skip hook if it appears ANYWHERE in the body — not just at the start.
+    // This catches: hook at start, hook as first line, hook in first line,
+    // AND hook anywhere in the body (middle, end, etc.).
+    // Only check if hook is long enough to avoid false positives (e.g., hook="AI" would
+    // match every "ai" in the body). Min 8 chars = meaningful headline.
+    const hookMinLength = 8;
+    const hookInBody = hook && body && hookNorm.length >= hookMinLength &&
+      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm ||
+       bodyFirstLine.includes(hookNorm) || bodyNorm.includes(hookNorm));
 
     if (hook && body && !hookInBody) {
       parts.push(`<b>${escapeHtml(hook)}</b>`);
@@ -160,12 +172,15 @@ export class UXLayerImpl implements UXLayer {
   /** Build the hook block (used for overhead calculation). */
   private buildHookBlock(hook: string, body: string): string {
     // v14.0.1: Use same normalization logic as buildFullTextParts.
+    // v14.3.2: Use same hookMinLength + bodyNorm.includes check.
     const normalizeForCompare = (s: string): string => s.replace(/[*_`>#~|]/g, "").trim().toLowerCase();
     const hookNorm = normalizeForCompare(hook);
     const bodyNorm = normalizeForCompare(body);
     const bodyFirstLine = normalizeForCompare(body.split("\n")[0] ?? "");
-    const hookInBody = hook && body && hookNorm.length > 0 &&
-      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm || bodyFirstLine.includes(hookNorm));
+    const hookMinLength = 8;
+    const hookInBody = hook && body && hookNorm.length >= hookMinLength &&
+      (bodyNorm.startsWith(hookNorm) || bodyFirstLine === hookNorm ||
+       bodyFirstLine.includes(hookNorm) || bodyNorm.includes(hookNorm));
     if (hook && body && !hookInBody) {
       return `<b>${escapeHtml(hook)}</b>\n\n`;
     }

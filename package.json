@@ -1,7 +1,7 @@
 {
   "name": "fredy-admin",
-  "version": "14.3.1",
-  "description": "Fredy v14.3.1 — Quiet-hours KV optimization (dashboard smart-refresh + maintenance cron moved + tick guard). Cloudflare Workers Free, serverless.",
+  "version": "14.3.2",
+  "description": "Fredy v14.3.2 — Quiet-hours KV optimization (dashboard smart-refresh + maintenance cron moved + tick guard). Cloudflare Workers Free, serverless.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
