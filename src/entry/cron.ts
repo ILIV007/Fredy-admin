@@ -38,7 +38,11 @@ export async function cronHandler(
   }
 
   // ── Layer 3: Daily Maintenance (every 24 hours) ────
-  if (event.cron === "0 0 * * *") {
+  // v14.3.1: Changed from "0 0 * * *" (midnight UTC = 03:30 Iran, during
+  // quiet hours) to "30 4 * * *" (04:30 UTC = 08:00 Iran, after quiet hours).
+  // Accept BOTH expressions for backward compatibility (in case wrangler.toml
+  // hasn't been redeployed yet).
+  if (event.cron === "30 4 * * *" || event.cron === "0 0 * * *") {
     await cronMaintenanceHandler({ env, container, ctx });
     return;
   }

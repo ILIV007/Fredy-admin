@@ -74,10 +74,16 @@ id = "5361932dda4544358b92e9341f3e77ef"
 #   This reduces Cloudflare Worker wakeups by 12/day.
 #
 # Layer 3 — DAILY MAINTENANCE (Cloudflare Cron, every 24 hours):
-#   "0 0 * * *"
+#   "30 4 * * *"
 #   Generates tomorrow's daily plan (with fresh random scheduledTime
 #   per window), cleans expired KV data, resets daily counters,
-#   updates statistics. Runs at midnight UTC.
+#   updates statistics.
+#   v14.3.1: CHANGED from "0 0 * * *" (midnight UTC = 03:30 Iran, during
+#   quiet hours 00:00-07:30) to "30 4 * * *" (04:30 UTC = 08:00 Iran,
+#   after quiet hours end). Previously, maintenance ran DURING quiet
+#   hours, contributing to the 50% KV consumption spike at 4:30 AM.
+#   Now it runs 30min after quiet hours end — plan is ready before
+#   the first morning post window (08:00-10:00).
 #
 # Cloudflare Free Plan: 5 cron triggers max — we use 2. ✓
 # External cron-job.org: 1 trigger (provider refresh every 2h). ✓
@@ -85,7 +91,7 @@ id = "5361932dda4544358b92e9341f3e77ef"
 # The /internal/tick endpoint is retained for manual triggers.
 
 [triggers]
-crons = ["*/20 * * * *", "0 0 * * *"]
+crons = ["*/20 * * * *", "30 4 * * *"]
 
 # ============================================================
 # Environment Variables (Non-Secret)

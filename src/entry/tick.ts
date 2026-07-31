@@ -186,7 +186,44 @@ async function runTickWork(
     log.push(`config loaded (mode: ${fullMode ? "full" : "scheduler-watch"})`);
 
     // ════════════════════════════════════════════════════════════
-    // Layer 1: SCHEDULER WATCH — fire due slots (ALWAYS runs)
+    // v14.3.1: QUIET HOURS GUARD for /internal/tick endpoint.
+    // ════════════════════════════════════════════════════════════
+    // Previously, the /internal/tick endpoint (called by external cron or
+    // manual dashboard "Force Tick") bypassed the quiet hours guard entirely.
+    // It always ran processScheduledQueue + scheduler.tick() + maintainQueue,
+    // even during quiet hours (00:00-07:30). This contributed to the 50%
+    // KV consumption spike at 4:30 AM.
+    //
+    // Now: check quiet hours BEFORE any KV-heavy operations. If quiet,
+    // skip everything except Tier V (which has its own fixed schedule and
+    // is allowed to publish during quiet hours — see cron-scheduler.ts).
+    //
+    // Note: scheduler.tick() internally checks quiet hours too (line 188-201
+    // in scheduler-service.ts), but processScheduledQueue and maintainQueue
+    // do NOT. This guard prevents all 3 from running during quiet hours.
+    const isQuiet = settings
+      ? (container.quietHoursChecker?.isQuietHours(tickStartTime, settings.scheduler) ?? false)
+      : false;
+
+    if (isQuiet) {
+      log.push("⏸️ quiet hours active — skipping scheduler tick + queue maintenance");
+      // v13.3.10: Still allow Tier V to publish during quiet hours (fixed schedule).
+      try {
+        const tierVResult = await container.tierVScheduler.checkAndPublish(settings, tickStartTime);
+        if (tierVResult > 0) {
+          log.push(`🟣 Tier V: published ${tierVResult} scheduled post(s) during quiet hours`);
+        }
+      } catch (error) {
+        log.push(`❌ Tier V error: ${errMsg(error)}`);
+      }
+      // Skip Layer 1 (processScheduledQueue + scheduler.tick) and Layer 2 (maintainQueue).
+      // These are the KV-heavy operations that should not run during quiet hours.
+      await tickLock.release();
+      return log;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // Layer 1: SCHEDULER WATCH — fire due slots (ALWAYS runs when not quiet)
     // ════════════════════════════════════════════════════════════
     try {
       await processScheduledQueue(env, container);
